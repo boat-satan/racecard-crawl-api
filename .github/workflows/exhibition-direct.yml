@@ -20,57 +20,51 @@ on:
 permissions:
   contents: write
 
-# 同じブランチでの並列実行を防止（衝突回避）
-concurrency:
-  group: exhibition-direct-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   run:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-        with:
-          # rebase/push の安全性向上
-          fetch-depth: 0
-
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       - name: Install deps
         run: npm ci || npm i --no-audit --no-fund
 
-      # 入力確認
+      # デバッグ（入力確認）
       - name: Echo inputs
         run: |
           echo "date=${{ inputs.date }}"
           echo "pid=${{ inputs.pid }}"
           echo "race=${{ inputs.race }}"
 
-      # 直接クロール（環境変数で指定）
+      # 展示後 直接クロール（CLI 引数で渡す）
       - name: Run direct exhibition crawler
-        env:
-          TARGET_DATE:  ${{ inputs.date }}
-          TARGET_PIDS:  ${{ inputs.pid }}
-          TARGET_RACES: ${{ inputs.race }}
         run: |
           set -euo pipefail
-          node scripts/fetch-exhibition-direct.js --skip-existing
+          DATE="${{ inputs.date }}"
+          PID="${{ inputs.pid }}"
+          IN_RACE="${{ inputs.race }}"
+          # race を 1..12 / 1R..12R どちらでも受け取れるように正規化
+          RACE="$(echo "$IN_RACE" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g; s/[Rr]$//')"
+          if ! [[ "$RACE" =~ ^([1-9]|1[0-2])$ ]]; then
+            echo "race の形式が不正です: $IN_RACE" >&2
+            exit 1
+          fi
+          RACE="${RACE}R"
 
-      # 競合しにくい順序：pull -> add -> commit -> push
+          echo "-> exec: node scripts/fetch-exhibition-direct.js $DATE $PID $RACE"
+          node scripts/fetch-exhibition-direct.js "$DATE" "$PID" "$RACE" --skip-existing
+
       - name: Commit & push results
         run: |
-          set -euo pipefail
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git pull --rebase
-
           git add -A
           if ! git diff --cached --quiet; then
             git commit -m "exhibition direct: ${{ inputs.date }} ${{ inputs.pid }} ${{ inputs.race }} [skip ci]"
+            git pull --rebase
             git push
           else
             echo "No changes."
