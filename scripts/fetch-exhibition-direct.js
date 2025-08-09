@@ -1,30 +1,32 @@
 // scripts/fetch-exhibition-direct.js
 // Node v20 / ESM / cheerio v1.x
-// 使い方: node scripts/fetch-exhibition-direct.js 20250809 02 4R
-// 出力: public/exhibition/v1/<date>/<pid>/<race>.json
 
 import { load } from "cheerio";
 import fs from "node:fs/promises";
 import path from "node:path";
 
-const [,, ARG_DATE="today", ARG_PID="02", ARG_RACE="1R"] = process.argv;
+// -------- args (flags 無視) --------
+const args = process.argv.slice(2).filter(a => !a.startsWith("-"));
+const [ DATE_IN = "today", PID_IN = "02", RACE_IN = "1R" ] = args;
 
 function to2(v){ return String(v).padStart(2,"0"); }
 function raceKey(r){ return `${String(r).replace(/[^\d]/g,"")}R`; }
-function yyyymmdd(dateLike){
-  if (dateLike === "today") {
+function yyyymmdd(x){
+  if (x === "today") {
     const d = new Date();
     const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,"0"), dd = String(d.getDate()).padStart(2,"0");
     return `${y}${m}${dd}`;
   }
-  return String(dateLike).replace(/-/g,"");
+  const s = String(x).replace(/-/g,"");
+  // 8桁以外が来たら today にフォールバック
+  return /^\d{8}$/.test(s) ? s : yyyymmdd("today");
 }
 
-function urlBeforeInfo(date, pid, raceNo){
-  return `https://www.boatrace.jp/owpc/pc/race/beforeinfo?hd=${date}&jcd=${pid}&rno=${raceNo}`;
+function urlBeforeInfo(date, pid, rno){
+  return `https://www.boatrace.jp/owpc/pc/race/beforeinfo?hd=${date}&jcd=${pid}&rno=${rno}`;
 }
-function urlRaceList(date, pid, raceNo){
-  return `https://www.boatrace.jp/owpc/pc/race/racelist?hd=${date}&jcd=${pid}&rno=${raceNo}`;
+function urlRaceList(date, pid, rno){
+  return `https://www.boatrace.jp/owpc/pc/race/racelist?hd=${date}&jcd=${pid}&rno=${rno}`;
 }
 
 async function fetchHtml(url){
@@ -38,91 +40,19 @@ async function fetchHtml(url){
   return await res.text();
 }
 
-function norm(t){ return (t ?? "").replace(/\u00A0/g," ").replace(/\s+/g," ").trim(); }
+const norm = (t) => (t ?? "").replace(/\u00A0/g," ").replace(/\s+/g," ").trim();
 
-// プロフィールリンク（/racersearch/profile?...rno=XXXX）から登録番号
 function extractRegnoFrom($el){
   const href = $el.attr("href") || "";
   const m = href.match(/[?&]rno=(\d{4})/);
   return m ? Number(m[1]) : null;
 }
 
-/** beforeinfo: 6艇の選手（名前/登録番号）＋展示ST */
+// beforeinfo から {lane, number, name, st, stFlag}
 function parseBeforeInfo(html){
   const $ = load(html);
 
-  // 1) 6艇の行（左大テーブル）から lane / name / regno
-  //   - 先頭セルが1..6の行を対象にする
-  const entriesMap = new Map(); // lane -> {lane, number, name}
-  const candidateTables = $("table");
-  candidateTables.each((_, el) => {
-    $(el).find("tbody tr").each((__, tr) => {
-      const $tr = $(tr);
-      const first = norm($tr.find("th,td").first().text());
-      if (!/^[1-6]$/.test(first)) return;
-      const lane = Number(first);
-      // 選手プロフィールリンク
-      const $profile = $tr.find('a[href*="/racersearch/profile"]').first();
-      let number = null, name = null;
-      if ($profile.length){
-        number = extractRegnoFrom($profile);
-        name = norm($profile.text());
-      }
-      if (!name) {
-        // 日本語文字を含むセルから推測（保険）
-        const guess = $tr.find("td").toArray()
-          .map(td => norm($(td).text()))
-          .find(t => /[^\x00-\x7F]/.test(t) && t.length >= 2);
-        if (guess) name = guess.split(/\s/)[0] || null;
-      }
-      if (lane) entriesMap.set(lane, { lane, number, name });
-    });
-  });
-
-  // 2) 右サイドの「スタート展示」テーブルからST
-  //    見出しに「コース」「並び」「ST」あたりが出る表を探す
-  const stByLane = {};
-  candidateTables.each((_, el) => {
-    const headTxt = norm($(el).find("thead, caption").text());
-    const looksLike = /ST/.test(headTxt) || /スタート/.test(headTxt);
-    if (!looksLike) return;
-
-    $(el).find("tbody tr").each((__, tr) => {
-      const $tr = $(tr);
-      // 1列目: コース(=枠番)、2列目: 並び/艇色、3列目: ST
-      const cells = $tr.find("th,td");
-      if (cells.length < 2) return;
-      const c1 = norm($(cells[0]).text());
-      const cSt = norm($(cells[cells.length-1]).text()); // 末尾をSTとみなす
-      const lane = Number(c1);
-      if (Number.isFinite(lane) && lane>=1 && lane<=6) {
-        // ST表記: ".13" / "F.03" / "L.10"
-        let st = null, flag = null;
-        if (/^[FL]/i.test(cSt)) { flag = cSt[0].toUpperCase(); }
-        const m = cSt.match(/-?\.?\d+(?:\.\d+)?/);
-        if (m) st = Number(m[0]);
-        stByLane[lane] = { st, flag }; // flag: 'F'|'L'|null
-      }
-    });
-  });
-
-  // マージして配列へ
-  const result = [];
-  for (let lane = 1; lane <= 6; lane++){
-    if (!entriesMap.has(lane) && !stByLane[lane]) continue;
-    const base = entriesMap.get(lane) || { lane };
-    const st = stByLane[lane]?.st ?? null;
-    const stFlag = stByLane[lane]?.flag ?? null;
-    result.push({ ...base, st, stFlag });
-  }
-  // 6艇揃わない場合も返す（未掲載のときがあるため）
-  return result.sort((a,b)=>a.lane - b.lane);
-}
-
-/** racelist フォールバック: 名前/登録番号だけ */
-function parseRaceList(html){
-  const $ = load(html);
-  const entries = [];
+  const entriesByLane = new Map();
   $("table").each((_, el) => {
     $(el).find("tbody tr").each((__, tr) => {
       const $tr = $(tr);
@@ -135,52 +65,98 @@ function parseRaceList(html){
         number = extractRegnoFrom($profile);
         name = norm($profile.text());
       }
-      if (lane) entries.push({ lane, number, name });
+      if (!name){
+        const guess = $tr.find("td").toArray().map(td => norm($(td).text()))
+          .find(t => /[^\x00-\x7F]/.test(t) && t.length>=2);
+        if (guess) name = guess.split(/\s/)[0] || null;
+      }
+      entriesByLane.set(lane, { lane, number, name });
     });
   });
-  return entries.sort((a,b)=>a.lane-b.lane);
+
+  const stByLane = {};
+  $("table").each((_, el) => {
+    const head = norm($(el).find("thead, caption").text());
+    if (!/ST|スタート/.test(head)) return;
+    $(el).find("tbody tr").each((__, tr) => {
+      const $tr = $(tr);
+      const cells = $tr.find("th,td");
+      if (cells.length < 2) return;
+      const lane = Number(norm($(cells[0]).text()));
+      const stTxt = norm($(cells[cells.length-1]).text());
+      if (!Number.isFinite(lane)) return;
+
+      let st = null, stFlag = null;
+      if (/^[FL]/i.test(stTxt)) stFlag = stTxt[0].toUpperCase();
+      const m = stTxt.match(/-?\.?\d+(?:\.\d+)?/);
+      if (m) st = Number(m[0]);
+
+      stByLane[lane] = { st, stFlag };
+    });
+  });
+
+  const out = [];
+  for (let lane=1; lane<=6; lane++){
+    const base = entriesByLane.get(lane) || { lane };
+    const stPart = stByLane[lane] || {};
+    if (!entriesByLane.has(lane) && !stByLane[lane]) continue;
+    out.push({ ...base, st: stPart.st ?? null, stFlag: stPart.stFlag ?? null });
+  }
+  return out.sort((a,b)=>a.lane-b.lane);
+}
+
+// racelist フォールバック
+function parseRaceList(html){
+  const $ = load(html);
+  const out = [];
+  $("table").each((_, el) => {
+    $(el).find("tbody tr").each((__, tr) => {
+      const $tr = $(tr);
+      const first = norm($tr.find("th,td").first().text());
+      if (!/^[1-6]$/.test(first)) return;
+      const lane = Number(first);
+      const $profile = $tr.find('a[href*="/racersearch/profile"]').first();
+      let number = null, name = null;
+      if ($profile.length){
+        number = extractRegnoFrom($profile);
+        name = norm($profile.text());
+      }
+      out.push({ lane, number, name });
+    });
+  });
+  return out.sort((a,b)=>a.lane-b.lane);
 }
 
 async function ensureDir(p){ await fs.mkdir(p, { recursive: true }); }
 
 async function main(){
-  const date = yyyymmdd(ARG_DATE);
-  const pid  = to2(ARG_PID);
-  const raceNo = String(ARG_RACE).replace(/[^\d]/g,"");
-  const race = raceKey(ARG_RACE);
+  const date = yyyymmdd(DATE_IN);
+  const pid  = to2(PID_IN);
+  const rno  = String(RACE_IN).replace(/[^\d]/g,"");
+  const race = raceKey(RACE_IN);
 
-  let src = urlBeforeInfo(date, pid, raceNo);
+  let mode = "beforeinfo";
+  let src  = urlBeforeInfo(date, pid, rno);
   let entries = [];
-  let used = "beforeinfo";
-
   try{
     const html = await fetchHtml(src);
     entries = parseBeforeInfo(html);
-  }catch(e){
-    // beforeinfo が未公開の場合は racelist にフォールバック
-    used = "racelist";
-    src = urlRaceList(date, pid, raceNo);
+  }catch{
+    mode = "racelist";
+    src  = urlRaceList(date, pid, rno);
     try{
       const html2 = await fetchHtml(src);
       entries = parseRaceList(html2);
-    }catch(e2){
-      // どちらもダメ
+    }catch{
       entries = [];
     }
   }
 
-  const payload = {
-    date, pid, race,
-    source: src,
-    mode: used,              // "beforeinfo" or "racelist"
-    generatedAt: new Date().toISOString(),
-    entries                   // [{lane, number, name, st, stFlag}]
-  };
-
-  const outDir = path.join("public", "exhibition", "v1", date, pid);
+  const payload = { date, pid, race, source: src, mode, generatedAt: new Date().toISOString(), entries };
+  const outDir = path.join("public","exhibition","v1", date, pid);
   await ensureDir(outDir);
   await fs.writeFile(path.join(outDir, `${race}.json`), JSON.stringify(payload, null, 2), "utf8");
-  console.log(`wrote: public/exhibition/v1/${date}/${pid}/${race}.json (mode=${used}, entries=${entries.length})`);
+  console.log(`wrote public/exhibition/v1/${date}/${pid}/${race}.json (mode=${mode}, entries=${entries.length})`);
 }
 
-main().catch(e => { console.error(e); process.exit(1); });
+main().catch(e=>{ console.error(e); process.exit(1); });
