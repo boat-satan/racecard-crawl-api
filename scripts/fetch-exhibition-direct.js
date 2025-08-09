@@ -10,9 +10,7 @@
 // {
 //   date, pid, race, source, mode: "beforeinfo",
 //   generatedAt,
-//   entries: [
-//     { lane, number, name, weight, tenjiTime, tilt, st, stFlag }
-//   ]
+//   entries: [{ lane, number, name, weight, tenjiTime, tilt, st, stFlag }]
 // }
 
 import fs from "node:fs";
@@ -68,13 +66,14 @@ async function writeJSON(file, data) {
   await fsp.writeFile(file, JSON.stringify(data, null, 2));
 }
 
+// ---------- input ----------
 const argvDate = process.argv[2];
-const argvPid = process.argv[3];
+const argvPid  = process.argv[3];
 const argvRace = process.argv[4];
 
-const DATE = process.env.TARGET_DATE || argvDate || "";
-const PIDS = (process.env.TARGET_PIDS || argvPid || "").split(",").map((s) => s.trim()).filter(Boolean);
-const RACES_EXPR = process.env.TARGET_RACES || argvRace || "";
+const DATE       = process.env.TARGET_DATE  || argvDate  || "";
+const PIDS       = (process.env.TARGET_PIDS || argvPid   || "").split(",").map(s => s.trim()).filter(Boolean);
+const RACES_EXPR = process.env.TARGET_RACES || argvRace  || "";
 const SKIP_EXISTING = process.argv.includes("--skip-existing");
 
 if (!DATE || PIDS.length === 0 || !RACES_EXPR) usageAndExit();
@@ -84,6 +83,7 @@ if (RACES.length === 0) usageAndExit();
 
 log(`date=${DATE} pids=${PIDS.join(",")} races=${RACES.join(",")}`);
 
+// ---------- core ----------
 async function fetchBeforeinfo({ date, pid, raceNo }) {
   const url = `https://www.boatrace.jp/owpc/pc/race/beforeinfo?hd=${date}&jcd=${pid}&rno=${raceNo}`;
   log("GET", url);
@@ -101,34 +101,61 @@ async function fetchBeforeinfo({ date, pid, raceNo }) {
 function parseBeforeinfo(html, { date, pid, raceNo, url }) {
   const $ = loadHTML(html);
 
-  // ST情報取得
+  // 右側「スタート展示」: 各 .table1_boatImage1 に (lane, ST)
   const stByLane = {};
   $("div.table1_boatImage1").each((_, el) => {
-    const lane = parseInt($(el).find(".table1_boatImage1Number").text().trim(), 10);
-    const timeText = $(el).find(".table1_boatImage1Time").text().trim();
+    const laneText =
+      $(el).find(".table1_boatImage1Number").text().trim() ||
+      $(el).find('[class*="table1_boatImage1Number"]').text().trim();
+    const timeText =
+      $(el).find(".table1_boatImage1Time").text().trim() ||
+      $(el).find('[class*="table1_boatImage1Time"]').text().trim();
+    const lane = parseInt(laneText, 10);
     if (lane >= 1 && lane <= 6) stByLane[lane] = timeText || "";
   });
 
   const entries = [];
-  const tbodies = $("table.is-w748 tbody");
+  const tbodies = $('table.is-w748 tbody'); // 左の直前情報表は tbody×6
 
   tbodies.each((i, tbody) => {
     const lane = i + 1;
     const $tb = $(tbody);
 
+    // 選手番号/名前: toban=XXXX の a のうち、テキスト非空のものを優先
     let number = "";
     let name = "";
-    const profA = $tb.find('a[href*="toban="]').first();
-    if (profA.length) {
-      const m = (profA.attr("href") || "").match(/toban=(\d{4})/);
+    const profAs = $tb.find('a[href*="toban="]');
+    profAs.each((_, a) => {
+      const href = $(a).attr("href") || "";
+      const m = href.match(/toban=(\d{4})/);
       if (m) number = m[1];
-      name = profA.text().replace(/\s+/g, " ").trim();
-    }
+      const t = $(a).text().replace(/\s+/g, " ").trim();
+      if (t) name = t; // 画像リンクは空、名前セルは非空
+    });
 
-    const tds = $tb.find("tr").first().find("td");
-    const weight = (tds.eq(0).text() || "").replace(/\s+/g, "").trim();
-    const tenjiTime = (tds.eq(1).text() || "").trim();
-    const tilt = (tds.eq(2).text() || "").trim();
+    // 1行目の <td> 群から「kg を含むセル」を基点に抽出
+    const firstRowTds = $tb.find("tr").first().find("td").toArray();
+    let weight = "", tenjiTime = "", tilt = "";
+
+    const texts = firstRowTds.map(td =>
+      ($(td).text() || "").replace(/\s+/g, "").trim()
+    );
+    const kgIdx = texts.findIndex(t => /kg$/i.test(t));
+    if (kgIdx !== -1) {
+      weight    = texts[kgIdx]     || "";
+      tenjiTime = texts[kgIdx + 1] || "";
+      tilt      = texts[kgIdx + 2] || "";
+    } else {
+      // フォールバック（まれな崩れ対策）
+      const kgCell = $tb.find("td").filter((_, td) => /kg$/i.test($(td).text().replace(/\s+/g, "").trim())).first();
+      if (kgCell.length) {
+        weight = kgCell.text().replace(/\s+/g, "").trim();
+        const next1 = kgCell.next("td");
+        const next2 = next1.next("td");
+        tenjiTime = (next1.text() || "").trim();
+        tilt      = (next2.text() || "").trim();
+      }
+    }
 
     const st = stByLane[lane] || "";
     const stFlag = st.startsWith("F") ? "F" : "";
@@ -150,7 +177,9 @@ function parseBeforeinfo(html, { date, pid, raceNo, url }) {
 async function main() {
   for (const pid of PIDS) {
     for (const raceNo of RACES) {
-      const outPath = path.join(__dirname, "..", "public", "exhibition", "v1", DATE, pid, `${raceNo}R.json`);
+      const outPath = path.join(
+        __dirname, "..", "public", "exhibition", "v1", DATE, pid, `${raceNo}R.json`
+      );
 
       if (SKIP_EXISTING && fs.existsSync(outPath)) {
         log("skip existing:", path.relative(process.cwd(), outPath));
