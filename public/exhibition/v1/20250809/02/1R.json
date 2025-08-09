@@ -1,22 +1,52 @@
 {
-  "schemaVersion": "1.0",
   "date": "20250809",
-  "stadium": "02",
+  "pid": "02",
   "race": "1R",
-  "deadline": null,
-  "fetchedAt": "2025-08-09T00:00:00.000Z",
+  "source": "https://www.boatrace.jp/owpc/pc/race/beforeinfo?hd=20250809&jcd=02&rno=1",
+  "mode": "beforeinfo",
+  "generatedAt": "2025-08-09T14:23:36.829Z",
   "entries": [
     {
       "lane": 1,
-      "racerNumber": 3898,
-      "entryCourse": 1,
-      "exTime": 6.71,
-      "exRank": 2,
-      "startPracticeST": 0.13
+      "number": null,
+      "name": "山崎",
+      "st": null,
+      "stFlag": null
+    },
+    {
+      "lane": 2,
+      "number": null,
+      "name": "齋藤",
+      "st": null,
+      "stFlag": null
+    },
+    {
+      "lane": 3,
+      "number": null,
+      "name": "梅原",
+      "st": null,
+      "stFlag": null
+    },
+    {
+      "lane": 4,
+      "number": null,
+      "name": "後藤",
+      "st": null,
+      "stFlag": null
+    },
+    {
+      "lane": 5,
+      "number": null,
+      "name": "生方",
+      "st": null,
+      "stFlag": null
+    },
+    {
+      "lane": 6,
+      "number": null,
+      "name": "多羅尾",
+      "st": null,
+      "stFlag": null
     }
-  ],
-  "source": {
-    "type": "preview|official|manual",
-    "url": "https://boatraceopenapi.github.io/previews/v2/20250809/02/1R.json"
-  }
+  ]
 }
