@@ -1,85 +1,82 @@
 // scripts/fetch-exhibition.js
-// Node v20 / ESM
+// 目的: previews を叩いて展示データを保存
+// 入力ENV:
+//   TARGET_DATE=YYYYMMDD or "today"（必須）
+//   TARGET_PID=場コード(01..24)（必須）
+//   TARGET_RACE=1R..12R（必須）
+//   USE_PREVIEWS=1 のとき previews 経由URLを使う（デフォルト 1）
+//
+// 保存先: public/exhibition/v1/<date>/<pid>/<race>.json
+// デバッグ: public/debug/exh-<date>-<pid>-<race>.txt
+
 import fs from "node:fs/promises";
 import path from "node:path";
 
-const ROOT = process.cwd();
-const OUT_BASE = path.join(ROOT, "public", "exhibition", "v1");
+const to2 = (v) => String(v).padStart(2, "0");
+const DATE_RAW = (process.env.TARGET_DATE || "").trim();
+const PID_RAW  = (process.env.TARGET_PID  || "").trim();
+const RACE_RAW = (process.env.TARGET_RACE || "").trim().toUpperCase();
+const USE_PREVIEWS = String(process.env.USE_PREVIEWS ?? "1") === "1";
 
-// 手動実行用 env:
-//   TARGET_DATE=20250809 TARGET_PID=02 TARGET_RACE=1R node scripts/fetch-exhibition.js
-// 省略時は "today" ではなく YYYYMMDD 必須にしておく（運用の明確化）
-const DATE  = (process.env.TARGET_DATE || "").replace(/-/g, "");
-const PID   = String(process.env.TARGET_PID || "").padStart(2, "0");
-const RACEQ = (process.env.TARGET_RACE || "").toUpperCase();
-const RACE  = /R$/.test(RACEQ) ? RACEQ : `${RACEQ}R`;
-
-// プレビューソースを試すかどうか（当面の暫定）：1 で使用
-const USE_PREVIEWS = process.env.USE_PREVIEWS === "1";
-
-if (!/^\d{8}$/.test(DATE) || !/^\d{2}$/.test(PID) || !/^\d{1,2}R$/.test(RACE)) {
-  console.error("Usage: TARGET_DATE=YYYYMMDD TARGET_PID=NN TARGET_RACE=NR [USE_PREVIEWS=1] node scripts/fetch-exhibition.js");
+if (!DATE_RAW || !PID_RAW || !RACE_RAW) {
+  console.error("ERROR: TARGET_DATE, TARGET_PID, TARGET_RACE は必須です");
   process.exit(1);
 }
+
+const DATE = DATE_RAW.replace(/-/g, "");   // 20250809
+const PID  = /^\d+$/.test(PID_RAW) ? to2(PID_RAW) : PID_RAW;
+const RACE = /R$/i.test(RACE_RAW) ? RACE_RAW : `${RACE_RAW}R`;
+
+// boatraceopenapi (GitHub Pages) の previews
+const BASE = USE_PREVIEWS
+  ? "https://boatraceopenapi.github.io/previews/v2"
+  : "https://boatraceopenapi.github.io/previews/v2"; // 将来的に切替したければここを分岐
+
+const SRC = `${BASE}/${DATE}/${PID}/${RACE}.json`;
+
+const OUT_DIR = path.join("public", "exhibition", "v1", DATE, PID);
+const OUT_FILE = path.join(OUT_DIR, `${RACE}.json`);
+const DBG_DIR = path.join("public", "debug");
+const DBG_FILE = path.join(DBG_DIR, `exh-${DATE}-${PID}-${RACE}.txt`);
 
 async function ensureDir(p) {
   await fs.mkdir(p, { recursive: true });
 }
 
-async function fetchText(url) {
-  const res = await fetch(url, {
-    headers: {
-      "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118 Safari/537.36",
-      "accept": "application/json,text/plain,*/*"
-    }
-  });
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-  return res.text();
-}
-
-// 暫定: previews を試す（形は保存しつつ、必要なら将来ここでパースして entries に落とす）
-async function tryFetchFromPreviews(date, pid, race) {
-  const url = `https://boatraceopenapi.github.io/previews/v2/${date}/${pid}/${race}.json`;
-  try {
-    const txt = await fetchText(url);
-    const raw = JSON.parse(txt);
-    return { ok: true, url, raw };
-  } catch (e) {
-    return { ok: false, url, error: String(e) };
-  }
-}
-
-function blankPayload() {
-  return {
-    schemaVersion: "1.0",
-    date: DATE,
-    stadium: PID,
-    race: RACE,
-    deadline: null,
-    fetchedAt: new Date().toISOString(),
-    entries: [],
-    source: { type: "manual", url: null }
-  };
-}
-
 async function main() {
-  const outDir = path.join(OUT_BASE, DATE, PID);
-  await ensureDir(outDir);
-  const outPath = path.join(outDir, `${RACE}.json`);
+  console.log("fetch:", SRC);
+  const res = await fetch(SRC);
+  const status = res.status;
+  const text = await res.text();
 
-  let payload = blankPayload();
+  await ensureDir(DBG_DIR);
+  await fs.writeFile(DBG_FILE, text);
 
-  if (USE_PREVIEWS) {
-    const r = await tryFetchFromPreviews(DATE, PID, RACE);
-    if (r.ok) {
-      // そのまま raw も添付（将来はここで entries へ正規化）
-      payload.source = { type: "preview", url: r.url };
-      payload.previewRaw = r.raw; // ★当面は丸ごと保存（後で削る/正規化する）
-    }
+  if (status !== 200) {
+    console.error(`ERROR: source fetch ${status}`);
+    process.exit(1);
   }
 
-  await fs.writeFile(outPath, JSON.stringify(payload, null, 2), "utf8");
-  console.log(`✅ wrote ${path.relative(ROOT, outPath)}`);
+  let json;
+  try { json = JSON.parse(text); } catch {
+    console.error("ERROR: invalid JSON");
+    process.exit(1);
+  }
+
+  // 何が来ても保存（将来スキーマ変化に強く）
+  const wrapped = {
+    schemaVersion: "1.0",
+    source: SRC,
+    fetchedAt: new Date().toISOString(),
+    date: DATE,
+    pid: PID,
+    race: RACE,
+    data: json
+  };
+
+  await ensureDir(OUT_DIR);
+  await fs.writeFile(OUT_FILE, JSON.stringify(wrapped, null, 2), "utf8");
+  console.log("write:", OUT_FILE);
 }
 
 main().catch((e) => {
