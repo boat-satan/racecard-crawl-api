@@ -7,15 +7,32 @@ const BASE_OUT_SLIM = "public/programs-slim/v2";
 const BASE_OUT_FULL = "public/programs/v2";
 const DEBUG_OUT = "public/debug";
 
+// stats 参照先
+const STATS_BASE = "public/stats/v1/racers";
+
 // ---------- helpers ----------
 const ensureDir = (p) => fs.mkdirSync(p, { recursive: true });
 const outDirSlim = (date, pid) => path.join(BASE_OUT_SLIM, date, pid);
 const outDirFull = (date, pid) => path.join(BASE_OUT_FULL, date, pid);
 const to2 = (s) => String(s).padStart(2, "0");
 
+const readJsonIfExists = (p) => {
+  try {
+    if (fs.existsSync(p)) {
+      return JSON.parse(fs.readFileSync(p, "utf8"));
+    }
+  } catch {}
+  return null;
+};
+
+const pickCourseItem = (arr, key, course) => {
+  if (!Array.isArray(arr)) return null;
+  return arr.find((x) => Number(x[key]) === Number(course)) || null;
+};
+
 // inputs
 const DATE   = (process.env.TARGET_DATE || "today").replace(/-/g, "");
-const PID_IN = process.env.TARGET_PID || "02";   // "02" or 場名
+const PID_IN = process.env.TARGET_PID || "02"; // "02" or 場名
 const PID    = /^\d+$/.test(PID_IN) ? to2(PID_IN) : PID_IN;
 const RACE_Q = process.env.TARGET_RACE || "1";
 const RACE   = /R$/i.test(RACE_Q) ? RACE_Q.toUpperCase() : `${RACE_Q}R`;
@@ -45,7 +62,7 @@ try {
   let raw; try { raw = JSON.parse(text); } catch { raw = null; }
   let programs = null;
   if (Array.isArray(raw)) programs = raw;
-  else if (raw && Array.isArray(raw.programs)) programs = raw.programs;     // ←今回の形式
+  else if (raw && Array.isArray(raw.programs)) programs = raw.programs; // いまの形式
   else if (raw && Array.isArray(raw.venues)) programs = raw.venues;
   else if (raw && Array.isArray(raw.items))  programs = raw.items;
 
@@ -139,8 +156,7 @@ try {
     };
   }
 
-  // ---------- ここから “フル” と “スリム” を同時保存 ----------
-  // フル用の拡張フィールド（raceData にあるものは拾う）
+  // ---------- ここから “フル” を作りつつ stats をマージ ----------
   const fullPayload = (() => {
     const base = {
       schemaVersion: "2.0",
@@ -157,32 +173,99 @@ try {
       base.subtitle    = raceData.race_subtitle ?? null;
       base.distance    = raceData.race_distance ?? null;
     }
+
     // entries（フルは取れるだけ盛る）
-    base.entries = (raceData?.boats || payload.entries || []).map(b => ({
-      lane: b.racer_boat_number ?? b.lane ?? null,
-      number: b.racer_number ?? b.number ?? null,
-      name: b.racer_name ?? b.name ?? null,
-      classNumber: b.racer_class_number ?? b.class ?? null,
-      branchNumber: b.racer_branch_number ?? b.branch ?? null,
-      birthplaceNumber: b.racer_birthplace_number ?? null,
-      age: b.racer_age ?? null,
-      weight: b.racer_weight ?? null,
-      flyingCount: b.racer_flying_count ?? null,
-      lateCount: b.racer_late_count ?? null,
-      avgST: b.racer_average_start_timing ?? null,
-      natTop1: b.racer_national_top_1_percent ?? null,
-      natTop2: b.racer_national_top_2_percent ?? null,
-      natTop3: b.racer_national_top_3_percent ?? null,
-      locTop1: b.racer_local_top_1_percent ?? null,
-      locTop2: b.racer_local_top_2_percent ?? null,
-      locTop3: b.racer_local_top_3_percent ?? null,
-      motorNumber: b.racer_assigned_motor_number ?? null,
-      motorTop2: b.racer_assigned_motor_top_2_percent ?? null,
-      motorTop3: b.racer_assigned_motor_top_3_percent ?? null,
-      boatNumber: b.racer_assigned_boat_number ?? null,
-      boatTop2: b.racer_assigned_boat_top_2_percent ?? null,
-      boatTop3: b.racer_assigned_boat_top_3_percent ?? null
-    }));
+    const rawEntries = (raceData?.boats || payload.entries || []);
+    base.entries = rawEntries.map(b => {
+      const lane  = b.racer_boat_number ?? b.lane ?? null;
+      const regno = b.racer_number ?? b.number ?? null;
+
+      const entry = {
+        lane,
+        number: regno,
+        name: b.racer_name ?? b.name ?? null,
+        classNumber: b.racer_class_number ?? b.class ?? null,
+        branchNumber: b.racer_branch_number ?? b.branch ?? null,
+        birthplaceNumber: b.racer_birthplace_number ?? null,
+        age: b.racer_age ?? null,
+        weight: b.racer_weight ?? null,
+        flyingCount: b.racer_flying_count ?? null,
+        lateCount: b.racer_late_count ?? null,
+        avgST: b.racer_average_start_timing ?? null,
+        natTop1: b.racer_national_top_1_percent ?? null,
+        natTop2: b.racer_national_top_2_percent ?? null,
+        natTop3: b.racer_national_top_3_percent ?? null,
+        locTop1: b.racer_local_top_1_percent ?? null,
+        locTop2: b.racer_local_top_2_percent ?? null,
+        locTop3: b.racer_local_top_3_percent ?? null,
+        motorNumber: b.racer_assigned_motor_number ?? null,
+        motorTop2: b.racer_assigned_motor_top_2_percent ?? null,
+        motorTop3: b.racer_assigned_motor_top_3_percent ?? null,
+        boatNumber: b.racer_assigned_boat_number ?? null,
+        boatTop2: b.racer_assigned_boat_top_2_percent ?? null,
+        boatTop3: b.racer_assigned_boat_top_3_percent ?? null,
+      };
+
+      // ---- ここで stats をマージ（存在すれば）----
+      if (regno) {
+        const statsPath = path.join(STATS_BASE, `${regno}.json`);
+        const stats = readJsonIfExists(statsPath);
+        if (stats) {
+          // コース別（直近6か月）
+          const cs = pickCourseItem(stats.courseStats, "course", lane);
+          // 決まり手（自艇行の内訳）
+          const km = pickCourseItem(stats.courseKimarite, "course", lane);
+          // 展示タイム順位別
+          const rk = Array.isArray(stats.exTimeRank) ? stats.exTimeRank : null;
+
+          entry.stats = {};
+
+          if (cs) {
+            entry.stats.course = {
+              course: lane,
+              topRates: {
+                top1: cs.top1Rate ?? null,
+                top2: cs.top2Rate ?? null,
+                top3: cs.top3Rate ?? null,
+              },
+              // ★ 平均STやST順が stats に入ったらここで追加
+              // avgST: cs.avgST ?? null,
+              // avgSTRank: cs.avgSTRank ?? null,
+              starts: cs.starts ?? null
+            };
+          }
+
+          if (km && km.detail) {
+            // 自艇の勝ち決まり手（index2 由来なら回数ベース）
+            entry.stats.course = entry.stats.course || { course: lane };
+            entry.stats.course.kimariteSelf = {
+              nige: km.detail["逃げ"]?.count ?? null,
+              sashi: km.detail["差し"]?.count ?? null,
+              makuri: km.detail["まくり"]?.count ?? null,
+              makurizashi: km.detail["まくり差し"]?.count ?? null,
+              nuki: km.detail["抜き"]?.count ?? null,
+              megumare: km.detail["恵まれ"]?.count ?? null
+            };
+            // ★ “負け決まり手” を stats に出せたらここで別フィールドにマージ
+            // entry.stats.course.kimariteLose = {...}
+          }
+
+          if (rk) {
+            entry.stats.demo = {
+              rankRates: rk.map(r => ({
+                rank: r.rank,
+                winRate: r.winRate ?? null,
+                top2Rate: r.top2Rate ?? null,
+                top3Rate: r.top3Rate ?? null
+              }))
+            };
+          }
+        }
+      }
+
+      return entry;
+    });
+
     return base;
   })();
 
