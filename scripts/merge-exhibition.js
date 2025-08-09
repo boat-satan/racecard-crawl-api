@@ -1,132 +1,128 @@
-// scripts/merge-exhibition.js
-// 目的: public/exhibition/v1/<date>/<pid>/<race>.json を
-//       public/programs/v2/<date>/<pid>/<race>.json（フル）にマージ
-// ついでに programs-slim 側にも軽量な抜粋を足す（存在すれば）
+// 展示 -> 出走表(= programs) 統合スクリプト
+// 対象: public/exhibition/v1/<date>/<pid>/<race>.json
+// マージ先候補(優先順):
+//   1) public/programs/v2/today/<pid>/<race>.json
+//   2) public/programs/v2/<date>/<pid>/<race>.json
+//   3) public/startlist/v1/<date>/<pid>/<race>.json (フォールバック)
 //
-// 入力ENV:
-//   TARGET_DATE=YYYYMMDD or "today"（必須）
-//   TARGET_PID=場コード(01..24)（必須）
-//   TARGET_RACE=1R..12R（必須）
-//
-// マージ戦略:
-//   - full に .exhibition を追加 { source, fetchedAt, entries:[{lane, st, exTime, timeRank, ...}] , raw }
-//   - slim にも entries[i].ex を追加できる範囲で追加
-//
-// ※ previews のスキーマは不定のため、よくあるキーを推測して拾いつつ、raw も保持
+// 付加: entry.exhibition = { lane, weight, tenjiTime, tilt, st, stFlag }
+// 進入反映: APPLY_COURSE_FROM_EXHIBITION = true なら course/lane を上書き
 
-import fs from "node:fs/promises";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
 import path from "node:path";
 
-const to2 = (v) => String(v).padStart(2, "0");
-const DATE_RAW = (process.env.TARGET_DATE || "").trim();
-const PID_RAW  = (process.env.TARGET_PID  || "").trim();
-const RACE_RAW = (process.env.TARGET_RACE || "").trim().toUpperCase();
+const APPLY_COURSE_FROM_EXHIBITION = true;
 
-if (!DATE_RAW || !PID_RAW || !RACE_RAW) {
-  console.error("ERROR: TARGET_DATE, TARGET_PID, TARGET_RACE は必須です");
-  process.exit(1);
+function log(...a){ console.log("[merge-exh]", ...a); }
+async function readJSON(p){ return JSON.parse(await fsp.readFile(p, "utf-8")); }
+async function writeJSON(p,o){ await fsp.mkdir(path.dirname(p),{recursive:true}); await fsp.writeFile(p, JSON.stringify(o,null,2)+"\n"); }
+function listArg(raw){ return (raw||"").split(",").map(s=>s.trim()).filter(Boolean); }
+
+function indexExhibition(exh){
+  const byNumber=new Map(), byLane=new Map();
+  for(const e of exh.entries||[]){
+    const num=(e.number||"").trim();
+    if(num) byNumber.set(num,e);
+    if(Number.isInteger(e.lane)&&e.lane>=1&&e.lane<=6) byLane.set(e.lane,e);
+  }
+  return {byNumber, byLane};
 }
 
-const DATE = DATE_RAW.replace(/-/g, "");
-const PID  = /^\d+$/.test(PID_RAW) ? to2(PID_RAW) : PID_RAW;
-const RACE = /R$/i.test(RACE_RAW) ? RACE_RAW : `${RACE_RAW}R`;
+function mergeOne(start, exh, idx){
+  if(!Array.isArray(start.entries)) return {changed:false, start};
+  let changed=false;
 
-const EXH_FILE  = path.join("public", "exhibition", "v1", DATE, PID, `${RACE}.json`);
-const FULL_FILE = path.join("public", "programs", "v2", DATE, PID, `${RACE}.json`);
-const SLIM_FILE = path.join("public", "programs-slim", "v2", DATE, PID, `${RACE}.json`);
+  for(const entry of start.entries){
+    const num=(entry.number||"").trim();
+    const laneFallback = Number.isInteger(entry.lane) ? entry.lane :
+                         Number.isInteger(entry.course) ? entry.course : undefined;
 
-async function exists(p) {
-  try { await fs.access(p); return true; } catch { return false; }
-}
+    const src = (num && idx.byNumber.get(num)) || (laneFallback && idx.byLane.get(laneFallback));
+    if(!src) continue;
 
-// よくある previews の形から抽出を試みる
-function normalizeExEntries(raw) {
-  // 可能性: raw.data.entries / raw.data.boats / raw.data.lanes / raw.data
-  const cand =
-    raw?.data?.entries ??
-    raw?.data?.boats ??
-    raw?.data?.lanes ??
-    (Array.isArray(raw?.data) ? raw.data : null);
-
-  if (!Array.isArray(cand)) return [];
-
-  // lane 推定: lane / boat / number / index
-  return cand.map((e, i) => {
-    // 代表的なキーの候補
-    const lane =
-      e.lane ?? e.boat ?? e.number ?? e.laneNo ?? (i + 1);
-
-    // ST / 展示タイムなどに該当しそうなキー候補を広めに
-    const st =
-      e.st ?? e.ST ?? e.start ?? e.start_timing ?? null;
-
-    const exTime =
-      e.exTime ?? e.exhibitionTime ?? e.demoTime ?? e.time ?? null;
-
-    const timeRank =
-      e.timeRank ?? e.exTimeRank ?? e.rank ?? null;
-
-    // 他にも気づいたら追加してOK
-    return {
-      lane: Number(lane) || lane,
-      st: typeof st === "string" ? st : (st ?? null),
-      exTime: typeof exTime === "string" ? exTime : (exTime ?? null),
-      timeRank: typeof timeRank === "string" ? timeRank : (timeRank ?? null),
-      raw: e
+    const newExh = {
+      lane: src.lane,
+      weight: src.weight || "",
+      tenjiTime: src.tenjiTime || "",
+      tilt: src.tilt || "",
+      st: src.st || "",
+      stFlag: src.stFlag || "",
     };
-  });
-}
 
-async function main() {
-  if (!(await exists(EXH_FILE))) {
-    console.error(`ERROR: exhibition not found: ${EXH_FILE}`);
-    process.exit(1);
-  }
-  if (!(await exists(FULL_FILE))) {
-    console.error(`ERROR: full race file not found: ${FULL_FILE}`);
-    process.exit(1);
-  }
+    const prev = JSON.stringify(entry.exhibition||{});
+    const next = JSON.stringify(newExh);
+    if(prev!==next){ entry.exhibition=newExh; changed=true; }
 
-  const exh = JSON.parse(await fs.readFile(EXH_FILE, "utf8"));
-  const full = JSON.parse(await fs.readFile(FULL_FILE, "utf8"));
-
-  const exEntries = normalizeExEntries(exh);
-
-  // full 側に .exhibition を追加/更新
-  full.exhibition = {
-    source: exh.source ?? null,
-    fetchedAt: exh.fetchedAt ?? new Date().toISOString(),
-    entries: exEntries,
-    raw: exh.data ?? exh
-  };
-
-  await fs.writeFile(FULL_FILE, JSON.stringify(full, null, 2), "utf8");
-  console.log("updated:", FULL_FILE);
-
-  // slim があれば、entries 順に lane 突合せして軽量付与
-  if (await exists(SLIM_FILE)) {
-    const slim = JSON.parse(await fs.readFile(SLIM_FILE, "utf8"));
-    if (Array.isArray(slim.entries) && slim.entries.length) {
-      const byLane = new Map(exEntries.map((x) => [String(x.lane), x]));
-      slim.entries = slim.entries.map((en) => {
-        const hit = byLane.get(String(en.lane));
-        if (!hit) return en;
-        return {
-          ...en,
-          ex: {
-            st: hit.st ?? null,
-            time: hit.exTime ?? null,
-            timeRank: hit.timeRank ?? null
-          }
-        };
-      });
-      await fs.writeFile(SLIM_FILE, JSON.stringify(slim, null, 2), "utf8");
-      console.log("updated:", SLIM_FILE);
+    if(APPLY_COURSE_FROM_EXHIBITION && Number.isInteger(src.lane)){
+      if(entry.course!==src.lane){ entry.course=src.lane; changed=true; }
+      if(entry.lane!==undefined && entry.lane!==src.lane){ entry.lane=src.lane; changed=true; }
     }
   }
+
+  const meta = start.meta||{};
+  const mergedMeta = {
+    ...meta,
+    lastMergedExhibitionAt: new Date().toISOString(),
+    mergedFrom: {
+      date: exh.date, pid: exh.pid, race: exh.race,
+      source: exh.source, generatedAt: exh.generatedAt,
+    },
+  };
+  if(JSON.stringify(meta)!==JSON.stringify(mergedMeta)){ start.meta=mergedMeta; changed=true; }
+
+  return {changed, start};
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+function basenameRace(filePath){
+  // ".../7R.json" -> "7R.json"
+  return path.basename(filePath);
+}
+
+function deriveProgramTargets(exhJsonPath, exhJson){
+  // 展示ファイル名の "7R.json" をそのまま使う
+  const raceFile = basenameRace(exhJsonPath);
+  const { date, pid } = exhJson; // pidは "02" など
+
+  return [
+    path.posix.join("public","programs","v2","today", pid, raceFile),         // 1st
+    path.posix.join("public","programs","v2", date,  pid, raceFile),          // 2nd
+    // 旧構成フォールバック
+    path.posix.join("public","startlist","v1", date, pid, raceFile),          // 3rd
+  ];
+}
+
+async function pickExisting(paths){
+  for(const p of paths){
+    if(fs.existsSync(p)) return p;
+  }
+  return null;
+}
+
+async function processOne(exhPath){
+  if(!fs.existsSync(exhPath)){ log("skip (no exhibition):", exhPath); return; }
+
+  const exh = await readJSON(exhPath);
+  const targets = deriveProgramTargets(exhPath, exh);
+  const startPath = await pickExisting(targets);
+
+  if(!startPath){ log("skip (no startlist/programs found):", targets.join(" | ")); return; }
+
+  const start = await readJSON(startPath);
+  const idx = indexExhibition(exh);
+  const {changed, start:merged} = mergeOne(start, exh, idx);
+  if(!changed){ log("no changes:", startPath); return; }
+
+  await writeJSON(startPath, merged);
+  log("merged ->", startPath);
+}
+
+async function main(){
+  const files = listArg(process.argv.slice(2).join(",") || process.env.EXHIBITION_FILES);
+  if(files.length===0){ console.error("No exhibition files given."); return; }
+  for(const f of files){
+    try{ await processOne(f); }
+    catch(e){ console.error("Failed to merge:", f, String(e)); }
+  }
+}
+main().catch(e=>{ console.error(e); process.exit(1); });
