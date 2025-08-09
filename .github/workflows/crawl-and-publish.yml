@@ -1,0 +1,50 @@
+name: Crawl & Publish
+
+on:
+  workflow_dispatch: {}         # Actions画面から手動実行
+  schedule:
+    - cron: "15 * * * *"        # 毎時15分（UTC）に実行（必要なら変えてね）
+
+permissions:
+  contents: write               # 生成物をコミットするため
+
+concurrency:
+  group: crawl-and-publish
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install deps
+        run: npm ci || npm i
+
+      - name: Run crawler
+        run: node scripts/crawl.js
+
+      # enrich.js がある場合だけ動かす（任意）
+      - name: Run enrich (optional)
+        if: ${{ hashFiles('scripts/enrich.js') != '' }}
+        run: node scripts/enrich.js
+
+      - name: Commit & Push changes
+        run: |
+          git config user.name  "${{ github.actor }}"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
+          if [[ -n "$(git status --porcelain)" ]]; then
+            git add -A
+            git commit -m "chore: publish $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            git push
+          else
+            echo "No changes to commit."
+          fi
