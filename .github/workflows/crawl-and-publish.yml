@@ -18,10 +18,13 @@ jobs:
         with:
           node-version: '20'
 
+      # ここを追加：依存を入れる（lockfile無しでもOK）
+      - name: Install deps
+        run: npm install --no-audit --no-fund
+
       - name: Run crawler
         run: node scripts/crawl.js
 
-      # まずは動作確認が済んだらコメント解除
       - name: Fetch racer stats (boatrace-db)
         run: node scripts/fetch-stats.js
 
