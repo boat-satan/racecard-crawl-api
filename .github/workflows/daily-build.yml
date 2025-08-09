@@ -1,0 +1,51 @@
+name: Daily Build (all venues & races)
+
+on:
+  schedule:
+    # 21:30 UTC = 06:30 JST（毎朝6:30くらいに実行）
+    - cron: "30 21 * * *"
+  workflow_dispatch: {}         # 手動実行も可
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-build
+  cancel-in-progress: true
+
+jobs:
+  build-all:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install deps
+        run: npm ci || npm i
+
+      # ここで全場/全12Rを作るスクリプト名に合わせて変更してね
+      - name: Build ALL
+        run: |
+          if [ -f scripts/build-all.js ]; then
+            node scripts/build-all.js
+          else
+            # ない場合は crawl.js をそのまま使う etc. 好きに差し替え可
+            node scripts/crawl.js
+          fi
+
+      - name: Commit & Push
+        run: |
+          git config user.name  "${{ github.actor }}"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
+          if [[ -n "$(git status --porcelain)" ]]; then
+            git add -A
+            git commit -m "chore: daily build $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            git push
+          else
+            echo "No changes."
+          fi
