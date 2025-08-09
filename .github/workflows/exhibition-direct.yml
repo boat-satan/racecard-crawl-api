@@ -1,0 +1,60 @@
+name: Test Exhibition Direct
+
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "YYYYMMDD or today"
+        required: true
+        default: "today"
+      pids:
+        description: "場コードCSV (例: 02,09)"
+        required: false
+        default: "02"
+      races:
+        description: "レースCSV (例: 1R,2R または 1,2) 空=1..12"
+        required: false
+        default: "1R"
+      skipExisting:
+        description: "既存ファイルがあればスキップ？"
+        required: true
+        default: "true"
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+
+      - name: Install deps
+        run: npm ci || npm i --no-audit --no-fund
+
+      - name: Run direct exhibition crawler
+        env:
+          TARGET_DATE:  ${{ inputs.date  }}
+          TARGET_PIDS:  ${{ inputs.pids  }}
+          TARGET_RACES: ${{ inputs.races }}
+          SKIP:         ${{ inputs.skipExisting }}
+        run: |
+          if [ "${SKIP}" = "true" ]; then
+            node scripts/fetch-exhibition-direct.js --skip-existing
+          else
+            node scripts/fetch-exhibition-direct.js
+          fi
+
+      - name: Commit & push results
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "Direct exhibition crawl [skip ci]"
+            git push
+          else
+            echo "No changes."
+          fi
