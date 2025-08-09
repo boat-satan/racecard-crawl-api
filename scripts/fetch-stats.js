@@ -8,11 +8,12 @@
 
 import { load } from "cheerio";
 import fs from "node:fs/promises";
+import fss from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // -------------------------------
-// 定数
+// 定数 & パス
 // -------------------------------
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -24,20 +25,98 @@ const TODAY_ROOTS = [
 ];
 const OUTPUT_DIR = path.join(PUBLIC_DIR, "stats", "v1", "racers");
 
-// polite wait
-const WAIT_MS_BETWEEN_RACERS = Number(process.env.STATS_DELAY_MS || 3000);
-// 各コース詳細ページの間隔（GitHub Actions では広めに）
-const WAIT_MS_BETWEEN_COURSE_PAGES = Number(process.env.COURSE_WAIT_MS || 1200);
-
-// env
+// -------------------------------
+// 環境変数 / 引数
+// -------------------------------
 const ENV_RACERS       = process.env.RACERS?.trim() || "";
 const ENV_RACERS_LIMIT = Number(process.env.RACERS_LIMIT ?? "");
 const ENV_BATCH        = Number(process.env.STATS_BATCH ?? "");
+const WAIT_MS_BETWEEN_RACERS = Number(process.env.STATS_DELAY_MS || 3000);
+const WAIT_MS_BETWEEN_COURSE_PAGES = Number(process.env.COURSE_WAIT_MS || 1200);
+
+// 新規: 既存スキップ/強制/鮮度
+const ENV_FORCE = /^1|true|yes$/i.test(process.env.FORCE || "");
+const ENV_MAX_AGE_HOURS = Number(process.env.MAX_AGE_HOURS ?? "");
+const ENV_SKIP_EXISTING = process.env.SKIP_EXISTING == null
+  ? true // デフォルト: スキップON
+  : /^1|true|yes$/i.test(process.env.SKIP_EXISTING);
+
+// 簡易引数パーサ（--force / --max-age-hours=24 / --no-skip-existing）
+let ARG_FORCE = false;
+let ARG_MAX_AGE_HOURS = null;
+let ARG_SKIP_EXISTING = null;
+for (const a of process.argv.slice(2)) {
+  if (a === "--force") ARG_FORCE = true;
+  else if (a === "--no-skip-existing") ARG_SKIP_EXISTING = false;
+  else if (a.startsWith("--max-age-hours=")) {
+    const v = Number(a.split("=")[1]);
+    if (Number.isFinite(v) && v > 0) ARG_MAX_AGE_HOURS = v;
+  }
+}
+const FORCE = ENV_FORCE || ARG_FORCE;
+const MAX_AGE_HOURS = Number.isFinite(ENV_MAX_AGE_HOURS) && ENV_MAX_AGE_HOURS > 0
+  ? ENV_MAX_AGE_HOURS
+  : (ARG_MAX_AGE_HOURS ?? null);
+const SKIP_EXISTING = ARG_SKIP_EXISTING ?? ENV_SKIP_EXISTING;
 
 // -------------------------------
 // ユーティリティ
 // -------------------------------
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function pathExists(p) {
+  try { await fs.stat(p); return true; } catch { return false; }
+}
+
+function isStaleByMtime(stats, maxHours) {
+  if (!stats?.mtime || !maxHours) return false;
+  const ageMs = Date.now() - stats.mtime.getTime();
+  return ageMs > maxHours * 3600 * 1000;
+}
+
+async function loadFetchedAtIfAny(file) {
+  try {
+    const t = await fs.readFile(file, "utf8");
+    const j = JSON.parse(t);
+    return j?.fetchedAt ? new Date(j.fetchedAt) : null;
+  } catch { return null; }
+}
+
+function isStaleByFetchedAt(fetchedAt, maxHours) {
+  if (!fetchedAt || !maxHours) return false;
+  const ageMs = Date.now() - new Date(fetchedAt).getTime();
+  return ageMs > maxHours * 3600 * 1000;
+}
+
+/**
+ * 既存スキップ判定:
+ * - FORCE: 常に再取得
+ * - ファイル未存在: 取得
+ * - MAX_AGE_HOURS 指定あり: mtime or fetchedAt が古ければ再取得
+ * - それ以外: SKIP_EXISTING が true ならスキップ、false なら再取得
+ */
+async function shouldSkip(regno) {
+  const outPath = path.join(OUTPUT_DIR, `${regno}.json`);
+  const exists = await pathExists(outPath);
+  if (!exists) return { skip: false, reason: "not-exists" };
+  if (FORCE) return { skip: false, reason: "force" };
+
+  if (MAX_AGE_HOURS) {
+    // mtime か fetchedAt で鮮度をチェック
+    const st = fss.statSync(outPath);
+    const staleByMtime = isStaleByMtime(st, MAX_AGE_HOURS);
+    if (staleByMtime) return { skip: false, reason: `stale-mtime>${MAX_AGE_HOURS}h` };
+
+    const fetchedAt = await loadFetchedAtIfAny(outPath);
+    const staleByFetched = isStaleByFetchedAt(fetchedAt, MAX_AGE_HOURS);
+    if (staleByFetched) return { skip: false, reason: `stale-fetchedAt>${MAX_AGE_HOURS}h` };
+
+    // 新しければスキップ
+    return { skip: true, reason: "fresh" };
+  }
+
+  return { skip: SKIP_EXISTING, reason: SKIP_EXISTING ? "exists" : "no-skip-existing" };
+}
 
 /**
  * fetchHtml: UA/Referer/言語ヘッダ付き、リトライ強化版
@@ -46,8 +125,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  */
 async function fetchHtml(url, {
   retries = 6,
-  baseDelayMs = 2500,   // 1回目待機
-  timeoutMs = 20000,    // レスポンス待ちタイムアウト
+  baseDelayMs = 2500,
+  timeoutMs = 20000,
 } = {}) {
   const controller = () => new AbortController();
 
@@ -59,7 +138,6 @@ async function fetchHtml(url, {
       const res = await fetch(url, {
         signal: ac.signal,
         headers: {
-          // 本物ブラウザっぽく
           "user-agent":
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
           "accept": "text/html,application/xhtml+xml",
@@ -69,12 +147,8 @@ async function fetchHtml(url, {
         },
       });
 
-      if (res.ok) {
-        clearTimeout(t);
-        return await res.text();
-      }
+      if (res.ok) { clearTimeout(t); return await res.text(); }
 
-      // 一部ステータスは待ってから再試行
       const retriable = [403, 429, 500, 502, 503, 504].includes(res.status);
       if (!retriable || attempt === retries) {
         const body = await res.text().catch(() => "");
@@ -82,8 +156,7 @@ async function fetchHtml(url, {
         throw new Error(`HTTP ${res.status} ${res.statusText} @ ${url} ${body?.slice(0, 120)}`);
       }
 
-      // 403/429/503 は待機を長めに（指数バックオフ + ジッター）
-      const factor = res.status === 403 || res.status === 429 || res.status === 503 ? 2.0 : 1.3;
+      const factor = (res.status === 403 || res.status === 429 || res.status === 503) ? 2.0 : 1.3;
       const delay = Math.round((baseDelayMs * Math.pow(factor, attempt)) * (0.8 + Math.random() * 0.4));
       clearTimeout(t);
       await sleep(delay);
@@ -91,10 +164,7 @@ async function fetchHtml(url, {
 
     } catch (err) {
       clearTimeout(t);
-      if (attempt === retries) {
-        throw new Error(`GET failed after ${retries + 1} tries: ${url} :: ${err.message}`);
-      }
-      // ネットワーク/タイムアウトも指数バックオフ
+      if (attempt === retries) throw new Error(`GET failed after ${retries + 1} tries: ${url} :: ${err.message}`);
       const delay = Math.round((baseDelayMs * Math.pow(1.6, attempt)) * (0.8 + Math.random() * 0.4));
       await sleep(delay);
     }
@@ -103,10 +173,7 @@ async function fetchHtml(url, {
 }
 
 function normText(t) {
-  return (t ?? "")
-    .replace(/\u00A0/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return (t ?? "").replace(/\u00A0/g, " ").replace(/\s+/g, " ").trim();
 }
 function toNumber(v) {
   if (v == null) return null;
@@ -142,10 +209,7 @@ function mustTableByHeader($, keyLikes) {
   return null;
 }
 function normalizeKimariteKey(k) {
-  return k
-    .replace("ま差し", "まくり差し")
-    .replace("捲り差し", "まくり差し")
-    .replace("捲り", "まくり");
+  return k.replace("ま差し", "まくり差し").replace("捲り差し", "まくり差し").replace("捲り", "まくり");
 }
 
 // -------------------------------
@@ -221,9 +285,9 @@ function parseAvgSTFromCoursePage($) {
 
   let sum = 0, cnt = 0;
   for (const r of rows) {
-    const st = r[iST]; // ".15" / "F.01" / "L.10"
+    const st = r[iST];
     if (!st) continue;
-    if (/^[FL]/i.test(st)) continue;
+    if (/^[FL]/i.test(st)) continue; // F/L除外
     const m = st.match(/-?\.?\d+(?:\.\d+)?/);
     if (!m) continue;
     const n = Number(m[0]);
@@ -244,7 +308,7 @@ function parseLoseKimariteFromCoursePage($) {
   const lose = Object.fromEntries(keys.map(k => [k, 0]));
   for (const r of rows) {
     const label = r[iCourse] || "";
-    if (label.includes("（自艇）")) continue;
+    if (label.includes("（自艇）")) continue; // 自艇は除外
     keys.forEach((k, i) => {
       const v = r[3 + i];
       const num = v ? Number((v.match(/(\d+)/) || [])[1]) : NaN;
@@ -408,13 +472,23 @@ async function main() {
     `process ${racers.length} racers` +
       (ENV_RACERS ? " (env RACERS specified)" : "") +
       (ENV_RACERS_LIMIT ? ` (limit=${ENV_RACERS_LIMIT})` : "") +
-      (ENV_BATCH ? ` (batch=${ENV_BATCH})` : "")
+      (ENV_BATCH ? ` (batch=${ENV_BATCH})` : "") +
+      (FORCE ? " [FORCE]" : "") +
+      (MAX_AGE_HOURS ? ` [MAX_AGE_HOURS=${MAX_AGE_HOURS}]` : "") +
+      (SKIP_EXISTING ? " [skip-existing]" : " [no-skip-existing]")
   );
 
   await ensureDir(OUTPUT_DIR);
 
-  let ok = 0, ng = 0;
+  let ok = 0, ng = 0, skipped = 0;
   for (const regno of racers) {
+    const { skip, reason } = await shouldSkip(regno);
+    if (skip) {
+      console.log(`⏭️  skip ${regno} (${reason})`);
+      skipped++;
+      continue;
+    }
+
     try {
       const data = await fetchOne(regno);
       const outPath = path.join(OUTPUT_DIR, `${regno}.json`);
@@ -438,6 +512,10 @@ async function main() {
         racers: racers.map((r) => Number(r)),
         success: ok,
         failed: ng,
+        skipped,
+        force: FORCE,
+        maxAgeHours: MAX_AGE_HOURS,
+        skipExisting: SKIP_EXISTING,
       },
       null,
       2
