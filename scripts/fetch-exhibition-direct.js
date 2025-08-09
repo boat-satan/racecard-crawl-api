@@ -1,54 +1,24 @@
 // scripts/fetch-exhibition.js
 // Node v20 / ESM / cheerio v1.x
-// 保存先: public/exhibitions/v1/<date>/<pid>/<race>.json
+// 保存: public/exhibitions/v1/<date>/<pid>/<race>.json
 //
-// 使い方（ローカル or GitHub Actions の "Run workflow" から）:
-//   環境変数/inputs:
-//     TARGET_DATE  = "YYYYMMDD" or "today"
-//     TARGET_PIDS  = "02,09"        ← カンマ区切り（ゼロ埋め2桁でもOK）
-//     TARGET_RACES = "1R,2R"  or "1,2"（空なら 1..12）
-//   フラグ:
-//     --skip-existing  … 出力ファイルが存在する場合スキップ（上書きしない）
+// 取得順: beforeinfo(名前/枠) → racelist(不足補完) → exhresult(ST)
 //
-// 取得ロジック:
-//   1) beforeinfo を優先（展示後なら ST を含む）
-//   2) 取れなければ racelist をフォールバック（名前/枠のみ）
-//
-// 備考:
-//   - 公式HTML側の見出し依存をやめ、ヘッダ内の「進入/枠/号艇/コース」「ST/スタート」をキーに
-//     テーブルを検出。行テキストから F.01 / L.10 / .13 などを正規化して抽出。
+// 実行例:
+//   TARGET_DATE=20250809 TARGET_PIDS=02 TARGET_RACES=5 node scripts/fetch-exhibition.js --skip-existing
 
 import { load } from "cheerio";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-// ----------------------------- 基本設定 -----------------------------
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
 const OUT_ROOT = path.resolve(__dirname, "..", "public", "exhibitions", "v1");
+const UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36";
 
-const UA =
-  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36";
-
-// ----------------------------- ユーティリティ -----------------------------
-const norm = (s) => (s ?? "").replace(/\s+/g, " ").trim();
-
+const norm = (s) => (s ?? "").replace(/\u00A0/g, " ").replace(/\s+/g, " ").trim();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-async function ensureDir(p) {
-  await fs.mkdir(p, { recursive: true });
-}
-
-async function fileExists(p) {
-  try {
-    await fs.access(p);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 function todayYYYYMMDD() {
   const jst = new Date(Date.now() + 9 * 3600 * 1000);
@@ -57,20 +27,17 @@ function todayYYYYMMDD() {
   const d = String(jst.getUTCDate()).padStart(2, "0");
   return `${y}${m}${d}`;
 }
-
-function to2(v) {
-  const s = String(v).trim();
-  return /^\d+$/.test(s) ? s.padStart(2, "0") : s;
-}
-
-function toRaceKey(v) {
+const to2 = (v) => (/^\d+$/.test(String(v).trim()) ? String(v).padStart(2, "0") : String(v).trim().toUpperCase());
+const toRaceKey = (v) => {
   const s = String(v).trim().toUpperCase();
   if (/^\d+$/.test(s)) return `${Number(s)}R`;
   if (/^\d+R$/.test(s)) return s;
-  // フォールバック
   const n = s.replace(/[^\d]/g, "");
   return n ? `${Number(n)}R` : s;
-}
+};
+
+async function ensureDir(p) { await fs.mkdir(p, { recursive: true }); }
+async function fileExists(p) { try { await fs.access(p); return true; } catch { return false; } }
 
 async function fetchHtml(url, { retries = 2, delayMs = 700 } = {}) {
   for (let i = 0; i <= retries; i++) {
@@ -82,15 +49,15 @@ async function fetchHtml(url, { retries = 2, delayMs = 700 } = {}) {
   throw new Error(`HTTP failed after ${retries + 1} tries`);
 }
 
-function buildBeforeInfoUrl(date, pid, raceNum) {
-  return `https://www.boatrace.jp/owpc/pc/race/beforeinfo?hd=${date}&jcd=${pid}&rno=${raceNum}`;
-}
-function buildRaceListUrl(date, pid, raceNum) {
-  return `https://www.boatrace.jp/owpc/pc/race/racelist?hd=${date}&jcd=${pid}&rno=${raceNum}`;
-}
+const urls = {
+  beforeinfo: (date, pid, rno) => `https://www.boatrace.jp/owpc/pc/race/beforeinfo?hd=${date}&jcd=${pid}&rno=${rno}`,
+  racelist:   (date, pid, rno) => `https://www.boatrace.jp/owpc/pc/race/racelist?hd=${date}&jcd=${pid}&rno=${rno}`,
+  exhresult:  (date, pid, rno) => `https://www.boatrace.jp/owpc/pc/race/exhresult?hd=${date}&jcd=${pid}&rno=${rno}`,
+};
 
 const pickNumberFromHref = (href) => {
   if (!href) return null;
+  // プロフィール dno=XXXX を拾う（無いことも多い）
   const m = href.match(/[?&]dno=(\d{4})\b/);
   return m ? Number(m[1]) : null;
 };
@@ -98,67 +65,65 @@ const pickNumberFromHref = (href) => {
 const parseSTToken = (txt) => {
   if (!txt) return { st: null, flag: null };
   const flag = /^[FL]/i.test(txt) ? txt[0].toUpperCase() : null;
-  // 0.13 / .13 / F.01 / L.10 を拾う
-  // まず 0.13 のような明示小数、なければ .13 の孤立小数
   const m = txt.match(/\b(\d?\.\d{2})\b/) || txt.match(/(\.\d{2})/);
   return m ? { st: Number(m[1]), flag } : { st: null, flag };
 };
 
-// ----------------------------- パーサー（beforeinfo） -----------------------------
-function extractEntriesFromMainTable($) {
-  const entries = [];
+// ---------- beforeinfo: 枠＆名前（列位置で厳密に） ----------
+function parseEntriesFromBeforeInfo(html) {
+  const $ = load(html);
+  let entries = [];
+
   $("table").each((_, tbl) => {
     const $tbl = $(tbl);
-    const heads = $tbl
-      .find("thead th, thead td")
-      .map((_, th) => norm($(th).text()))
-      .get();
-    // レーン/艇/進入 x 名前 のような構成をざっくり検出
-    const hasLane = heads.some((h) => /艇|枠|コース|進入|号艇/.test(h));
-    const hasName = heads.some((h) => /選手|名/.test(h));
+    const headers = $tbl.find("thead th, thead td").map((_, th) => norm($(th).text())).get();
+    if (!headers.length) return;
+    const hasName = headers.some((h) => /選手名|選手|氏名/.test(h));
+    const hasLane = headers.some((h) => /艇|枠|コース|進入|号艇/.test(h));
     if (!hasLane || !hasName) return;
+
+    // 列インデックス推定
+    const laneIdx = headers.findIndex((h) => /艇|枠|コース|進入|号艇/.test(h));
+    const nameIdx = headers.findIndex((h) => /選手名|選手|氏名/.test(h));
 
     $tbl.find("tbody tr").each((_, tr) => {
       const $tr = $(tr);
-      const cells = $tr.find("th,td");
-      if (!cells.length) return;
+      const tds = $tr.find("th,td");
+      if (!tds.length) return;
 
-      // lane を最初に見つかった 1..6 で決定
+      // lane
       let lane = null;
-      cells.each((i, td) => {
-        const v = Number(norm($(td).text()).replace(/[^\d]/g, ""));
-        if (!lane && Number.isFinite(v) && v >= 1 && v <= 6) lane = v;
-      });
-      if (!Number.isFinite(lane)) return;
-
-      // 名前 & 登録番号（profile リンク dno）
-      let name = null,
-        number = null;
-      $tr.find("a[href]").each((_, a) => {
-        const href = $(a).attr("href") || "";
-        const txt = norm($(a).text());
-        const dno = pickNumberFromHref(href);
-        if (dno) number = dno;
-        if (txt && !name) name = txt;
-      });
-      if (!name) {
-        // フォールバック：行テキストからそれっぽい和名
-        const t = norm($tr.text());
-        const m = t.match(/[一-龥ぁ-んァ-ン][一-龥ぁ-んァ-ン・\s]{1,10}/);
-        if (m) name = norm(m[0]);
+      if (laneIdx >= 0 && tds.eq(laneIdx).length) {
+        const v = Number(norm(tds.eq(laneIdx).text()).replace(/[^\d]/g, ""));
+        if (Number.isFinite(v) && v >= 1 && v <= 6) lane = v;
       }
+      if (!(lane >= 1 && lane <= 6)) return;
 
-      entries.push({
-        lane,
-        number: number ?? null,
-        name: name ?? null,
-        st: null,
-        stFlag: null,
+      // name（ruby/改行/リンク考慮）
+      let name = null;
+      if (nameIdx >= 0 && tds.eq(nameIdx).length) {
+        const $n = tds.eq(nameIdx);
+        const anchorName = norm($n.find("a").text());
+        const plain = norm($n.text());
+        name = anchorName || plain || null;
+        if (name) {
+          // フリガナや余計な空白を軽く整理（例: "山田 太郎" 形式に）
+          name = name.replace(/\s+/g, " ").replace(/\s*\(.*?\)\s*/g, "").trim();
+        }
+      }
+      // number（リンクがあれば）
+      let number = null;
+      tds.find("a[href]").each((__, a) => {
+        const href = $(a).attr("href") || "";
+        const d = pickNumberFromHref(href);
+        if (d) number = d;
       });
+
+      entries.push({ lane, number: number ?? null, name: name || null, st: null, stFlag: null });
     });
   });
 
-  // lane 1..6 に揃える（重複があれば最初の行を採用）
+  // lane 1..6 優先整列＆重複除去
   const uniq = [];
   for (let l = 1; l <= 6; l++) {
     const hit = entries.find((e) => e.lane === l);
@@ -167,31 +132,77 @@ function extractEntriesFromMainTable($) {
   return uniq;
 }
 
-function extractStartDisplayST($) {
-  const stMap = new Map(); // lane -> {st, flag}
-
+// ---------- racelist: 欠けた名前/番号の補完 ----------
+function parseEntriesFromRaceList(html) {
+  const $ = load(html);
+  const out = [];
   $("table").each((_, tbl) => {
     const $tbl = $(tbl);
-    const heads = $tbl
-      .find("thead th, thead td")
-      .map((_, th) => norm($(th).text()))
-      .get();
-    const hasST = heads.some((h) => /Ｓ?T|スタート/.test(h));
-    const hasLane = heads.some((h) => /進入|コース|枠|号艇/.test(h));
-    if (!hasST || !hasLane) return;
+    const headers = $tbl.find("thead th, thead td").map((_, th) => norm($(th).text())).get();
+    const ok = headers.some((h) => /艇|枠|コース|号艇/.test(h)) && headers.some((h) => /選手|名/.test(h));
+    if (!ok) return;
+
+    const laneIdx = headers.findIndex((h) => /艇|枠|コース|進入|号艇/.test(h));
+    const nameIdx = headers.findIndex((h) => /選手名|選手|氏名|名/.test(h));
 
     $tbl.find("tbody tr").each((_, tr) => {
-      const texts = $(tr)
-        .find("th,td")
-        .map((_, td) => norm($(td).text()))
-        .get();
-      if (!texts.length) return;
+      const $tr = $(tr);
+      const tds = $tr.find("th,td");
+      if (!tds.length) return;
 
-      // 最初に見つかった 1..6 を lane とする
-      let lane = Number(texts[0]);
-      if (!(lane >= 1 && lane <= 6)) {
-        const mLane = texts.join(" ").match(/\b([1-6])\b/);
-        lane = mLane ? Number(mLane[1]) : NaN;
+      let lane = null;
+      if (laneIdx >= 0) {
+        const v = Number(norm(tds.eq(laneIdx).text()).replace(/[^\d]/g, ""));
+        if (Number.isFinite(v) && v >= 1 && v <= 6) lane = v;
+      }
+      if (!(lane >= 1 && lane <= 6)) return;
+
+      let name = null;
+      if (nameIdx >= 0) {
+        const $n = tds.eq(nameIdx);
+        name = norm($n.find("a").text()) || norm($n.text()) || null;
+        if (name) name = name.replace(/\s+/g, " ").replace(/\s*\(.*?\)\s*/g, "").trim();
+      }
+
+      let number = null;
+      $tr.find("a[href]").each((__, a) => {
+        const href = $(a).attr("href") || "";
+        const d = pickNumberFromHref(href);
+        if (d) number = d;
+      });
+
+      out.push({ lane, number: number ?? null, name: name ?? null, st: null, stFlag: null });
+    });
+  });
+
+  const uniq = [];
+  for (let l = 1; l <= 6; l++) {
+    const hit = out.find((e) => e.lane === l);
+    if (hit) uniq.push(hit);
+  }
+  return uniq;
+}
+
+// ---------- exhresult: ST 取得 ----------
+function parseSTFromExhResult(html) {
+  const $ = load(html);
+  const stMap = new Map(); // lane -> {st, flag}
+  $("table").each((_, tbl) => {
+    const $tbl = $(tbl);
+    const headers = $tbl.find("thead th, thead td").map((_, th) => norm($(th).text())) .get();
+    const hasLane = headers.some((h) => /進入|コース|枠|号艇/.test(h));
+    const hasST = headers.some((h) => /Ｓ?T|スタート/.test(h));
+    if (!hasLane || !hasST) return;
+
+    $tbl.find("tbody tr").each((_, tr) => {
+      const $tr = $(tr);
+      const texts = $tr.find("th,td").map((__, td) => norm($(td).text())).get();
+      if (!texts.length) return;
+      // lane (最初の 1..6)
+      let lane = null;
+      for (const t of texts) {
+        const m = t.match(/\b([1-6])\b/);
+        if (m) { lane = Number(m[1]); break; }
       }
       if (!(lane >= 1 && lane <= 6)) return;
 
@@ -200,72 +211,12 @@ function extractStartDisplayST($) {
       if (st != null) stMap.set(lane, { st, flag });
     });
   });
-
   return stMap;
 }
 
-function parseEntriesBeforeInfo(html) {
-  const $ = load(html);
-  const entries = extractEntriesFromMainTable($);
-  const stMap = extractStartDisplayST($);
-  entries.forEach((e) => {
-    const hit = stMap.get(e.lane);
-    if (hit) {
-      e.st = hit.st;
-      e.stFlag = hit.flag;
-    }
-  });
-  return entries.sort((a, b) => a.lane - b.lane);
-}
-
-// ----------------------------- パーサー（racelist フォールバック） -----------------------------
-function parseEntriesFromRaceList(html) {
-  const $ = load(html);
-  const out = [];
-  // シンプルに 1..6 の枠＋選手 a[href*="dno="] を探す
-  $("table").each((_, tbl) => {
-    const $tbl = $(tbl);
-    const heads = $tbl
-      .find("thead th, thead td")
-      .map((_, th) => norm($(th).text()))
-      .get();
-    const ok = heads.some((h) => /艇|枠|コース|号艇/.test(h)) && heads.some((h) => /選手|名/.test(h));
-    if (!ok) return;
-
-    $tbl.find("tbody tr").each((_, tr) => {
-      const $tr = $(tr);
-      let lane = null,
-        name = null,
-        number = null;
-      // lane
-      $tr.find("th,td").each((_, td) => {
-        const v = Number(norm($(td).text()).replace(/[^\d]/g, ""));
-        if (!lane && Number.isFinite(v) && v >= 1 && v <= 6) lane = v;
-      });
-      // name/number
-      $tr.find("a[href]").each((_, a) => {
-        const href = $(a).attr("href") || "";
-        const txt = norm($(a).text());
-        const dno = pickNumberFromHref(href);
-        if (dno) number = dno;
-        if (txt && !name) name = txt;
-      });
-      if (Number.isFinite(lane)) {
-        out.push({ lane, number: number ?? null, name: name ?? null, st: null, stFlag: null });
-      }
-    });
-  });
-  const uniq = [];
-  for (let l = 1; l <= 6; l++) {
-    const hit = out.find((e) => e.lane === l);
-    if (hit) uniq.push(hit);
-  }
-  return uniq.sort((a, b) => a.lane - b.lane);
-}
-
-// ----------------------------- 1レース処理 -----------------------------
+// ---------- 1レース ----------
 async function fetchOne({ date, pid, race, skipExisting = false }) {
-  const raceNum = Number(String(race).replace(/[^\d]/g, "")); // 1..12
+  const rno = Number(String(race).replace(/[^\d]/g, ""));
   const outDir = path.join(OUT_ROOT, date, pid);
   const outPath = path.join(outDir, `${race}.json`);
 
@@ -273,47 +224,30 @@ async function fetchOne({ date, pid, race, skipExisting = false }) {
     console.log(`⏭️ skip existing: ${path.relative(OUT_ROOT, outPath)}`);
     return;
   }
-
   await ensureDir(outDir);
 
-  const urlBefore = buildBeforeInfoUrl(date, pid, raceNum);
-  const urlList = buildRaceListUrl(date, pid, raceNum);
-
-  let html = null;
+  let entries = [];
   let mode = "beforeinfo";
+  const urlBefore = urls.beforeinfo(date, pid, rno);
+  const urlList = urls.racelist(date, pid, rno);
+  const urlExh = urls.exhresult(date, pid, rno);
+
+  // beforeinfo
   try {
-    html = await fetchHtml(urlBefore);
+    const html = await fetchHtml(urlBefore);
+    entries = parseEntriesFromBeforeInfo(html);
   } catch (e) {
-    console.warn(`warn beforeinfo ${pid} ${race}: ${e.message} → fallback racelist`);
+    console.warn(`warn beforeinfo: ${e.message}`);
     mode = "racelist";
-    try {
-      html = await fetchHtml(urlList);
-    } catch (e2) {
-      const payload = {
-        status: "unavailable",
-        date,
-        pid,
-        race,
-        mode,
-        source: mode === "beforeinfo" ? urlBefore : urlList,
-        error: String(e2),
-        generatedAt: new Date().toISOString(),
-      };
-      await fs.writeFile(outPath, JSON.stringify(payload, null, 2), "utf8");
-      console.log(`❌ unavailable wrote: ${path.relative(OUT_ROOT, outPath)}`);
-      return;
-    }
   }
 
-  let entries =
-    mode === "beforeinfo" ? parseEntriesBeforeInfo(html) : parseEntriesFromRaceList(html);
-
-  // beforeinfo で entries が空/不十分なら racelist でも再チャレンジ
-  if (mode === "beforeinfo" && (!entries.length || entries.some((e) => !e.name))) {
-    try {
-      const html2 = await fetchHtml(urlList);
-      const listEntries = parseEntriesFromRaceList(html2);
-      // 名前/番号の補完
+  // racelist 補完 or 置換
+  try {
+    const htmlList = await fetchHtml(urlList);
+    const listEntries = parseEntriesFromRaceList(htmlList);
+    if (!entries.length) {
+      entries = listEntries;
+    } else {
       const map = new Map(listEntries.map((e) => [e.lane, e]));
       entries = entries.map((e) => {
         const m = map.get(e.lane);
@@ -325,50 +259,58 @@ async function fetchOne({ date, pid, race, skipExisting = false }) {
           stFlag: e.stFlag,
         };
       });
-      // まだ不足なら listEntries に置き換え
-      if (!entries.length) entries = listEntries;
-    } catch {}
+    }
+  } catch (e) {
+    if (!entries.length) {
+      // どっちもダメなら空で保存
+      const payload = { date, pid, race, source: urlBefore, mode, generatedAt: new Date().toISOString(), entries: [] };
+      await fs.writeFile(outPath, JSON.stringify(payload, null, 2), "utf8");
+      console.log(`❌ unavailable wrote: ${path.relative(OUT_ROOT, outPath)}`);
+      return;
+    }
+  }
+
+  // exhresult で ST 取得
+  try {
+    const htmlExh = await fetchHtml(urlExh);
+    const stMap = parseSTFromExhResult(htmlExh);
+    if (stMap.size) {
+      entries = entries.map((e) => {
+        const s = stMap.get(e.lane);
+        return s ? { ...e, st: s.st, stFlag: s.flag } : e;
+        });
+    }
+  } catch {
+    // ST なしでも可
   }
 
   const payload = {
-    date,
-    pid,
-    race,
+    date, pid, race,
     source: mode === "beforeinfo" ? urlBefore : urlList,
     mode,
     generatedAt: new Date().toISOString(),
     entries,
   };
-
   await fs.writeFile(outPath, JSON.stringify(payload, null, 2), "utf8");
   console.log(`✅ wrote: ${path.relative(OUT_ROOT, outPath)} (mode=${mode})`);
 }
 
-// ----------------------------- メイン -----------------------------
+// ---------- メイン ----------
 function parseCliFlags(argv) {
-  return {
-    skipExisting: argv.includes("--skip-existing"),
-  };
+  return { skipExisting: argv.includes("--skip-existing") };
 }
 
 async function main() {
-  const argv = process.argv.slice(2);
-  const { skipExisting } = parseCliFlags(argv);
-
+  const { skipExisting } = parseCliFlags(process.argv.slice(2));
   const DATE_IN = (process.env.TARGET_DATE || "today").trim();
   const date = DATE_IN === "today" ? todayYYYYMMDD() : DATE_IN;
 
   const PIDS_IN = (process.env.TARGET_PIDS || "02").trim();
-  const pids = PIDS_IN.split(",")
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map(to2);
+  const pids = PIDS_IN.split(",").map((s) => s.trim()).filter(Boolean).map(to2);
 
   const RACES_IN = (process.env.TARGET_RACES || "").trim();
   const races = RACES_IN
-    ? RACES_IN.split(",")
-        .map((s) => toRaceKey(s))
-        .filter(Boolean)
+    ? RACES_IN.split(",").map((s) => toRaceKey(s)).filter(Boolean)
     : Array.from({ length: 12 }, (_, i) => `${i + 1}R`);
 
   console.log(`target: date=${date} pids=${pids.join(",")} races=${races.join(",")}`);
@@ -376,8 +318,7 @@ async function main() {
   for (const pid of pids) {
     for (const race of races) {
       await fetchOne({ date, pid, race, skipExisting });
-      // サイトに優しめに
-      await sleep(400);
+      await sleep(350); // 優しめ
     }
   }
 }
