@@ -1,14 +1,20 @@
 // scripts/crawl.js
+// Node v20 (fetch 同梱)
+// 出力：
+//   - public/programs-slim/v2/<date>/<pid>/<race>.json（軽量）+ index.json
+//   - public/programs/v2/<date>/<pid>/<race>.json（フル：元データ寄せ）
+// 環境変数：
+//   TARGET_DATE=today | YYYYMMDD / YYYY-MM-DD
+//   TARGET_PID=02 | 場名
+//   TARGET_RACE=1..12 | "1R" など
+
 import fs from "node:fs";
 import path from "node:path";
 
-// 出力先
+// ---------- 定数 ----------
 const BASE_OUT_SLIM = "public/programs-slim/v2";
 const BASE_OUT_FULL = "public/programs/v2";
-const DEBUG_OUT = "public/debug";
-
-// stats 参照先
-const STATS_BASE = "public/stats/v1/racers";
+const DEBUG_OUT     = "public/debug";
 
 // ---------- helpers ----------
 const ensureDir = (p) => fs.mkdirSync(p, { recursive: true });
@@ -16,35 +22,22 @@ const outDirSlim = (date, pid) => path.join(BASE_OUT_SLIM, date, pid);
 const outDirFull = (date, pid) => path.join(BASE_OUT_FULL, date, pid);
 const to2 = (s) => String(s).padStart(2, "0");
 
-const readJsonIfExists = (p) => {
-  try {
-    if (fs.existsSync(p)) {
-      return JSON.parse(fs.readFileSync(p, "utf8"));
-    }
-  } catch {}
-  return null;
-};
-
-const pickCourseItem = (arr, key, course) => {
-  if (!Array.isArray(arr)) return null;
-  return arr.find((x) => Number(x[key]) === Number(course)) || null;
-};
-
 // inputs
-const DATE   = (process.env.TARGET_DATE || "today").replace(/-/g, "");
-const PID_IN = process.env.TARGET_PID || "02"; // "02" or 場名
-const PID    = /^\d+$/.test(PID_IN) ? to2(PID_IN) : PID_IN;
-const RACE_Q = process.env.TARGET_RACE || "1";
-const RACE   = /R$/i.test(RACE_Q) ? RACE_Q.toUpperCase() : `${RACE_Q}R`;
-const RNO    = String(RACE_Q).replace(/[^\d]/g, ""); // 数字だけ（1..12）
+const DATE_IN = (process.env.TARGET_DATE || "today").trim();
+const DATE = DATE_IN.toLowerCase() === "today" ? "today" : DATE_IN.replace(/-/g, "");
+const PID_IN = (process.env.TARGET_PID || "02").trim();  // "02" or 場名
+const PID = /^\d+$/.test(PID_IN) ? to2(PID_IN) : PID_IN;
+const RACE_Q = (process.env.TARGET_RACE || "1").trim();
+const RACE = /R$/i.test(RACE_Q) ? RACE_Q.toUpperCase() : `${RACE_Q}R`;
+const RNO  = String(RACE_Q).replace(/[^\d]/g, ""); // 数字だけ（1..12）
 
-const SRC = DATE.toLowerCase() === "today"
+const SRC = DATE === "today"
   ? "https://boatraceopenapi.github.io/programs/v2/today.json"
   : `https://boatraceopenapi.github.io/programs/v2/${DATE}.json`;
 
 console.log("fetch:", SRC);
 
-// ------ main ------
+// ---------- main ----------
 try {
   const res = await fetch(SRC);
   const status = res.status;
@@ -58,20 +51,27 @@ try {
 
   if (status !== 200) throw new Error(`source fetch ${status}`);
 
-  // JSON化 & 配列抽出（複数スキーマ対応）
+  // JSON 化 & 配列抽出（複数スキーマ対応）
   let raw; try { raw = JSON.parse(text); } catch { raw = null; }
   let programs = null;
   if (Array.isArray(raw)) programs = raw;
-  else if (raw && Array.isArray(raw.programs)) programs = raw.programs; // いまの形式
-  else if (raw && Array.isArray(raw.venues)) programs = raw.venues;
-  else if (raw && Array.isArray(raw.items))  programs = raw.items;
+  else if (raw && Array.isArray(raw.programs)) programs = raw.programs; // v2標準
+  else if (raw && Array.isArray(raw.venues))   programs = raw.venues;
+  else if (raw && Array.isArray(raw.items))    programs = raw.items;
 
   const dirSlim = outDirSlim(DATE, PID);
   ensureDir(dirSlim);
 
   if (!programs) {
     fs.writeFileSync(path.join(dirSlim, "index.json"),
-      JSON.stringify({ stadium: PID, stadiumName: null, races: [], reason: "unexpected source format", sampleKeys: raw ? Object.keys(raw) : null }, null, 2));
+      JSON.stringify({
+        stadium: PID,
+        stadiumName: null,
+        races: [],
+        reason: "unexpected source format",
+        sampleKeys: raw ? Object.keys(raw) : null
+      }, null, 2)
+    );
     console.log("write:", path.join(dirSlim, "index.json"));
     process.exit(0);
   }
@@ -111,19 +111,19 @@ try {
   let payload;
   if (raceData) {
     if (raceData.boats) {
-      // A 直持ち
+      // A 直持ち（v2標準）
       payload = {
         date: DATE,
         stadium: to2(stadiumCode),
         stadiumName: stadiumName,
-        race: RACE,
+        race: `${Number(raceData.race_number)}R`,
         deadline: raceData.race_closed_at ?? null,
         entries: (raceData.boats || []).map(b => ({
-          lane: b.racer_boat_number ?? b.lane ?? null,
-          number: b.racer_number ?? b.number ?? null,
-          name: b.racer_name ?? b.name ?? null,
-          class: b.racer_class_number ?? b.class ?? null,
-          branch: b.racer_branch_number ?? b.branch ?? null
+          lane: b.racer_boat_number ?? null,
+          number: b.racer_number ?? null,
+          name: b.racer_name ?? null,
+          class: b.racer_class_number ?? null,
+          branch: b.racer_branch_number ?? null
         }))
       };
     } else {
@@ -156,7 +156,8 @@ try {
     };
   }
 
-  // ---------- ここから “フル” を作りつつ stats をマージ ----------
+  // ---------- “フル” と “スリム” を同時保存 ----------
+  // フル用（source を最大限活かして保存）
   const fullPayload = (() => {
     const base = {
       schemaVersion: "2.0",
@@ -168,137 +169,97 @@ try {
       deadline: payload.deadline ?? null
     };
     if (raceData) {
+      // v2標準に多いフィールドを拾う（無ければ null）
       base.gradeNumber = raceData.race_grade_number ?? null;
       base.title       = raceData.race_title ?? null;
       base.subtitle    = raceData.race_subtitle ?? null;
       base.distance    = raceData.race_distance ?? null;
     }
-
-    // entries（フルは取れるだけ盛る）
-    const rawEntries = (raceData?.boats || payload.entries || []);
-    base.entries = rawEntries.map(b => {
-      const lane  = b.racer_boat_number ?? b.lane ?? null;
-      const regno = b.racer_number ?? b.number ?? null;
-
-      const entry = {
-        lane,
-        number: regno,
-        name: b.racer_name ?? b.name ?? null,
-        classNumber: b.racer_class_number ?? b.class ?? null,
-        branchNumber: b.racer_branch_number ?? b.branch ?? null,
-        birthplaceNumber: b.racer_birthplace_number ?? null,
-        age: b.racer_age ?? null,
-        weight: b.racer_weight ?? null,
-        flyingCount: b.racer_flying_count ?? null,
-        lateCount: b.racer_late_count ?? null,
-        avgST: b.racer_average_start_timing ?? null,
-        natTop1: b.racer_national_top_1_percent ?? null,
-        natTop2: b.racer_national_top_2_percent ?? null,
-        natTop3: b.racer_national_top_3_percent ?? null,
-        locTop1: b.racer_local_top_1_percent ?? null,
-        locTop2: b.racer_local_top_2_percent ?? null,
-        locTop3: b.racer_local_top_3_percent ?? null,
-        motorNumber: b.racer_assigned_motor_number ?? null,
-        motorTop2: b.racer_assigned_motor_top_2_percent ?? null,
-        motorTop3: b.racer_assigned_motor_top_3_percent ?? null,
-        boatNumber: b.racer_assigned_boat_number ?? null,
-        boatTop2: b.racer_assigned_boat_top_2_percent ?? null,
-        boatTop3: b.racer_assigned_boat_top_3_percent ?? null,
-      };
-
-      // ---- ここで stats をマージ（存在すれば）----
-      if (regno) {
-        const statsPath = path.join(STATS_BASE, `${regno}.json`);
-        const stats = readJsonIfExists(statsPath);
-        if (stats) {
-          // コース別（直近6か月）
-          const cs = pickCourseItem(stats.courseStats, "course", lane);
-          // 決まり手（自艇行の内訳）
-          const km = pickCourseItem(stats.courseKimarite, "course", lane);
-          // 展示タイム順位別
-          const rk = Array.isArray(stats.exTimeRank) ? stats.exTimeRank : null;
-
-          entry.stats = {};
-
-          if (cs) {
-            entry.stats.course = {
-              course: lane,
-              topRates: {
-                top1: cs.top1Rate ?? null,
-                top2: cs.top2Rate ?? null,
-                top3: cs.top3Rate ?? null,
-              },
-              // ★ 平均STやST順が stats に入ったらここで追加
-              // avgST: cs.avgST ?? null,
-              // avgSTRank: cs.avgSTRank ?? null,
-              starts: cs.starts ?? null
-            };
-          }
-
-          if (km && km.detail) {
-            // 自艇の勝ち決まり手（index2 由来なら回数ベース）
-            entry.stats.course = entry.stats.course || { course: lane };
-            entry.stats.course.kimariteSelf = {
-              nige: km.detail["逃げ"]?.count ?? null,
-              sashi: km.detail["差し"]?.count ?? null,
-              makuri: km.detail["まくり"]?.count ?? null,
-              makurizashi: km.detail["まくり差し"]?.count ?? null,
-              nuki: km.detail["抜き"]?.count ?? null,
-              megumare: km.detail["恵まれ"]?.count ?? null
-            };
-            // ★ “負け決まり手” を stats に出せたらここで別フィールドにマージ
-            // entry.stats.course.kimariteLose = {...}
-          }
-
-          if (rk) {
-            entry.stats.demo = {
-              rankRates: rk.map(r => ({
-                rank: r.rank,
-                winRate: r.winRate ?? null,
-                top2Rate: r.top2Rate ?? null,
-                top3Rate: r.top3Rate ?? null
-              }))
-            };
-          }
-        }
-      }
-
-      return entry;
-    });
-
+    base.entries = (raceData?.boats || payload.entries || []).map(b => ({
+      lane: b.racer_boat_number ?? b.lane ?? null,
+      number: b.racer_number ?? b.number ?? null,
+      name: b.racer_name ?? b.name ?? null,
+      classNumber: b.racer_class_number ?? b.class ?? null,
+      branchNumber: b.racer_branch_number ?? b.branch ?? null,
+      birthplaceNumber: b.racer_birthplace_number ?? null,
+      age: b.racer_age ?? null,
+      weight: b.racer_weight ?? null,
+      flyingCount: b.racer_flying_count ?? null,
+      lateCount: b.racer_late_count ?? null,
+      avgST: b.racer_average_start_timing ?? null,
+      natTop1: b.racer_national_top_1_percent ?? null,
+      natTop2: b.racer_national_top_2_percent ?? null,
+      natTop3: b.racer_national_top_3_percent ?? null,
+      locTop1: b.racer_local_top_1_percent ?? null,
+      locTop2: b.racer_local_top_2_percent ?? null,
+      locTop3: b.racer_local_top_3_percent ?? null,
+      motorNumber: b.racer_assigned_motor_number ?? null,
+      motorTop2: b.racer_assigned_motor_top_2_percent ?? null,
+      motorTop3: b.racer_assigned_motor_top_3_percent ?? null,
+      boatNumber: b.racer_assigned_boat_number ?? null,
+      boatTop2: b.racer_assigned_boat_top_2_percent ?? null,
+      boatTop3: b.racer_assigned_boat_top_3_percent ?? null
+    }));
     return base;
   })();
 
   // 保存先ディレクトリ
   const fullDir = outDirFull(DATE, payload.stadium);
   ensureDir(fullDir);
-  // フル保存
-  fs.writeFileSync(path.join(fullDir, `${RACE}.json`), JSON.stringify(fullPayload, null, 2));
 
-  // スリム保存（既存）
-  const racePathSlim = path.join(dirSlim, `${RACE}.json`);
-  fs.writeFileSync(racePathSlim, JSON.stringify({
-    race: payload.race,
-    deadline: payload.deadline ?? null,
-    entries: (payload.entries || []).map(e => ({ lane: e.lane, name: e.name, class: e.class ?? null }))
-  }, null, 2));
+  // フル保存
+  fs.writeFileSync(path.join(fullDir, `${payload.race}.json`), JSON.stringify(fullPayload, null, 2));
+
+  // スリム保存（API互換：最低限）
+  const slimDir = outDirSlim(DATE, payload.stadium);
+  ensureDir(slimDir);
+
+  const racePathSlim = path.join(slimDir, `${payload.race}.json`);
+  fs.writeFileSync(
+    racePathSlim,
+    JSON.stringify(
+      {
+        race: payload.race,
+        deadline: payload.deadline ?? null,
+        entries: (payload.entries || []).map(e => ({
+          lane: e.lane,
+          name: e.name,
+          class: e.class ?? null
+        }))
+      },
+      null,
+      2
+    )
+  );
 
   // 場の index.json（スリム）
-  const idxPath = path.join(dirSlim, "index.json");
+  const idxPath = path.join(slimDir, "index.json");
   let idx = { stadium: payload.stadium, stadiumName: payload.stadiumName ?? null, races: [] };
-  if (fs.existsSync(idxPath)) idx = JSON.parse(fs.readFileSync(idxPath, "utf8"));
+  if (fs.existsSync(idxPath)) {
+    try {
+      idx = JSON.parse(fs.readFileSync(idxPath, "utf8"));
+    } catch {
+      idx = { stadium: payload.stadium, stadiumName: payload.stadiumName ?? null, races: [] };
+    }
+  }
+  const slimEntry = {
+    race: payload.race,
+    deadline: payload.deadline ?? null,
+    entries: (payload.entries || []).map(x => ({ lane: x.lane, name: x.name, class: x.class ?? null }))
+  };
   const i = idx.races.findIndex(rr => rr.race === payload.race);
-  const slimEntry = { race: payload.race, deadline: payload.deadline ?? null,
-                      entries: (payload.entries || []).map(x => ({ lane: x.lane, name: x.name, class: x.class ?? null })) };
   if (i >= 0) idx.races[i] = slimEntry; else idx.races.push(slimEntry);
   fs.writeFileSync(idxPath, JSON.stringify(idx, null, 2));
 
   console.log("write slim:", racePathSlim);
-  console.log("write full:", path.join(fullDir, `${RACE}.json`));
+  console.log("write full:", path.join(fullDir, `${payload.race}.json`));
 } catch (err) {
+  // エラー時も index.json を最低限出す
   const dirSlim = outDirSlim(DATE, PID);
   ensureDir(dirSlim);
-  fs.writeFileSync(path.join(dirSlim, "index.json"),
-    JSON.stringify({ stadium: PID, stadiumName: null, races: [], error: String(err) }, null, 2));
+  fs.writeFileSync(
+    path.join(dirSlim, "index.json"),
+    JSON.stringify({ stadium: PID, stadiumName: null, races: [], error: String(err) }, null, 2)
+  );
   console.error("error:", String(err));
 }
