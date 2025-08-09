@@ -18,7 +18,7 @@ on:
         default: "3000"
   # 毎日 07:00 JST に自動実行（＝UTC 22:00）
   schedule:
-    - cron: "0 20 * * *"
+    - cron: "0 22 * * *"
 
 permissions:
   contents: write
@@ -56,17 +56,20 @@ jobs:
 
       - name: Fetch racer stats
         env:
-          # schedule では inputs が空なので、delay は 3000 にフォールバック
+          # schedule では inputs が空なので、delay は '3000' にフォールバック
           RACERS: ${{ inputs.racers }}
           STATS_BATCH: ${{ inputs.batch }}
           STATS_DELAY_MS: ${{ inputs.delayMs || '3000' }}
         run: node scripts/fetch-stats.js
 
+      - name: Build picks (score races)
+        run: node scripts/score-race.js
+
       - name: Commit & Push changes
         run: |
           git add -A
           if ! git diff --cached --quiet; then
-            git commit -m "Update racer stats [skip ci]"
+            git commit -m "Update programs, stats and picks [skip ci]"
             git push
           else
             echo "No changes to commit."
