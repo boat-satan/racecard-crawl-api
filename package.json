@@ -1,11 +1,12 @@
 {
   "name": "racecard-crawl-api",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "crawl": "node scripts/crawl.js",
     "stats": "node scripts/fetch-stats.js",
-    "exhibition": "node scripts/fetch-exhibition.js"   // ← 追加
+    "exhibition": "node scripts/fetch-exhibition.js"
   },
   "dependencies": {
     "cheerio": "^1.0.0"
