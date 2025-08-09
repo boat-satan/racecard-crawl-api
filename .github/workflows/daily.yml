@@ -2,7 +2,7 @@ name: Daily Build (all venues & all races)
 
 on:
   schedule:
-    - cron: "0 21 * * *"   # UTC 21:00 = JST 06:00
+    - cron: "0 21 * * *"   # ← UTC 21:00 = JST 06:00 に毎日実行
   workflow_dispatch:
     inputs:
       date:
@@ -39,13 +39,13 @@ jobs:
 
       - name: Build ALL (full & slim)
         env:
-          TARGET_DATE: ${{ github.event.inputs.date }}
+          TARGET_DATE: ${{ github.event.inputs.date || 'today' }}
         run: node scripts/build-all.js
 
       - name: List outputs
         run: |
           echo "=== GENERATED FILES ==="
-          ls -R public | sed 's/^/  /'
+          ls -R public || true
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
