@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "crawl": "node scripts/crawl.js",
-    "stats": "node scripts/fetch-stats.js"
+    "stats": "node scripts/fetch-stats.js",
+    "enrich": "node scripts/enrich.js"
   },
   "dependencies": {
     "cheerio": "^1.0.0"
