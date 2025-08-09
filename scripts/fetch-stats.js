@@ -14,9 +14,6 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// どの選手を取得するか：
-// 1) 環境変数 RACERS に「4349,3156」のようにカンマ区切りで指定
-// 2) 未指定なら、public/programs/v2/today/**.json を全走査して出走選手を集める
 const PUBLIC_DIR = path.resolve(__dirname, "..", "public");
 const TODAY_ROOTS = [
   path.join(PUBLIC_DIR, "programs", "v2", "today"),
@@ -61,18 +58,13 @@ function toNumber(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-// 見出し（h2/h3/strong 等）を手掛かりに「次の table」を拾う。
-// サイト構造差異に強めの探索。
 function findTableByTitle($, titleLike) {
-  // 含む要素を広めに探索
   const $cands = $(
     `h1,h2,h3,h4,strong,b,legend,th,td,div,span,p:contains("${titleLike}")`
   );
 
   for (const el of $cands.toArray()) {
     const $el = $(el);
-
-    // 1) 同コンテナ内の table
     let $tbl =
       $el.nextAll("table").first() ||
       $el.parent().nextAll("table").first() ||
@@ -83,13 +75,11 @@ function findTableByTitle($, titleLike) {
   return null;
 }
 
-// thead -> th をヘッダに、tbody -> tr/td を配列で取り出すジェネリックパーサ
 function parseTable($tbl) {
   const headers = [];
   $tbl.find("thead th, thead td").each((_, th) => {
     headers.push(normText($(th).text()));
   });
-  // thead がない場合、最初の tr をヘッダ扱い
   if (headers.length === 0) {
     const firstRow = $tbl.find("tr").first();
     firstRow.find("th,td").each((_, th) => headers.push(normText($(th).text())));
@@ -107,7 +97,6 @@ function parseTable($tbl) {
   return { headers, rows };
 }
 
-// 指定した列名（部分一致可）を列インデックスにマップ
 function headerIndexMap(headers, keys) {
   const map = {};
   for (const k of keys) {
@@ -117,11 +106,7 @@ function headerIndexMap(headers, keys) {
   return map;
 }
 
-// -------------------------------
-// 各セクションのパース
-// -------------------------------
 function parseCourseStats($) {
-  // 「コース別成績」テーブル
   const $tbl =
     findTableByTitle($, "コース別成績") || findTableByTitle($, "コース成績");
   if (!$tbl) return null;
@@ -138,7 +123,6 @@ function parseCourseStats($) {
 
   const items = [];
   for (const r of rows) {
-    // 1〜6コースの行だけ拾う
     const courseTxt =
       idx["コース"] >= 0 ? r[idx["コース"]] : r[0] ?? "";
     const m = courseTxt.match(/([1-6])/);
@@ -155,13 +139,11 @@ function parseCourseStats($) {
     });
   }
 
-  // コース順に整列
   items.sort((a, b) => a.course - b.course);
   return items.length ? items : null;
 }
 
 function parseCourseKimarite($) {
-  // 「コース別決まり手」テーブル
   const $tbl =
     findTableByTitle($, "コース別決まり手") ||
     findTableByTitle($, "決まり手（コース別）") ||
@@ -170,9 +152,7 @@ function parseCourseKimarite($) {
   if (!$tbl) return null;
 
   const { headers, rows } = parseTable($tbl);
-  // 先頭列が「コース」、残りが決まり手（逃げ/差し/まくり/まくり差し/抜き/恵まれ… など）を想定
-  // 見出し名はサイト側で多少違っても部分一致で拾う
-  const kimariteKeys = headers.slice(1); // 1列目以外
+  const kimariteKeys = headers.slice(1);
   const items = [];
   for (const r of rows) {
     const courseTxt = r[0] ?? "";
@@ -182,7 +162,6 @@ function parseCourseKimarite($) {
     const detail = {};
     kimariteKeys.forEach((k, i) => {
       const v = r[i + 1];
-      // 例: "12 (30.0%)" / "30.0%" / "12" 等、数字や%をラフに受ける
       const percent = v?.match(/([-+]?\d+(\.\d+)?)\s*%/);
       const count = v?.match(/(\d+)\s*(回|件|)/);
 
@@ -205,7 +184,6 @@ function parseCourseKimarite($) {
 }
 
 function parseExTimeRank($) {
-  // 「展示タイム順位別成績」
   const $tbl =
     findTableByTitle($, "展示タイム順位別成績") ||
     findTableByTitle($, "展示タイム順位");
@@ -235,9 +213,6 @@ function parseExTimeRank($) {
   return items.length ? items : null;
 }
 
-// -------------------------------
-// 取得メイン
-// -------------------------------
 async function fetchOne(regno) {
   const url = `https://boatrace-db.net/racer/rcourse/regno/${regno}/`;
   const html = await fetchHtml(url);
@@ -251,13 +226,12 @@ async function fetchOne(regno) {
     regno: Number(regno),
     source: url,
     fetchedAt: new Date().toISOString(),
-    courseStats, // [{ course, starts, winRate, top1Rate, top2Rate, top3Rate, raw }]
-    courseKimarite, // [{ course, detail: { '逃げ':{count,rate}, … }, raw }]
-    exTimeRank, // [{ rank, winRate, top2Rate, top3Rate, raw }]
+    courseStats,
+    courseKimarite,
+    exTimeRank,
   };
 }
 
-// today ディレクトリ配下から出走選手を列挙
 async function collectRacersFromToday() {
   const set = new Set();
   for (const root of TODAY_ROOTS) {
@@ -320,15 +294,14 @@ async function main() {
       await fs.writeFile(outPath, JSON.stringify(data, null, 2), "utf8");
       console.log(`✅ wrote ${path.relative(PUBLIC_DIR, outPath)}`);
       ok++;
-      // polite
-      await sleep(600);
+      // polite: 3秒待つ
+      await sleep(3000);
     } catch (e) {
       console.warn(`❌ ${regno}: ${e.message}`);
       ng++;
     }
   }
 
-  // メタ
   await ensureDir(path.join(PUBLIC_DIR, "debug"));
   await fs.writeFile(
     path.join(PUBLIC_DIR, "debug", "stats-meta.json"),
