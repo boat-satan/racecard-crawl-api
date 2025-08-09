@@ -1,0 +1,167 @@
+{
+  "race": {
+    "date": "2025-08-09",
+    "stadium": 2,
+    "number": 10,
+    "title": "BOATBoyカップ"
+  },
+  "picks": [
+    {
+      "boat": 1,
+      "regno": 5044,
+      "name": "渡邉 健",
+      "self": {
+        "courseTop1Rate": 40
+      },
+      "opponents": {
+        "avgAggressive": 95,
+        "samples": [
+          100,
+          75,
+          100,
+          100,
+          100
+        ]
+      },
+      "score": {
+        "net": -55
+      }
+    },
+    {
+      "boat": 4,
+      "regno": 3717,
+      "name": "立間 充宏",
+      "self": {
+        "courseTop1Rate": 17.6
+      },
+      "opponents": {
+        "avgAggressive": 75,
+        "samples": [
+          0,
+          100,
+          75,
+          100,
+          100
+        ]
+      },
+      "score": {
+        "net": -57.4
+      }
+    },
+    {
+      "boat": 3,
+      "regno": 4366,
+      "name": "前沢 丈史",
+      "self": {
+        "courseTop1Rate": 16
+      },
+      "opponents": {
+        "avgAggressive": 80,
+        "samples": [
+          0,
+          100,
+          100,
+          100,
+          100
+        ]
+      },
+      "score": {
+        "net": -64
+      }
+    },
+    {
+      "boat": 6,
+      "regno": 4789,
+      "name": "古賀 智之",
+      "self": {
+        "courseTop1Rate": 8.3
+      },
+      "opponents": {
+        "avgAggressive": 75,
+        "samples": [
+          0,
+          100,
+          75,
+          100,
+          100
+        ]
+      },
+      "score": {
+        "net": -66.7
+      }
+    },
+    {
+      "boat": 5,
+      "regno": 3591,
+      "name": "後藤 孝義",
+      "self": {
+        "courseTop1Rate": 7.6
+      },
+      "opponents": {
+        "avgAggressive": 75,
+        "samples": [
+          0,
+          100,
+          75,
+          100,
+          100
+        ]
+      },
+      "score": {
+        "net": -67.4
+      }
+    },
+    {
+      "boat": 2,
+      "regno": 3898,
+      "name": "平田 忠則",
+      "self": {
+        "courseTop1Rate": 4
+      },
+      "opponents": {
+        "avgAggressive": 75,
+        "samples": [
+          0,
+          75,
+          100,
+          100,
+          100
+        ]
+      },
+      "score": {
+        "net": -71
+      }
+    }
+  ],
+  "pairs": [
+    {
+      "a": 1,
+      "b": 3,
+      "score": 87.5
+    },
+    {
+      "a": 1,
+      "b": 2,
+      "score": 85
+    },
+    {
+      "a": 1,
+      "b": 4,
+      "score": 85
+    },
+    {
+      "a": 1,
+      "b": 5,
+      "score": 85
+    },
+    {
+      "a": 1,
+      "b": 6,
+      "score": 85
+    }
+  ],
+  "meta": {
+    "generatedAt": "2025-08-09T10:37:59.537Z",
+    "hint": "score.net = 自艇1着率 − 相手平均攻撃率（％）。不足時はnull。"
+  }
+}

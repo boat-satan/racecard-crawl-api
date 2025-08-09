@@ -1,0 +1,147 @@
+{
+  "race": {
+    "date": "2025-08-09",
+    "stadium": 2,
+    "number": 7,
+    "title": "BOATBoyカップ"
+  },
+  "picks": [
+    {
+      "boat": 3,
+      "regno": 5303,
+      "name": "土井 歩夢",
+      "self": {
+        "courseTop1Rate": 35.7
+      },
+      "opponents": {
+        "avgAggressive": 100,
+        "samples": [
+          100
+        ]
+      },
+      "score": {
+        "net": -64.3
+      }
+    },
+    {
+      "boat": 4,
+      "regno": 4129,
+      "name": "宇野 博之",
+      "self": {
+        "courseTop1Rate": 27.2
+      },
+      "opponents": {
+        "avgAggressive": 100,
+        "samples": [
+          100
+        ]
+      },
+      "score": {
+        "net": -72.8
+      }
+    },
+    {
+      "boat": 1,
+      "regno": 4019,
+      "name": "笠原 亮",
+      "self": {
+        "courseTop1Rate": null
+      },
+      "opponents": {
+        "avgAggressive": 100,
+        "samples": [
+          100,
+          100
+        ]
+      },
+      "score": {
+        "net": -100
+      }
+    },
+    {
+      "boat": 2,
+      "regno": 5206,
+      "name": "梅原 祥平",
+      "self": {
+        "courseTop1Rate": null
+      },
+      "opponents": {
+        "avgAggressive": 100,
+        "samples": [
+          100,
+          100
+        ]
+      },
+      "score": {
+        "net": -100
+      }
+    },
+    {
+      "boat": 5,
+      "regno": 4979,
+      "name": "中野 夢斗",
+      "self": {
+        "courseTop1Rate": null
+      },
+      "opponents": {
+        "avgAggressive": 100,
+        "samples": [
+          100,
+          100
+        ]
+      },
+      "score": {
+        "net": -100
+      }
+    },
+    {
+      "boat": 6,
+      "regno": 5313,
+      "name": "鈴木 唯央",
+      "self": {
+        "courseTop1Rate": null
+      },
+      "opponents": {
+        "avgAggressive": 100,
+        "samples": [
+          100,
+          100
+        ]
+      },
+      "score": {
+        "net": -100
+      }
+    }
+  ],
+  "pairs": [
+    {
+      "a": 1,
+      "b": 2,
+      "score": 100
+    },
+    {
+      "a": 1,
+      "b": 3,
+      "score": 100
+    },
+    {
+      "a": 1,
+      "b": 4,
+      "score": 100
+    },
+    {
+      "a": 1,
+      "b": 5,
+      "score": 100
+    },
+    {
+      "a": 1,
+      "b": 6,
+      "score": 100
+    }
+  ],
+  "meta": {
+    "generatedAt": "2025-08-09T10:37:59.597Z",
+    "hint": "score.net = 自艇1着率 − 相手平均攻撃率（％）。不足時はnull。"
+  }
+}

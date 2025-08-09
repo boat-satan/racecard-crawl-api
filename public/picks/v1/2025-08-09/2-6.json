@@ -1,0 +1,147 @@
+{
+  "race": {
+    "date": "2025-08-09",
+    "stadium": 2,
+    "number": 6,
+    "title": "BOATBoyカップ"
+  },
+  "picks": [
+    {
+      "boat": 5,
+      "regno": 4236,
+      "name": "松村 敏",
+      "self": {
+        "courseTop1Rate": 3.3
+      },
+      "opponents": {
+        "avgAggressive": 50,
+        "samples": [
+          50
+        ]
+      },
+      "score": {
+        "net": -46.7
+      }
+    },
+    {
+      "boat": 1,
+      "regno": 4438,
+      "name": "森作 雄大",
+      "self": {
+        "courseTop1Rate": null
+      },
+      "opponents": {
+        "avgAggressive": 75,
+        "samples": [
+          50,
+          100
+        ]
+      },
+      "score": {
+        "net": -75
+      }
+    },
+    {
+      "boat": 2,
+      "regno": 4342,
+      "name": "谷野 錬志",
+      "self": {
+        "courseTop1Rate": null
+      },
+      "opponents": {
+        "avgAggressive": 75,
+        "samples": [
+          50,
+          100
+        ]
+      },
+      "score": {
+        "net": -75
+      }
+    },
+    {
+      "boat": 4,
+      "regno": 3462,
+      "name": "竹上 真司",
+      "self": {
+        "courseTop1Rate": null
+      },
+      "opponents": {
+        "avgAggressive": 75,
+        "samples": [
+          50,
+          100
+        ]
+      },
+      "score": {
+        "net": -75
+      }
+    },
+    {
+      "boat": 6,
+      "regno": 3583,
+      "name": "齋藤 智裕",
+      "self": {
+        "courseTop1Rate": null
+      },
+      "opponents": {
+        "avgAggressive": 75,
+        "samples": [
+          50,
+          100
+        ]
+      },
+      "score": {
+        "net": -75
+      }
+    },
+    {
+      "boat": 3,
+      "regno": 5044,
+      "name": "渡邉 健",
+      "self": {
+        "courseTop1Rate": 13.3
+      },
+      "opponents": {
+        "avgAggressive": 100,
+        "samples": [
+          100
+        ]
+      },
+      "score": {
+        "net": -86.7
+      }
+    }
+  ],
+  "pairs": [
+    {
+      "a": 1,
+      "b": 3,
+      "score": 87.5
+    },
+    {
+      "a": 2,
+      "b": 3,
+      "score": 87.5
+    },
+    {
+      "a": 3,
+      "b": 4,
+      "score": 87.5
+    },
+    {
+      "a": 3,
+      "b": 6,
+      "score": 87.5
+    },
+    {
+      "a": 1,
+      "b": 2,
+      "score": 75
+    }
+  ],
+  "meta": {
+    "generatedAt": "2025-08-09T10:37:59.590Z",
+    "hint": "score.net = 自艇1着率 − 相手平均攻撃率（％）。不足時はnull。"
+  }
+}
