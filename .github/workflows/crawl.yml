@@ -1,0 +1,54 @@
+name: Crawl & Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_dates:
+        description: "YYYYMMDD[,YYYYMMDD...]"
+        required: false
+        default: "20250809"
+      target_stadiums:
+        description: "pid list e.g. 02 or 03,21"
+        required: false
+        default: "02"
+  schedule:
+    - cron: "0 21 * * *"   # UTC21:00 = JST06:00
+
+env:
+  TZ: Asia/Tokyo
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci || npm i
+      - name: Crawl
+        env:
+          TARGET_DATES: ${{ github.event.inputs.target_dates }}
+          TARGET_STADIUMS: ${{ github.event.inputs.target_stadiums }}
+        run: npm run crawl
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
