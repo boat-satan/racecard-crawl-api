@@ -26,7 +26,8 @@ const OUTPUT_DIR = path.join(PUBLIC_DIR, "stats", "v1", "racers");
 
 // polite wait
 const WAIT_MS_BETWEEN_RACERS = Number(process.env.STATS_DELAY_MS || 3000);
-const WAIT_MS_BETWEEN_COURSE_PAGES = 600; // 各コース詳細の間
+// 各コース詳細ページの間隔（GitHub Actions では広めに）
+const WAIT_MS_BETWEEN_COURSE_PAGES = Number(process.env.COURSE_WAIT_MS || 1200);
 
 // env
 const ENV_RACERS       = process.env.RACERS?.trim() || "";
@@ -38,19 +39,67 @@ const ENV_BATCH        = Number(process.env.STATS_BATCH ?? "");
 // -------------------------------
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function fetchHtml(url, { retries = 3, delayMs = 800 } = {}) {
-  for (let i = 0; i <= retries; i++) {
-    const res = await fetch(url, {
-      headers: {
-        "user-agent":
-          "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118 Safari/537.36",
-        accept: "text/html,application/xhtml+xml",
-      },
-    });
-    if (res.ok) return await res.text();
-    if (i < retries) await sleep(delayMs);
+/**
+ * fetchHtml: UA/Referer/言語ヘッダ付き、リトライ強化版
+ * - 403/429/503 は待機を伸ばして再試行
+ * - 単純なネットワークエラーも再試行
+ */
+async function fetchHtml(url, {
+  retries = 6,
+  baseDelayMs = 2500,   // 1回目待機
+  timeoutMs = 20000,    // レスポンス待ちタイムアウト
+} = {}) {
+  const controller = () => new AbortController();
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const ac = controller();
+    const t = setTimeout(() => ac.abort(), timeoutMs);
+
+    try {
+      const res = await fetch(url, {
+        signal: ac.signal,
+        headers: {
+          // 本物ブラウザっぽく
+          "user-agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+          "accept": "text/html,application/xhtml+xml",
+          "accept-language": "ja,en;q=0.9",
+          "referer": "https://boatrace-db.net/",
+          "cache-control": "no-cache",
+        },
+      });
+
+      if (res.ok) {
+        clearTimeout(t);
+        return await res.text();
+      }
+
+      // 一部ステータスは待ってから再試行
+      const retriable = [403, 429, 500, 502, 503, 504].includes(res.status);
+      if (!retriable || attempt === retries) {
+        const body = await res.text().catch(() => "");
+        clearTimeout(t);
+        throw new Error(`HTTP ${res.status} ${res.statusText} @ ${url} ${body?.slice(0, 120)}`);
+      }
+
+      // 403/429/503 は待機を長めに（指数バックオフ + ジッター）
+      const factor = res.status === 403 || res.status === 429 || res.status === 503 ? 2.0 : 1.3;
+      const delay = Math.round((baseDelayMs * Math.pow(factor, attempt)) * (0.8 + Math.random() * 0.4));
+      clearTimeout(t);
+      await sleep(delay);
+      continue;
+
+    } catch (err) {
+      clearTimeout(t);
+      if (attempt === retries) {
+        throw new Error(`GET failed after ${retries + 1} tries: ${url} :: ${err.message}`);
+      }
+      // ネットワーク/タイムアウトも指数バックオフ
+      const delay = Math.round((baseDelayMs * Math.pow(1.6, attempt)) * (0.8 + Math.random() * 0.4));
+      await sleep(delay);
+    }
   }
-  throw new Error(`GET ${url} failed after ${retries + 1} tries`);
+  throw new Error(`unreachable fetch loop for ${url}`);
 }
 
 function normText(t) {
@@ -164,7 +213,6 @@ function parseKimariteFromRcourse($) {
 // rcourse/course/{n}: 平均ST & 負け決まり手
 // -------------------------------
 function parseAvgSTFromCoursePage($) {
-  // 出走結果テーブル（ST列あり）
   const $tbl = mustTableByHeader($, ["月日", "場", "レース", "ST", "結果"]);
   if (!$tbl) return null;
   const { headers, rows } = parseTable($, $tbl);
@@ -173,75 +221,36 @@ function parseAvgSTFromCoursePage($) {
 
   let sum = 0, cnt = 0;
   for (const r of rows) {
-    const st = r[iST]; // ".15" / "F.01" / "L.10" など
+    const st = r[iST]; // ".15" / "F.01" / "L.10"
     if (!st) continue;
-    if (/^[FL]/i.test(st)) continue;          // F/Lは除外
-    const m = st.match(/-?\.?\d+(?:\.\d+)?/); // ".15" → .15
+    if (/^[FL]/i.test(st)) continue;
+    const m = st.match(/-?\.?\d+(?:\.\d+)?/);
     if (!m) continue;
     const n = Number(m[0]);
     if (Number.isFinite(n)) { sum += Math.abs(n); cnt++; }
   }
   if (!cnt) return null;
-  return Math.round((sum / cnt) * 100) / 100; // 小数2桁
+  return Math.round((sum / cnt) * 100) / 100;
 }
 
-// ★差し替え：見出し直後のテーブルを厳密特定し、「（他艇）」行だけ合算
 function parseLoseKimariteFromCoursePage($) {
-  // 見出しに「全艇決まり手」を含む箇所の直後の table を優先して採用
-  let $tbl = null;
-  $("h2,h3,h4").each((_, el) => {
-    const title = normText($(el).text());
-    if (title.includes("全艇決まり手")) {
-      const nextTable = $(el).nextAll("table").first();
-      if (nextTable && nextTable.length) $tbl = nextTable;
-      return false; // break
-    }
-  });
-  // フォールバック：ヘッダ一致で探す
-  if (!$tbl) {
-    $tbl = mustTableByHeader($, ["コース", "出走数", "1着数", "逃げ", "差し", "まくり"]);
-  }
+  const $tbl = mustTableByHeader($, ["コース", "出走数", "1着数", "逃げ", "差し", "まくり"]);
   if (!$tbl) return null;
 
   const { headers, rows } = parseTable($, $tbl);
+  const iCourse = headerIndex(headers, "コース");
+  const keys = headers.slice(3).map(normalizeKimariteKey);
 
-  // 列インデックス（「まくり差し」は表記ゆれ吸収）
-  const idx = {
-    course: headerIndex(headers, "コース"),
-    nige:   headerIndex(headers, "逃げ"),
-    sashi:  headerIndex(headers, "差し"),
-    makuri: headerIndex(headers, "まくり"),
-    makus:  (() => {
-      const i1 = headerIndex(headers, "まくり差");
-      const i2 = headerIndex(headers, "ま差し");
-      const i3 = headerIndex(headers, "捲り差");
-      return Math.max(i1, i2, i3);
-    })(),
-    nuki:   headerIndex(headers, "抜き"),
-    meg:    headerIndex(headers, "恵まれ"),
-  };
-
-  if (idx.course < 0 || idx.nige < 0 || idx.sashi < 0 || idx.makuri < 0 || idx.makus < 0 || idx.nuki < 0 || idx.meg < 0) {
-    return null;
-  }
-
-  const lose = { "逃げ": 0, "差し": 0, "まくり": 0, "まくり差し": 0, "抜き": 0, "恵まれ": 0 };
-
+  const lose = Object.fromEntries(keys.map(k => [k, 0]));
   for (const r of rows) {
-    const label = r[idx.course] || "";
-    // 自艇の行は除外し、他艇のみ合算
-    if (!label.includes("（他艇）")) continue;
-
-    const pick = (text) => toNumber((text || "").match(/\d+/)?.[0]) || 0;
-
-    lose["逃げ"]       += pick(r[idx.nige]);
-    lose["差し"]       += pick(r[idx.sashi]);
-    lose["まくり"]     += pick(r[idx.makuri]);
-    lose["まくり差し"] += pick(r[idx.makus]);
-    lose["抜き"]       += pick(r[idx.nuki]);
-    lose["恵まれ"]     += pick(r[idx.meg]);
+    const label = r[iCourse] || "";
+    if (label.includes("（自艇）")) continue;
+    keys.forEach((k, i) => {
+      const v = r[3 + i];
+      const num = v ? Number((v.match(/(\d+)/) || [])[1]) : NaN;
+      if (Number.isFinite(num)) lose[k] += num;
+    });
   }
-
   return lose;
 }
 
@@ -386,7 +395,6 @@ async function main() {
   if (ENV_RACERS_LIMIT && Number.isFinite(ENV_RACERS_LIMIT) && ENV_RACERS_LIMIT > 0) {
     racers = racers.slice(0, ENV_RACERS_LIMIT);
   }
-  // バッチ上限（任意）
   if (ENV_BATCH && Number.isFinite(ENV_BATCH) && ENV_BATCH > 0) {
     racers = racers.slice(0, ENV_BATCH);
   }
