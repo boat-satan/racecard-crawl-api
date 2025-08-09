@@ -1,24 +1,21 @@
+# .github/workflows/exhibition-direct.yml
 name: Test Exhibition Direct
 
 on:
   workflow_dispatch:
     inputs:
       date:
-        description: "YYYYMMDD or today"
+        description: "YYYYMMDD（例: 20250809）"
         required: true
-        default: "today"
-      pids:
-        description: "場コードCSV (例: 02,09)"
-        required: false
+        default: ""
+      pid:
+        description: "場コード 01..24（例: 02）"
+        required: true
         default: "02"
-      races:
-        description: "レースCSV (例: 1R,2R または 1,2) 空=1..12"
-        required: false
-        default: "1R"
-      skipExisting:
-        description: "既存ファイルがあればスキップ？"
+      race:
+        description: "レース番号（例: 5R または 5）"
         required: true
-        default: "true"
+        default: "1R"
 
 permissions:
   contents: write
@@ -34,18 +31,19 @@ jobs:
       - name: Install deps
         run: npm ci || npm i --no-audit --no-fund
 
-      - name: Run direct exhibition crawler
-        env:
-          TARGET_DATE:  ${{ inputs.date  }}
-          TARGET_PIDS:  ${{ inputs.pids  }}
-          TARGET_RACES: ${{ inputs.races }}
-          SKIP:         ${{ inputs.skipExisting }}
+      # 入力が正しく取れているかログで確認
+      - name: Echo inputs
         run: |
-          if [ "${SKIP}" = "true" ]; then
-            node scripts/fetch-exhibition-direct.js --skip-existing
-          else
-            node scripts/fetch-exhibition-direct.js
-          fi
+          echo "date=${{ inputs.date }}"
+          echo "pid=${{ inputs.pid }}"
+          echo "race=${{ inputs.race }}"
+
+      - name: Run direct exhibition crawler
+        run: |
+          node scripts/fetch-exhibition-direct.js \
+            "${{ inputs.date }}" \
+            "${{ inputs.pid }}" \
+            "${{ inputs.race }}"
 
       - name: Commit & push results
         run: |
@@ -53,7 +51,8 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           if ! git diff --cached --quiet; then
-            git commit -m "Direct exhibition crawl [skip ci]"
+            git commit -m "exhibition direct: ${{ inputs.date }} ${{ inputs.pid }} ${{ inputs.race }} [skip ci]"
+            git pull --rebase
             git push
           else
             echo "No changes."
