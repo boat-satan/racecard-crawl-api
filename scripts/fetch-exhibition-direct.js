@@ -21,7 +21,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { load as loadHTML } from "cheerio";
 
-// ---------- utils ----------
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -38,12 +37,10 @@ function usageAndExit() {
 }
 
 function normRaceToken(tok) {
-  // "7R" -> 7, "7" -> 7
   return parseInt(String(tok).replace(/[^0-9]/g, ""), 10);
 }
 
 function expandRaces(expr) {
-  // Accept: "7R", "7", "1..12", "1R..12R", "1,3,5R"
   if (!expr) return [];
   const parts = String(expr).split(",").map((s) => s.trim()).filter(Boolean);
   const out = new Set();
@@ -71,15 +68,12 @@ async function writeJSON(file, data) {
   await fsp.writeFile(file, JSON.stringify(data, null, 2));
 }
 
-// ---------- input ----------
 const argvDate = process.argv[2];
 const argvPid = process.argv[3];
 const argvRace = process.argv[4];
 
-const DATE =
-  process.env.TARGET_DATE || argvDate || "";
-const PIDS =
-  (process.env.TARGET_PIDS || argvPid || "").split(",").map((s) => s.trim()).filter(Boolean);
+const DATE = process.env.TARGET_DATE || argvDate || "";
+const PIDS = (process.env.TARGET_PIDS || argvPid || "").split(",").map((s) => s.trim()).filter(Boolean);
 const RACES_EXPR = process.env.TARGET_RACES || argvRace || "";
 const SKIP_EXISTING = process.argv.includes("--skip-existing");
 
@@ -90,14 +84,12 @@ if (RACES.length === 0) usageAndExit();
 
 log(`date=${DATE} pids=${PIDS.join(",")} races=${RACES.join(",")}`);
 
-// ---------- core ----------
 async function fetchBeforeinfo({ date, pid, raceNo }) {
   const url = `https://www.boatrace.jp/owpc/pc/race/beforeinfo?hd=${date}&jcd=${pid}&rno=${raceNo}`;
   log("GET", url);
   const res = await fetch(url, {
     headers: {
-      "user-agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36",
+      "user-agent": "Mozilla/5.0",
       "accept-language": "ja,en;q=0.8",
     },
   });
@@ -109,61 +101,39 @@ async function fetchBeforeinfo({ date, pid, raceNo }) {
 function parseBeforeinfo(html, { date, pid, raceNo, url }) {
   const $ = loadHTML(html);
 
-  // --- ST（スタート展示）側を先に拾う ---
-  // 右側の「スタート展示」ブロック: div.table1_boatImage1 が 1..6
+  // ST情報取得
   const stByLane = {};
   $("div.table1_boatImage1").each((_, el) => {
-    const laneText =
-      $(el).find(".table1_boatImage1Number").text().trim() ||
-      $(el).find('[class*="table1_boatImage1Number"]').text().trim();
-    const timeText =
-      $(el).find(".table1_boatImage1Time").text().trim() ||
-      $(el).find('[class*="table1_boatImage1Time"]').text().trim();
-    const lane = parseInt(laneText, 10);
-    if (lane >= 1 && lane <= 6) {
-      const st = timeText || "";
-      stByLane[lane] = st;
-    }
+    const lane = parseInt($(el).find(".table1_boatImage1Number").text().trim(), 10);
+    const timeText = $(el).find(".table1_boatImage1Time").text().trim();
+    if (lane >= 1 && lane <= 6) stByLane[lane] = timeText || "";
   });
 
-  // --- 左の直前情報テーブル（選手ごとに TBODY が 6 つある） ---
   const entries = [];
-  const tbodies = $('table.is-w748 tbody'); // クラスは開催で微妙に変わることがあるため最小限指定
+  const tbodies = $("table.is-w748 tbody");
 
   tbodies.each((i, tbody) => {
     const lane = i + 1;
     const $tb = $(tbody);
 
-    // 選手の番号（toban=XXXX）、名前
     let number = "";
     let name = "";
     const profA = $tb.find('a[href*="toban="]').first();
     if (profA.length) {
-      const href = profA.attr("href") || "";
-      const m = href.match(/toban=(\d{4})/);
+      const m = (profA.attr("href") || "").match(/toban=(\d{4})/);
       if (m) number = m[1];
       name = profA.text().replace(/\s+/g, " ").trim();
     }
 
-    // 1行目の td 群 から [体重, 展示タイム, チルト] を順に拾う（rowspan で 1行目に集約されている想定）
-    const firstTds = $tb.find("tr").first().find("td");
-    const weight = (firstTds.eq(0).text() || "").replace(/\s+/g, "").trim(); // e.g. "52.4kg"
-    const tenjiTime = (firstTds.eq(1).text() || "").trim(); // e.g. "6.83"
-    const tilt = (firstTds.eq(2).text() || "").trim(); // e.g. "-0.5"
+    const tds = $tb.find("tr").first().find("td");
+    const weight = (tds.eq(0).text() || "").replace(/\s+/g, "").trim();
+    const tenjiTime = (tds.eq(1).text() || "").trim();
+    const tilt = (tds.eq(2).text() || "").trim();
 
     const st = stByLane[lane] || "";
     const stFlag = st.startsWith("F") ? "F" : "";
 
-    entries.push({
-      lane,
-      number,
-      name,
-      weight,
-      tenjiTime,
-      tilt,
-      st,
-      stFlag,
-    });
+    entries.push({ lane, number, name, weight, tenjiTime, tilt, st, stFlag });
   });
 
   return {
@@ -180,16 +150,7 @@ function parseBeforeinfo(html, { date, pid, raceNo, url }) {
 async function main() {
   for (const pid of PIDS) {
     for (const raceNo of RACES) {
-      const outPath = path.join(
-        __dirname,
-        "..",
-        "public",
-        "exhibition",
-        "v1",
-        DATE,
-        pid,
-        `${raceNo}R.json`
-      );
+      const outPath = path.join(__dirname, "..", "public", "exhibition", "v1", DATE, pid, `${raceNo}R.json`);
 
       if (SKIP_EXISTING && fs.existsSync(outPath)) {
         log("skip existing:", path.relative(process.cwd(), outPath));
@@ -199,14 +160,10 @@ async function main() {
       try {
         const { url, html } = await fetchBeforeinfo({ date: DATE, pid, raceNo });
         const data = parseBeforeinfo(html, { date: DATE, pid, raceNo, url });
-
         await writeJSON(outPath, data);
         log("saved:", path.relative(process.cwd(), outPath));
       } catch (err) {
-        console.error(
-          `Failed: date=${DATE} pid=${pid} race=${raceNo} -> ${String(err)}`
-        );
-        // 続行（他レースは進める）
+        console.error(`Failed: date=${DATE} pid=${pid} race=${raceNo} -> ${String(err)}`);
       }
     }
   }
