@@ -1,0 +1,66 @@
+name: Daily Build (all venues & all races)
+
+on:
+  schedule:
+    - cron: "0 21 * * *"   # UTC 21:00 = JST 06:00
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "YYYYMMDD or today"
+        required: false
+        default: "today"
+
+env:
+  TZ: Asia/Tokyo
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: daily-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci || npm i
+
+      - name: Create health.json
+        run: |
+          mkdir -p public
+          echo '{"ok":true,"ts":"'"$(date -u +%FT%TZ)"'"}' > public/health.json
+
+      - name: Build ALL (full & slim)
+        env:
+          TARGET_DATE: ${{ github.event.inputs.date }}
+        run: node scripts/build-all.js
+
+      - name: List outputs
+        run: |
+          echo "=== GENERATED FILES ==="
+          ls -R public | sed 's/^/  /'
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
