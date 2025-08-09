@@ -13,18 +13,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Node だけ用意（キャッシュ指定しない！）
+      # Node だけ用意（ロックファイル無しでもOK）
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      # 依存なしなので npm install は不要
+      # 依存なしなので npm インストール不要
       # - name: Install deps
       #   run: npm ci
 
       - name: Run crawler
         run: node scripts/crawl.js
+
+      - name: Run enrich
+        run: node scripts/enrich.js
 
       - name: Commit & Push changes
         run: |
