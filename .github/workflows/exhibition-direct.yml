@@ -26,24 +26,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: "20" }
+        with:
+          node-version: "20"
 
       - name: Install deps
         run: npm ci || npm i --no-audit --no-fund
 
-      # 入力が正しく取れているかログで確認
+      # デバッグ（入力確認）
       - name: Echo inputs
         run: |
           echo "date=${{ inputs.date }}"
           echo "pid=${{ inputs.pid }}"
           echo "race=${{ inputs.race }}"
 
+      # 直接クロール（env で渡す）
       - name: Run direct exhibition crawler
-        run: |
-          node scripts/fetch-exhibition-direct.js \
-            "${{ inputs.date }}" \
-            "${{ inputs.pid }}" \
-            "${{ inputs.race }}"
+        env:
+          TARGET_DATE:  ${{ inputs.date }}
+          TARGET_PIDS:  ${{ inputs.pid }}
+          TARGET_RACES: ${{ inputs.race }}
+        run: node scripts/fetch-exhibition-direct.js --skip-existing
 
       - name: Commit & push results
         run: |
