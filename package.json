@@ -5,8 +5,7 @@
   "scripts": {
     "crawl": "node scripts/crawl.js",
     "stats": "node scripts/fetch-stats.js",
-    "exh:fetch": "node scripts/fetch-exhibition.js",
-    "exh:merge": "node scripts/merge-exhibition.js"
+    "previews": "node scripts/fetch-previews.js"
   },
   "dependencies": {
     "cheerio": "^1.0.0"
