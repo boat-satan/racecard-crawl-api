@@ -1,0 +1,36 @@
+name: Create Health JSON
+
+on:
+  workflow_dispatch:   # 手動実行
+  schedule:
+    - cron: "0 21 * * *"  # 毎日JST 06:00に実行（UTC 21:00）
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # health.json を直接作成
+      - name: Create health.json
+        run: |
+          mkdir -p public
+          echo '{"ok":true,"ts":"'"$(date -u +%FT%TZ)"'"}' > public/health.json
+
+      # 公開するフォルダをアップロード
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
