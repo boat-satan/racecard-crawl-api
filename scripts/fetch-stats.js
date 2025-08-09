@@ -2,7 +2,7 @@
 // Node v20 / ESM / cheerio v1.x
 // 出力: public/stats/v1/racers/<regno>.json
 // 参照元:
-//  - https://boatrace-db.net/racer/index2/regno/<regno>/   (コース別成績・決まり手)
+//  - https://boatrace-db.net/racer/rcourse/regno/<regno>/  (直近6か月: コース別成績・決まり手)
 //  - https://boatrace-db.net/racer/rdemo/regno/<regno>/    (展示タイム順位別)
 
 import { load } from "cheerio";
@@ -24,17 +24,22 @@ const TODAY_ROOTS = [
 
 const OUTPUT_DIR = path.join(PUBLIC_DIR, "stats", "v1", "racers");
 
-// polite wait（サイト側の推奨 3 秒）
-const WAIT_MS_BETWEEN_RACERS = 3000;
+// polite wait（デフォルト3秒、環境変数で上書き可）
+const DEFAULT_WAIT_MS = 3000;
+const ENV_DELAY_MS = Number(process.env.STATS_DELAY_MS ?? DEFAULT_WAIT_MS);
 
 // 環境変数でテスト/制限
-//   RACERS="4349,3898"  ・・・対象を直接指定
-//   RACERS_LIMIT="20"   ・・・先頭 N 件だけ実行（途中で止めてもOKにする用）
-const ENV_RACERS       = process.env.RACERS?.trim() || "";
-const ENV_RACERS_LIMIT = Number(process.env.RACERS_LIMIT ?? "");
+//   RACERS="4349,3898"       …対象を直接指定
+//   STATS_BATCH="20"         …先頭 N 件だけ実行（途中停止OKにする用）
+//   （互換）RACERS_LIMIT もあれば尊重
+const ENV_RACERS = (process.env.RACERS ?? "").trim();
+const ENV_BATCH =
+  Number(process.env.STATS_BATCH ?? process.env.RACERS_LIMIT ?? "");
 
 // -------------------------------
+//
 // ユーティリティ
+//
 // -------------------------------
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -54,10 +59,7 @@ async function fetchHtml(url, { retries = 3, delayMs = 800 } = {}) {
 }
 
 function normText(t) {
-  return (t ?? "")
-    .replace(/\u00A0/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return (t ?? "").replace(/\u00A0/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function toNumber(v) {
@@ -94,9 +96,11 @@ function headerIndex(headers, keyLike) {
   return headers.findIndex((h) => h.includes(keyLike));
 }
 
+// 指定したキー群を含むテーブルをページ内から拾う（クラス違いにも強い）
 function mustTableByHeader($, keyLikes) {
-  // 1) 明示クラス狙い（index2想定）
-  const candidates = $("table.tRacerCourse, table.tRacerTech, table.tRacerRboat1, table.tRacerRcourseTech, table.tRacerRboat2, table");
+  const candidates = $(
+    "table.tRacerCourse, table.tRacerTech, table.tRacerRboat1, table.tRacerRcourseTech, table.tRacerRboat2, table"
+  );
   for (const el of candidates.toArray()) {
     const { headers } = parseTable($, $(el));
     const ok = keyLikes.every((k) => headers.some((h) => h.includes(k)));
@@ -106,18 +110,24 @@ function mustTableByHeader($, keyLikes) {
 }
 
 // -------------------------------
-// パース（index2: コース別成績）
+// パース（rcourse: コース別成績）
 // -------------------------------
-function parseCourseStatsFromIndex2($) {
-  const $tbl = mustTableByHeader($, ["コース", "出走数", "1着率", "2連対率", "3連対率"]);
+function parseCourseStatsFromRcourse($) {
+  const $tbl = mustTableByHeader($, [
+    "コース",
+    "出走数",
+    "1着率",
+    "2連対率",
+    "3連対率",
+  ]);
   if (!$tbl) return null;
 
   const { headers, rows } = parseTable($, $tbl);
   const iCourse = headerIndex(headers, "コース");
   const iStarts = headerIndex(headers, "出走数");
-  const iWinRt  = headerIndex(headers, "1着率");
-  const iTop2   = headerIndex(headers, "2連対率");
-  const iTop3   = headerIndex(headers, "3連対率");
+  const iTop1 = headerIndex(headers, "1着率");
+  const iTop2 = headerIndex(headers, "2連対率");
+  const iTop3 = headerIndex(headers, "3連対率");
 
   const items = [];
   for (const r of rows) {
@@ -128,10 +138,10 @@ function parseCourseStatsFromIndex2($) {
     items.push({
       course: Number(m[1]),
       starts: iStarts >= 0 ? toNumber(r[iStarts]) : null,
-      top1Rate: iWinRt >= 0 ? toNumber(r[iWinRt]) : null,
-      top2Rate: iTop2  >= 0 ? toNumber(r[iTop2])  : null,
-      top3Rate: iTop3  >= 0 ? toNumber(r[iTop3])  : null,
-      // 直近ページには「勝率」列が無いので winRate は null にしておく
+      top1Rate: iTop1 >= 0 ? toNumber(r[iTop1]) : null,
+      top2Rate: iTop2 >= 0 ? toNumber(r[iTop2]) : null,
+      top3Rate: iTop3 >= 0 ? toNumber(r[iTop3]) : null,
+      // 直近ページには「勝率」列が無いことが多いので winRate は null
       winRate: null,
       raw: r,
     });
@@ -141,16 +151,27 @@ function parseCourseStatsFromIndex2($) {
 }
 
 // -------------------------------
-// パース（index2: コース別決まり手）
+// パース（rcourse: コース別決まり手）
 // -------------------------------
-function parseKimariteFromIndex2($) {
-  const $tbl = mustTableByHeader($, ["コース", "出走数", "1着数", "逃げ", "差し", "まくり", "抜き", "恵まれ"]);
+function parseKimariteFromRcourse($) {
+  // 「ま差し」「まくり差し」どちらでも通るように、必須キーは控えめに
+  const $tbl = mustTableByHeader($, [
+    "コース",
+    "出走数",
+    "1着数",
+    "逃げ",
+    "差し",
+    "まくり",
+    "抜き",
+    "恵まれ",
+  ]);
   if (!$tbl) return null;
 
   const { headers, rows } = parseTable($, $tbl);
   const iCourse = headerIndex(headers, "コース");
 
-  const detailKeys = headers.slice(3); // 「1着数」以降の各決まり手
+  // 1着数以降の列名をそのままキーにして保持（ま差し/まくり差しの差異吸収）
+  const detailKeys = headers.slice(3);
   const items = [];
   for (const r of rows) {
     const ct = r[iCourse] ?? r[0] ?? "";
@@ -160,7 +181,6 @@ function parseKimariteFromIndex2($) {
     const detail = {};
     detailKeys.forEach((k, i) => {
       const v = r[3 + i];
-      // index2 は基本「回数」だけ。% があれば拾う。
       const percent = v?.match(/([-+]?\d+(\.\d+)?)\s*%/);
       const count = v?.match(/(\d+)/);
       detail[k] = {
@@ -180,14 +200,20 @@ function parseKimariteFromIndex2($) {
 // パース（rdemo: 展示タイム順位別成績）
 // -------------------------------
 function parseExTimeRankFromRdemo($) {
-  const $tbl = mustTableByHeader($, ["順位", "出走数", "1着率", "2連対率", "3連対率"]);
+  const $tbl = mustTableByHeader($, [
+    "順位",
+    "出走数",
+    "1着率",
+    "2連対率",
+    "3連対率",
+  ]);
   if (!$tbl) return null;
 
   const { headers, rows } = parseTable($, $tbl);
   const iRank = headerIndex(headers, "順位");
-  const iWin  = headerIndex(headers, "1着率");
-  const iT2   = headerIndex(headers, "2連対率");
-  const iT3   = headerIndex(headers, "3連対率");
+  const iWin = headerIndex(headers, "1着率");
+  const iT2 = headerIndex(headers, "2連対率");
+  const iT3 = headerIndex(headers, "3連対率");
 
   const items = [];
   for (const r of rows) {
@@ -211,19 +237,19 @@ function parseExTimeRankFromRdemo($) {
 // 1 選手分取得
 // -------------------------------
 async function fetchOne(regno) {
-  const uIndex2 = `https://boatrace-db.net/racer/index2/regno/${regno}/`;
-  const uRdemo  = `https://boatrace-db.net/racer/rdemo/regno/${regno}/`;
+  const uRcourse = `https://boatrace-db.net/racer/rcourse/regno/${regno}/`;
+  const uRdemo = `https://boatrace-db.net/racer/rdemo/regno/${regno}/`;
 
-  // index2
+  // rcourse
   let courseStats = null;
   let courseKimarite = null;
   try {
-    const html = await fetchHtml(uIndex2);
+    const html = await fetchHtml(uRcourse);
     const $ = load(html);
-    courseStats = parseCourseStatsFromIndex2($);
-    courseKimarite = parseKimariteFromIndex2($);
+    courseStats = parseCourseStatsFromRcourse($);
+    courseKimarite = parseKimariteFromRcourse($);
   } catch (e) {
-    console.warn(`warn: index2 fetch/parse failed for ${regno}: ${e.message}`);
+    console.warn(`warn: rcourse fetch/parse failed for ${regno}: ${e.message}`);
   }
 
   // rdemo
@@ -238,14 +264,16 @@ async function fetchOne(regno) {
 
   return {
     regno: Number(regno),
-    sources: { index2: uIndex2, rdemo: uRdemo },
+    sources: { rcourse: uRcourse, rdemo: uRdemo },
     fetchedAt: new Date().toISOString(),
-    courseStats,     // [{course, starts, top1Rate, top2Rate, top3Rate, winRate:null}]
-    courseKimarite,  // [{course, detail:{逃げ:{count,rate},…}}]
-    exTimeRank,      // [{rank, winRate, top2Rate, top3Rate}]
+    courseStats, // [{course, starts, top1Rate, top2Rate, top3Rate, winRate:null}]
+    courseKimarite, // [{course, detail:{'逃げ':{count,rate}, …}, raw}]
+    exTimeRank, // [{rank, winRate, top2Rate, top3Rate, raw}]
   };
 }
 
+// -------------------------------
+// today ディレクトリ配下から出走選手を列挙
 // -------------------------------
 async function collectRacersFromToday() {
   const set = new Set();
@@ -291,8 +319,9 @@ async function main() {
   } else {
     racers = await collectRacersFromToday();
   }
-  if (ENV_RACERS_LIMIT && Number.isFinite(ENV_RACERS_LIMIT) && ENV_RACERS_LIMIT > 0) {
-    racers = racers.slice(0, ENV_RACERS_LIMIT);
+
+  if (ENV_BATCH && Number.isFinite(ENV_BATCH) && ENV_BATCH > 0) {
+    racers = racers.slice(0, ENV_BATCH);
   }
 
   if (racers.length === 0) {
@@ -301,14 +330,15 @@ async function main() {
   }
 
   console.log(
-    ENV_RACERS_LIMIT
+    ENV_BATCH
       ? `batch mode: process first ${racers.length} racers`
       : `process ${racers.length} racers`
   );
 
   await ensureDir(OUTPUT_DIR);
 
-  let ok = 0, ng = 0;
+  let ok = 0,
+    ng = 0;
   for (const regno of racers) {
     try {
       const data = await fetchOne(regno);
@@ -320,8 +350,8 @@ async function main() {
       console.warn(`❌ ${regno}: ${e.message}`);
       ng++;
     }
-    // polite wait（1選手ごとに3秒）
-    await sleep(WAIT_MS_BETWEEN_RACERS);
+    // polite wait（1選手ごとに）
+    await sleep(ENV_DELAY_MS > 0 ? ENV_DELAY_MS : DEFAULT_WAIT_MS);
   }
 
   await ensureDir(path.join(PUBLIC_DIR, "debug"));
