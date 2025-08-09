@@ -4,52 +4,57 @@ on:
   workflow_dispatch:
     inputs:
       date:
-        description: "YYYYMMDD or today"
-        required: false
-        default: "today"
+        description: 'YYYYMMDD or today'
+        required: true
+        default: 'today'
       pids:
-        description: "comma (例: 02,09) 空=全場"
+        description: 'comma（例: 02,09）空=全場'
         required: false
-        default: ""
       races:
-        description: "comma (例: 1R,2R) 空=全R"
+        description: 'comma（例: 1R,2R）空=全R'
         required: false
-        default: ""
-  schedule:
-    - cron: "*/5 * * * *"  # 5分ごと（必要に応じて変えてね）
-
-permissions:
-  contents: write
 
 jobs:
-  build-previews:
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: 20
 
       - name: Install deps
-        run: npm i --no-audit --no-fund
+        run: npm ci
 
       - name: Run previews builder
-        env:
-          TARGET_DATE: ${{ inputs.date }}
-          TARGET_PIDS: ${{ inputs.pids }}
-          TARGET_RACES: ${{ inputs.races }}
-        run: npm run previews
+        run: node scripts/build-previews.js ${{ github.event.inputs.date }} "${{ github.event.inputs.pids }}" "${{ github.event.inputs.races }}"
 
-      - name: Commit & push
+      - name: List generated exhibition files
+        run: |
+          echo "---- tree public/exhibition ----"
+          mkdir -p public/exhibition
+          if command -v tree >/dev/null 2>&1; then
+            tree -a public/exhibition || true
+          else
+            find public/exhibition -type f -maxdepth 5 | sort || true
+          fi
+          echo "---- ls -R public/exhibition/v1 ----"
+          ls -laR public/exhibition/v1 || true
+          echo "---- git status ----"
+          git status --porcelain=v1
+
+      - name: Commit & push exhibition
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
+          git add -A public/exhibition public/debug
           if ! git diff --cached --quiet; then
-            git commit -m "build: previews update [skip ci]"
+            git commit -m "Add/Update exhibition previews [skip ci]"
             git push
           else
-            echo "No changes."
+            echo "No changes to commit (nothing generated or same content)."
           fi
