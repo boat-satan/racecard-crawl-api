@@ -1,161 +1,190 @@
 // scripts/fetch-stats.js
-// Node.js 20+ / GitHub Actions 実行前提
-import fs from "node:fs/promises";
-import path from "node:path";
-import cheerio from "cheerio";
+// 今日の出走表から選手の登録番号を集め、boatrace-db から
+// ・コース別成績 ・コース別決まり手 ・展示タイム順位別成績 を取得して保存。
 
-const UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36";
-const OUT_DIR = "public/stats/v1/racer";
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import * as cheerio from 'cheerio';
 
-const racers = (process.env.RACERS || "")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
+const ROOT = path.resolve('public');
+const PROGRAMS_DIR = path.join(ROOT, 'programs', 'v2', 'today'); // 既存の出走表置き場
+const OUT_DIR = path.join(ROOT, 'stats', 'v1', 'racers');
 
-if (!racers.length) {
-  console.error("使い方: RACERS=4349,4103 node scripts/fetch-stats.js");
-  process.exit(1);
+async function ensureDir(p) {
+  await fs.mkdir(p, { recursive: true }).catch(() => {});
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-async function fetchText(url) {
-  const r = await fetch(url, { headers: { "User-Agent": UA, "Accept-Language": "ja,en;q=0.8" } });
-  if (!r.ok) throw new Error(`fetch ${r.status} ${url}`);
-  return await r.text();
+function toNumber(s) {
+  if (s == null) return null;
+  const n = String(s).replace(/[^\d.\-]/g, '');
+  return n === '' ? null : Number(n);
 }
 
-// --------- parsers (堅めのセレクタ／テキスト併用) ---------
-function toInt(s) {
-  const n = parseInt(String(s ?? "").replace(/[^\d\-]/g, ""), 10);
-  return Number.isFinite(n) ? n : null;
+function pickText($, el) {
+  return $(el).text().trim();
 }
 
-function parseCourseTables(html, course) {
-  // 返値: { byCourse: { [course]: {starts, win, top2, top3, avgSt|null} }, kimariteByCourse: { [course]: {...}} }
+// テーブル見出しの“見出しテキスト”から次のtableを拾うヘルパ
+function tableByHeading($, headingText) {
+  // 見出しの候補：h2,h3,.ttl などを総当たり
+  const headings = $('h1,h2,h3,h4,h5,.ttl,.title,.heading').filter((_, h) =>
+    pickText($, h).includes(headingText)
+  );
+  if (headings.length === 0) return null;
+  // 一番近い table
+  let t = headings.first().nextAll('table').first();
+  if (t.length === 0) {
+    // 別構造の保険
+    t = headings.first().parent().nextAll('table').first();
+  }
+  return t.length ? t : null;
+}
+
+// コース別成績テーブルをパース（1〜6コース）
+function parseCourseStats($, table) {
+  const result = {};
+  $('tr', table).each((i, tr) => {
+    const tds = $('th,td', tr).map((_, td) => pickText($, td)).get();
+    // 例: [ "1コース", "出走", "勝率/1着率", "2連対率", "3連対率", "平均ST" ] 等、サイトにより表記差あり
+    const head = tds.join(' ');
+    // 行データ候補：先頭が「1」「1コース」「１コース」など
+    const first = tds[0] || '';
+    const m = first.match(/([1-6])/);
+    if (!m) return;
+    const c = m[1];
+
+    // 残りから数値を拾う（許容的に）
+    // よくある並び: 出走, 勝率(または1着率), 2連対率, 3連対率, 平均ST
+    const nums = tds.slice(1).map(toNumber).filter(v => v !== null);
+    // 最低でも 4〜5 個拾える想定
+    const [starts, winOrRate, top2, top3, avgST] = nums;
+
+    result[c] = {
+      starts: starts ?? null,
+      winPct: winOrRate ?? null,   // サイトによって「勝率(%) or 1着率(%)」の差あり
+      top2Pct: top2 ?? null,
+      top3Pct: top3 ?? null,
+      avgST: avgST ?? null
+    };
+  });
+  return Object.keys(result).length ? result : null;
+}
+
+// コース別決まり手（行が「1コース」「2コース」…、列に決まり手名が並ぶテーブル想定）
+function parseMovesByCourse($, table) {
+  // 1行目がヘッダ（決まり手の種類）
+  const headers = $('tr', table).first().find('th,td').map((_, x) => pickText($, x)).get();
+  const moveNames = headers.slice(1); // 先頭列はコース
+
+  const out = {};
+  $('tr', table).slice(1).each((_, tr) => {
+    const cells = $('th,td', tr).map((_, td) => pickText($, td)).get();
+    const first = cells[0] || '';
+    const m = first.match(/([1-6])/);
+    if (!m) return;
+    const c = m[1];
+    const row = {};
+    moveNames.forEach((name, i) => {
+      row[name] = toNumber(cells[i + 1]) ?? 0;
+    });
+    out[c] = row;
+  });
+
+  return Object.keys(out).length ? out : null;
+}
+
+// 展示タイム順位別成績（順位1〜6の行に、1着率/2連対率/3連対率 等が並ぶ想定）
+function parseExTimeRankStats($, table) {
+  const out = {};
+  $('tr', table).each((_, tr) => {
+    const cells = $('th,td', tr).map((_, td) => pickText($, td)).get();
+    const label = cells[0] || '';
+    const m = label.match(/([1-6])\s*位/); // 「1位」「１位」など
+    if (!m) return;
+    const rank = m[1];
+
+    const nums = cells.slice(1).map(toNumber).filter(v => v !== null);
+    // 例: [出走, 1着率, 2連対率, 3連対率]
+    const [starts, winPct, top2Pct, top3Pct] = nums;
+    out[rank] = { starts, winPct, top2Pct, top3Pct };
+  });
+  return Object.keys(out).length ? out : null;
+}
+
+// boatrace-db レーサーページを取得してパース
+async function fetchOne(regno) {
+  const url = `https://boatrace-db.net/racer/rcourse/regno/${regno}/`;
+  const res = await fetch(url, { headers: { 'User-Agent': 'racecard-crawl-api (+github actions)' } });
+  if (!res.ok) throw new Error(`fetch ${regno} ${res.status}`);
+  const html = await res.text();
   const $ = cheerio.load(html);
-  const byCourse = {};
-  const kimariteByCourse = {};
 
-  // 進入時の全艇成績（自艇行だけ）
-  // 近い見出しを頼りに次の table を拾う
-  const t1 = $("h2,h3,h4").filter((_, el) => $(el).text().includes("進入時の全艇成績")).first().nextAll("table").first();
-  if (t1 && t1.length) {
-    t1.find("tbody tr").each((_, tr) => {
-      const tds = $(tr).find("td").map((i, td) => $(td).text().trim()).get();
-      // 例: ['4 コース （自艇）','14','1','0','6', ...] など
-      const label = tds[0] || "";
-      const isSelf = /自艇/.test(label);
-      if (isSelf) {
-        byCourse[course] = {
-          starts: toInt(tds[1]),
-          win: toInt(tds[2]),
-          top2: toInt(tds[3]),
-          top3: toInt(tds[4]),
-          avgSt: null // 同表に平均STが無いことが多い
-        };
-      }
-    });
-  }
+  // セクションを見出しテキストで探す（サイト変更に強めのゆる選択）
+  const courseTable = tableByHeading($, 'コース別成績');
+  const movesTable  = tableByHeading($, 'コース別決まり手');
+  const exRankTable = tableByHeading($, '展示タイム順位別成績');
 
-  // 進入時の全艇決まり手（自艇行）
-  const t2 = $("h2,h3,h4").filter((_, el) => $(el).text().includes("進入時の全艇決まり手")).first().nextAll("table").first();
-  if (t2 && t2.length) {
-    t2.find("tbody tr").each((_, tr) => {
-      const tds = $(tr).find("td").map((i, td) => $(td).text().trim()).get();
-      const label = tds[0] || "";
-      const isSelf = /自艇/.test(label);
-      if (isSelf) {
-        kimariteByCourse[course] = {
-          starts: toInt(tds[1]),
-          nige: toInt(tds[2]), // 1コース時に意味が立つが統一で保持
-          sashi: toInt(tds[3]),
-          makuri: toInt(tds[4]),
-          makurizashi: toInt(tds[5]),
-          nuki: toInt(tds[6]),
-          other: toInt(tds[7])
-        };
-      }
-    });
-  }
+  const courseStats = courseTable ? parseCourseStats($, courseTable) : null;
+  const finishingMovesByCourse = movesTable ? parseMovesByCourse($, movesTable) : null;
+  const exhibitionTimeRankStats = exRankTable ? parseExTimeRankStats($, exRankTable) : null;
 
-  return { byCourse, kimariteByCourse };
+  return {
+    regno,
+    fetchedAt: new Date().toISOString(),
+    ...(courseStats ? { courseStats } : {}),
+    ...(finishingMovesByCourse ? { finishingMovesByCourse } : {}),
+    ...(exhibitionTimeRankStats ? { exhibitionTimeRankStats } : {})
+  };
 }
 
-function parseDemoRank(html) {
-  const $ = cheerio.load(html);
-  const out = { byRank: {} };
-  const t = $("h2,h3,h4").filter((_, el) => $(el).text().includes("展示タイム順位別成績")).first().nextAll("table").first();
-  if (t && t.length) {
-    t.find("tbody tr").each((_, tr) => {
-      const tds = $(tr).find("td").map((i, td) => $(td).text().trim()).get();
-      // 例: ['1 位','33','7','7','7', ...]
-      const rank = (tds[0] || "").replace(/[^\d]/g, "");
-      if (!rank) return;
-      out.byRank[rank] = {
-        starts: toInt(tds[1]),
-        win: toInt(tds[2]),
-        top2: toInt(tds[3]),
-        top3: toInt(tds[4])
-      };
-    });
-  }
-  return out;
-}
-
-// --------- main ---------
-for (const regno of racers) {
-  const baseOut = path.join(OUT_DIR, regno);
-  await fs.mkdir(baseOut, { recursive: true });
-
-  // コース別: 1..6 を回す
-  const byCourse = {};
-  const kimariteByCourse = {};
-
-  for (let c = 1; c <= 6; c++) {
-    const url = `https://boatrace-db.net/racer/rcourse/regno/${regno}/course/${c}/`;
-    try {
-      const html = await fetchText(url);
-      const { byCourse: bc, kimariteByCourse: kc } = parseCourseTables(html, String(c));
-      Object.assign(byCourse, bc);
-      Object.assign(kimariteByCourse, kc);
-    } catch (e) {
-      console.error(`[${regno}] course ${c} fetch error:`, e.message);
+// 今日の出走 JSON から regno を集める
+async function collectTodayRegnos() {
+  const regnos = new Set();
+  const venues = await fs.readdir(PROGRAMS_DIR);
+  for (const v of venues) {
+    const venueDir = path.join(PROGRAMS_DIR, v);
+    const files = await fs.readdir(venueDir).catch(() => []);
+    for (const f of files) {
+      if (!f.endsWith('.json')) continue;
+      const j = JSON.parse(await fs.readFile(path.join(venueDir, f), 'utf8'));
+      if (!Array.isArray(j.boats)) continue;
+      for (const b of j.boats) {
+        if (b?.racer_number) regnos.add(b.racer_number);
+      }
     }
-    // 約束の3秒間隔
-    await sleep(3000);
   }
-
-  // 展示タイム順位別
-  let demo = { byRank: {} };
-  try {
-    const url = `https://boatrace-db.net/racer/rdemo/regno/${regno}/`;
-    const html = await fetchText(url);
-    demo = parseDemoRank(html);
-  } catch (e) {
-    console.error(`[${regno}] demo fetch error:`, e.message);
-  }
-  await sleep(3000);
-
-  const now = new Date().toISOString();
-
-  await fs.writeFile(
-    path.join(baseOut, "course.json"),
-    JSON.stringify({ schemaVersion: "1.0", racer: Number(regno), updatedAt: now, byCourse }, null, 2)
-  );
-
-  await fs.writeFile(
-    path.join(baseOut, "kimarite.json"),
-    JSON.stringify({ schemaVersion: "1.0", racer: Number(regno), updatedAt: now, byCourse: kimariteByCourse }, null, 2)
-  );
-
-  await fs.writeFile(
-    path.join(baseOut, "extime-rank.json"),
-    JSON.stringify({ schemaVersion: "1.0", racer: Number(regno), updatedAt: now, window: { months: 6 }, ...demo }, null, 2)
-  );
-
-  console.log("done:", regno);
+  return [...regnos];
 }
 
-console.log("all done.");
+async function main() {
+  await ensureDir(OUT_DIR);
+  const regnos = await collectTodayRegnos();
+  console.log(`targets: ${regnos.length} racers`);
+
+  const results = [];
+  for (const regno of regnos) {
+    try {
+      const data = await fetchOne(regno);
+      const outPath = path.join(OUT_DIR, `${regno}.json`);
+      await fs.writeFile(outPath, JSON.stringify(data, null, 2));
+      results.push({ regno, ok: true });
+      // 小さなウェイト（優しさ）
+      await new Promise(r => setTimeout(r, 150));
+    } catch (e) {
+      console.warn(`fail ${regno}:`, e.message);
+      results.push({ regno, ok: false, error: e.message });
+    }
+  }
+
+  // メタ
+  await fs.writeFile(
+    path.join(ROOT, 'debug', 'stats-meta-today.json'),
+    JSON.stringify({ status: 200, count: results.length, ok: results.filter(r => r.ok).length, generatedAt: new Date().toISOString() }, null, 2)
+  );
+  console.log('done.');
+}
+
+main().catch(err => {
+  console.error(err);
+  process.exit(1);
+});
