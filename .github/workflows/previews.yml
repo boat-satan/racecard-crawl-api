@@ -31,7 +31,7 @@ jobs:
         run: npm ci
 
       - name: Run previews builder
-        run: node scripts/build-previews.js ${{ github.event.inputs.date }} "${{ github.event.inputs.pids }}" "${{ github.event.inputs.races }}"
+        run: node scripts/fetch-previews.js ${{ github.event.inputs.date }} "${{ github.event.inputs.pids }}" "${{ github.event.inputs.races }}"
 
       - name: List generated exhibition files
         run: |
