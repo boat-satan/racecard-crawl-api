@@ -1,21 +1,22 @@
-name: Crawl & Publish
+name: Crawl & Publish (slim from public JSON)
 
 on:
   workflow_dispatch:
     inputs:
-      target_dates:
-        description: "YYYYMMDD[,YYYYMMDD...]"
+      date:
+        description: "YYYYMMDD or today"
         required: false
-        default: "20250809"
-      target_stadiums:
-        description: "pid list e.g. 02 or 03,21"
+        default: "today"
+      pid:
+        description: "Stadium code (01..24) or name"
         required: false
         default: "02"
+      race:
+        description: "Race number (1..12 or 1R..12R)"
+        required: false
+        default: "1"
   schedule:
-    - cron: "0 21 * * *"   # UTC21:00 = JST06:00
-
-env:
-  TZ: Asia/Tokyo
+    - cron: "0 21 * * *"   # JST 06:00
 
 permissions:
   contents: write
@@ -31,11 +32,25 @@ jobs:
         with:
           node-version: 20
       - run: npm ci || npm i
-      - name: Crawl
+
+      # health.json も毎回作る（任意）
+      - name: Create health.json
+        run: |
+          mkdir -p public
+          echo '{"ok":true,"ts":"'"$(date -u +%FT%TZ)"'"}' > public/health.json
+
+      - name: Build one race JSON
         env:
-          TARGET_DATES: ${{ github.event.inputs.target_dates }}
-          TARGET_STADIUMS: ${{ github.event.inputs.target_stadiums }}
+          TARGET_DATE: ${{ github.event.inputs.date }}
+          TARGET_PID:  ${{ github.event.inputs.pid }}
+          TARGET_RACE: ${{ github.event.inputs.race }}
         run: npm run crawl
+
+      - name: List outputs
+        run: |
+          echo "=== GENERATED FILES ==="
+          ls -R public || true
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
@@ -44,11 +59,6 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-    permissions:
-      pages: write
-      id-token: write
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
