@@ -50,6 +50,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # 念のため
+          git config pull.rebase true
 
       - name: Run crawler
         run: node scripts/crawl.js
@@ -61,12 +63,31 @@ jobs:
           STATS_DELAY_MS: ${{ inputs.delayMs || '3000' }}
         run: node scripts/fetch-stats.js
 
-      - name: Commit & Push changes
+      - name: Commit & Push changes (with rebase & retry)
         run: |
+          set -e
           git add -A
-          if ! git diff --cached --quiet; then
-            git commit -m "Update racer stats [skip ci]"
-            git push
-          else
+          if git diff --cached --quiet; then
             echo "No changes to commit."
+            exit 0
           fi
+
+          git commit -m "Update racer stats [skip ci]"
+
+          # push→reject 対策でリトライ (最大5回)
+          n=0
+          until [ $n -ge 5 ]
+          do
+            if git push; then
+              echo "Pushed successfully."
+              exit 0
+            fi
+            echo "Push rejected. Rebasing onto remote and retrying... ($((n+1))/5)"
+            # 最新取り込み（作業ツリーに変更があっても安全に）
+            git pull --rebase --autostash
+            n=$((n+1))
+            sleep 2
+          done
+
+          echo "ERROR: Failed to push after retries."
+          exit 1
