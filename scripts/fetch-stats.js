@@ -24,9 +24,9 @@ const TODAY_ROOTS = [
 ];
 const OUTPUT_DIR = path.join(PUBLIC_DIR, "stats", "v1", "racers");
 
-// polite wait
-const WAIT_MS_BETWEEN_RACERS = Number(process.env.STATS_DELAY_MS || 3000);
-const WAIT_MS_BETWEEN_COURSE_PAGES = 600; // 各コース詳細の間
+// polite wait（環境変数で調整可）
+const WAIT_MS_BETWEEN_RACERS       = Number(process.env.STATS_DELAY_MS || 3000);
+const WAIT_MS_BETWEEN_COURSE_PAGES = Number(process.env.STATS_COURSE_DELAY_MS || 600);
 
 // env
 const ENV_RACERS       = process.env.RACERS?.trim() || "";
@@ -39,6 +39,7 @@ const ENV_BATCH        = Number(process.env.STATS_BATCH ?? "");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function fetchHtml(url, { retries = 3, delayMs = 800 } = {}) {
+  let backoff = delayMs;
   for (let i = 0; i <= retries; i++) {
     const res = await fetch(url, {
       headers: {
@@ -48,7 +49,10 @@ async function fetchHtml(url, { retries = 3, delayMs = 800 } = {}) {
       },
     });
     if (res.ok) return await res.text();
-    if (i < retries) await sleep(delayMs);
+    if (i < retries) {
+      await sleep(backoff);
+      backoff = Math.min(backoff * 2, 5000);
+    }
   }
   throw new Error(`GET ${url} failed after ${retries + 1} tries`);
 }
@@ -87,6 +91,7 @@ function mustTableByHeader($, keyLikes) {
   const candidates = $("table");
   for (const el of candidates.toArray()) {
     const { headers } = parseTable($, $(el));
+    if (!headers.length) continue;
     const ok = keyLikes.every((k) => headers.some((h) => h.includes(k)));
     if (ok) return $(el);
   }
@@ -132,7 +137,7 @@ function parseCourseStatsFromRcourse($) {
 }
 
 function parseKimariteFromRcourse($) {
-  const $tbl = mustTableByHeader($, ["コース", "出走数", "1着数", "逃げ", "差し", "まくり", "抜き", "恵まれ"]);
+  const $tbl = mustTableByHeader($, ["コース", "出走数", "1着数", "逃げ", "差し", "まくり"]);
   if (!$tbl) return null;
   const { headers, rows } = parseTable($, $tbl);
   const iCourse = headerIndex(headers, "コース");
@@ -173,9 +178,9 @@ function parseAvgSTFromCoursePage($) {
 
   let sum = 0, cnt = 0;
   for (const r of rows) {
-    const st = r[iST]; // ".15" / "F.01" / "L.10" など
+    const st = r[iST];            // ".15" / "F.01" / "L.10" など
     if (!st) continue;
-    if (/^[FL]/i.test(st)) continue;          // F/Lは除外
+    if (/^[FL]/i.test(st)) continue;     // F/Lは平均から除外
     const m = st.match(/-?\.?\d+(?:\.\d+)?/); // ".15" → .15
     if (!m) continue;
     const n = Number(m[0]);
@@ -186,7 +191,7 @@ function parseAvgSTFromCoursePage($) {
 }
 
 function parseLoseKimariteFromCoursePage($) {
-  // 全艇決まり手テーブル
+  // 「全艇決まり手」テーブルを利用（自艇行を除外して他艇の勝ち決まり手＝自艇の負けパターン）
   const $tbl = mustTableByHeader($, ["コース", "出走数", "1着数", "逃げ", "差し", "まくり"]);
   if (!$tbl) return null;
 
@@ -270,11 +275,11 @@ async function fetchOne(regno) {
         avgST: avgST ?? null,
         loseKimarite: loseKimarite ?? null,
       });
-      await sleep(WAIT_MS_BETWEEN_COURSE_PAGES);
     } catch (e) {
       console.warn(`warn: course page parse failed regno=${regno} course=${c}: ${e.message}`);
       courseDetails.push({ course: c, avgST: null, loseKimarite: null });
     }
+    await sleep(WAIT_MS_BETWEEN_COURSE_PAGES);
   }
 
   // 展示タイム順位別
