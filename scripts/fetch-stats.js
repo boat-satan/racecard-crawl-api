@@ -6,15 +6,18 @@
 //   - rcourse 各コース:  https://boatrace-db.net/racer/rcourse/regno/<regno>/course/<n>/ (n=1..6)
 //   - rdemo   展示順位:  https://boatrace-db.net/racer/rdemo/regno/<regno>/
 //
-// 変更点（2025-08-09 差し替え版）
-// - 既存出力が12時間以内ならスキップ
-// - HTTPリトライは1回（=最大2回試行）。404 も再試行対象に含む
+// 追加ポイント（A案: 途中コミット＆Push）
+//   - 既存ファイルが “12時間以内の更新” ならスキップ（SKIP_WINDOW_HOURS=12）
+//   - HTTPリトライは 1 回だけ（= 最大 2 トライ）
+//   - GIT_CHECKPOINT_N 人ごと / GIT_CHECKPOINT_SEC 秒ごとに git add/commit/push
+//   - SIGINT/SIGTERM でも最後に push 試行
 
 import { load } from "cheerio";
 import fs from "node:fs/promises";
 import fssync from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { execSync } from "node:child_process";
 
 // -------------------------------
 // 定数
@@ -28,13 +31,10 @@ const TODAY_ROOTS = [
   path.join(PUBLIC_DIR, "programs-slim", "v2", "today"),
 ];
 const OUTPUT_DIR = path.join(PUBLIC_DIR, "stats", "v1", "racers");
-
-// 既存ファイルのスキップ閾値（12時間）
-const SKIP_AGE_MS = 12 * 60 * 60 * 1000;
+const DEBUG_DIR  = path.join(PUBLIC_DIR, "debug");
 
 // polite wait
 const WAIT_MS_BETWEEN_RACERS = Number(process.env.STATS_DELAY_MS || 3000);
-// 各コース詳細ページの間隔（GitHub Actions では広めに）
 const WAIT_MS_BETWEEN_COURSE_PAGES = Number(process.env.COURSE_WAIT_MS || 1200);
 
 // env
@@ -42,42 +42,41 @@ const ENV_RACERS       = process.env.RACERS?.trim() || "";
 const ENV_RACERS_LIMIT = Number(process.env.RACERS_LIMIT ?? "");
 const ENV_BATCH        = Number(process.env.STATS_BATCH ?? "");
 
+// 既存ファイルスキップの時間窓（時間）
+const SKIP_WINDOW_HOURS = Number(process.env.SKIP_WINDOW_HOURS || 12);
+
+// チェックポイント push 設定
+const GIT_CHECKPOINT_N   = Number(process.env.GIT_CHECKPOINT_N || 10);    // N人ごと
+const GIT_CHECKPOINT_SEC = Number(process.env.GIT_CHECKPOINT_SEC || 300);  // 秒ごと（5分）
+const GIT_COMMIT_MESSAGE = process.env.GIT_COMMIT_MESSAGE || "Update racer stats (checkpoint) [skip ci]";
+
+// HTTP リトライ（最大試行回数 = 1回リトライ → 2トライ）
+const MAX_RETRY = 1;
+const BASE_DELAY_MS = 2500;
+const TIMEOUT_MS = 20000;
+
 // -------------------------------
 // ユーティリティ
 // -------------------------------
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/**
- * 既存ファイルが「12時間以内に更新されていれば」true を返す
- */
-async function isFresh(file) {
+async function pathMtimeHours(p) {
   try {
-    const st = await fs.stat(file);
-    const age = Date.now() - st.mtimeMs;
-    return age >= 0 && age <= SKIP_AGE_MS;
+    const st = await fs.stat(p);
+    const ageMs = Date.now() - st.mtimeMs;
+    return ageMs / 1000 / 3600;
   } catch {
-    return false;
+    return Infinity;
   }
 }
 
 /**
- * fetchHtml: UA/Referer/言語ヘッダ付き、リトライ簡易版
- * - リトライ回数は 1 回（=最大2回試行）
- * - 404 も含め、[404,403,429,500,502,503,504] は再試行対象
+ * fetchHtml: UA/Referer/言語ヘッダ付き、リトライ(1回)版
  */
-async function fetchHtml(
-  url,
-  {
-    retries = 1,       // ★ 1回だけ再試行
-    baseDelayMs = 2000,
-    timeoutMs = 20000,
-  } = {}
-) {
-  const makeAC = () => new AbortController();
-
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    const ac = makeAC();
-    const t = setTimeout(() => ac.abort(), timeoutMs);
+async function fetchHtml(url) {
+  for (let attempt = 0; attempt <= MAX_RETRY; attempt++) {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), TIMEOUT_MS);
 
     try {
       const res = await fetch(url, {
@@ -93,28 +92,28 @@ async function fetchHtml(
       });
 
       if (res.ok) {
-        clearTimeout(t);
+        clearTimeout(timer);
         return await res.text();
       }
 
-      const retriable = [404, 403, 429, 500, 502, 503, 504].includes(res.status);
-      const body = await res.text().catch(() => "");
-      if (!retriable || attempt === retries) {
-        clearTimeout(t);
+      // リトライ対象
+      const retriable = [403, 404, 429, 500, 502, 503, 504].includes(res.status);
+      if (!retriable || attempt === MAX_RETRY) {
+        const body = await res.text().catch(() => "");
+        clearTimeout(timer);
         throw new Error(`HTTP ${res.status} ${res.statusText} @ ${url} ${body?.slice(0, 120)}`);
       }
 
-      clearTimeout(t);
-      const delay = Math.round(baseDelayMs * (0.9 + Math.random() * 0.4)); // 少しジッター
-      await sleep(delay);
+      clearTimeout(timer);
+      await sleep(Math.round(BASE_DELAY_MS * (0.8 + Math.random() * 0.4)));
       continue;
+
     } catch (err) {
-      clearTimeout(t);
-      if (attempt === retries) {
-        throw new Error(`GET failed after ${retries + 1} tries: ${url} :: ${err.message}`);
+      clearTimeout(err?.name === "AbortError" ? undefined : undefined);
+      if (attempt === MAX_RETRY) {
+        throw new Error(`GET failed after ${MAX_RETRY + 1} tries: ${url} :: ${err.message}`);
       }
-      const delay = Math.round(baseDelayMs * (0.9 + Math.random() * 0.4));
-      await sleep(delay);
+      await sleep(Math.round(BASE_DELAY_MS * (0.8 + Math.random() * 0.4)));
     }
   }
   throw new Error(`unreachable fetch loop for ${url}`);
@@ -356,10 +355,10 @@ async function fetchOne(regno) {
     regno: Number(regno),
     sources: { rcourse: uRcourse, rdemo: uRdemo, coursePages },
     fetchedAt: new Date().toISOString(),
-    courseStats,     // [{course, starts, top1Rate, top2Rate, top3Rate, winRate:null}]
-    courseKimarite,  // [{course, detail:{逃げ:{count,rate},…}}]
-    courseDetails,   // [{course, avgST, loseKimarite:{逃げ:xx,…}}]
-    exTimeRank,      // [{rank, winRate, top2Rate, top3Rate}]
+    courseStats,
+    courseKimarite,
+    courseDetails,
+    exTimeRank,
   };
 }
 
@@ -384,9 +383,11 @@ async function collectRacersFromToday() {
         const full = path.join(dayDir, f);
         try {
           const json = JSON.parse(await fs.readFile(full, "utf8"));
-          const boats = json?.boats || json?.program?.boats || [];
+          const boats = json?.boats || json?.program?.boats || json?.entries || [];
           for (const b of boats) {
-            const r = b.racer_number ?? b.racerNumber ?? b.racer?.number;
+            const r =
+              b.racer_number ?? b.racerNumber ?? b.racer?.number ??
+              b.number ?? null;
             if (r) set.add(String(r));
           }
         } catch {}
@@ -398,6 +399,46 @@ async function collectRacersFromToday() {
 
 async function ensureDir(p) {
   await fs.mkdir(p, { recursive: true });
+}
+
+// -------------------------------
+// Git チェックポイント
+// -------------------------------
+let processedSinceLastPush = 0;
+let lastPushAt = Date.now();
+
+function shouldCheckpoint() {
+  const byCount = GIT_CHECKPOINT_N > 0 && processedSinceLastPush >= GIT_CHECKPOINT_N;
+  const byTime  = GIT_CHECKPOINT_SEC > 0 && (Date.now() - lastPushAt) / 1000 >= GIT_CHECKPOINT_SEC;
+  return byCount || byTime;
+}
+
+function gitSafe(cmd) {
+  try {
+    return execSync(cmd, { stdio: "inherit" });
+  } catch (e) {
+    console.warn(`git cmd failed: ${cmd} :: ${e.message}`);
+    return null;
+  }
+}
+
+function gitCheckpointPush(label = "checkpoint") {
+  try {
+    // add 変更だけでOK
+    gitSafe(`git add -A ${OUTPUT_DIR} ${DEBUG_DIR} || true`);
+    // 差分なければ抜ける
+    const diff = execSync("git diff --cached --quiet || echo CHANGED", { encoding: "utf8" }).trim();
+    if (!diff) return;
+
+    gitSafe(`git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -m "${GIT_COMMIT_MESSAGE} (${label})"`);
+    // push は1回だけ試行（衝突は後段の再base等、別ジョブで調整する方針）
+    gitSafe("git push || true");
+
+    processedSinceLastPush = 0;
+    lastPushAt = Date.now();
+  } catch (e) {
+    console.warn(`checkpoint push failed: ${e.message}`);
+  }
 }
 
 // -------------------------------
@@ -422,40 +463,51 @@ async function main() {
     return;
   }
 
+  await ensureDir(OUTPUT_DIR);
+  await ensureDir(DEBUG_DIR);
+
   console.log(
     `process ${racers.length} racers` +
       (ENV_RACERS ? " (env RACERS specified)" : "") +
       (ENV_RACERS_LIMIT ? ` (limit=${ENV_RACERS_LIMIT})` : "") +
-      (ENV_BATCH ? ` (batch=${ENV_BATCH})` : "")
+      (ENV_BATCH ? ` (batch=${ENV_BATCH})` : "") +
+      ` | skip-if-mtime<${SKIP_WINDOW_HOURS}h`
   );
 
-  await ensureDir(OUTPUT_DIR);
+  // 中断時にも最後の push
+  const onExit = () => {
+    try { gitCheckpointPush("final"); } catch {}
+    process.exit();
+  };
+  process.on("SIGINT", onExit);
+  process.on("SIGTERM", onExit);
 
-  let ok = 0, ng = 0, skip = 0;
+  let ok = 0, ng = 0;
+
   for (const regno of racers) {
     const outPath = path.join(OUTPUT_DIR, `${regno}.json`);
-
-    if (await isFresh(outPath)) {
-      console.log(`⏭  skip fresh (<=12h): ${path.relative(PUBLIC_DIR, outPath)}`);
-      skip++;
-      continue;
+    const mtimeH = await pathMtimeHours(outPath);
+    if (mtimeH < SKIP_WINDOW_HOURS) {
+      console.log(`⏭  skip ${regno} (updated ${mtimeH.toFixed(1)}h ago < ${SKIP_WINDOW_HOURS}h)`);
+    } else {
+      try {
+        const data = await fetchOne(regno);
+        await fs.writeFile(outPath, JSON.stringify(data, null, 2), "utf8");
+        console.log(`✅ wrote ${path.relative(PUBLIC_DIR, outPath)}`);
+        ok++;
+      } catch (e) {
+        console.warn(`❌ ${regno}: ${e.message}`);
+        ng++;
+      }
+      await sleep(WAIT_MS_BETWEEN_RACERS);
     }
 
-    try {
-      const data = await fetchOne(regno);
-      await fs.writeFile(outPath, JSON.stringify(data, null, 2), "utf8");
-      console.log(`✅ wrote ${path.relative(PUBLIC_DIR, outPath)}`);
-      ok++;
-    } catch (e) {
-      console.warn(`❌ ${regno}: ${e.message}`);
-      ng++;
-    }
-    await sleep(WAIT_MS_BETWEEN_RACERS);
+    processedSinceLastPush++;
+    if (shouldCheckpoint()) gitCheckpointPush("periodic");
   }
 
-  await ensureDir(path.join(PUBLIC_DIR, "debug"));
   await fs.writeFile(
-    path.join(PUBLIC_DIR, "debug", "stats-meta.json"),
+    path.join(DEBUG_DIR, "stats-meta.json"),
     JSON.stringify(
       {
         status: 200,
@@ -463,17 +515,20 @@ async function main() {
         racers: racers.map((r) => Number(r)),
         success: ok,
         failed: ng,
-        skippedFresh: skip,
-        skipWindowHours: SKIP_AGE_MS / 3600000,
       },
       null,
       2
     ),
     "utf8"
   );
+
+  // 最後にもう一度 Push
+  gitCheckpointPush("final");
 }
 
 main().catch((e) => {
   console.error(e);
+  // 最後に push だけ試す
+  try { gitCheckpointPush("final-error"); } catch {}
   process.exit(1);
 });
