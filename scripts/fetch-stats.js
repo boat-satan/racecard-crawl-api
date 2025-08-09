@@ -1,22 +1,15 @@
 // scripts/fetch-stats.js
-// Node v20 (fetch 同梱) / ESM / cheerio v1.x
-// 参照:
-//  - コース別成績・決まり手: https://boatrace-db.net/racer/index2/regno/<regno>/
-//  - 展示タイム順位別成績:   https://boatrace-db.net/racer/rdemo/regno/<regno>/
+// Node v20 / ESM / cheerio v1.x
 // 出力: public/stats/v1/racers/<regno>.json
+// 取得元:
+//  - index2: https://boatrace-db.net/racer/index2/regno/<regno>/
+//  - rdemo : https://boatrace-db.net/racer/rdemo/regno/<regno>/
 
 import { load } from "cheerio";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { exec as _exec } from "node:child_process";
-import { promisify } from "node:util";
 
-const exec = promisify(_exec);
-
-// --------------------------------------------------
-// パス
-// --------------------------------------------------
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -28,20 +21,10 @@ const TODAY_ROOTS = [
 
 const OUTPUT_DIR = path.join(PUBLIC_DIR, "stats", "v1", "racers");
 
-// --------------------------------------------------
-// 設定（環境変数で上書き可）
-// --------------------------------------------------
-const STATS_DELAY_MS = Number(process.env.STATS_DELAY_MS ?? 3000) || 3000; // 1選手ごと待機ms
-const STATS_BATCH = Number(process.env.STATS_BATCH ?? 0) || 0; // 0=無制限 / N人だけ処理
-const PUSH_EACH = process.env.STATS_PUSH_EACH === "1"; // 1なら1人ごとにpush
-// 手動抽出: RACERS="4349,3156"
-
-// --------------------------------------------------
-// ユーティリティ
-// --------------------------------------------------
+// ---------- utils ----------
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function fetchHtml(url, { retries = 3, delayMs = 1000 } = {}) {
+async function fetchHtml(url, { retries = 3, delayMs = 800 } = {}) {
   let lastErr;
   for (let i = 0; i <= retries; i++) {
     try {
@@ -62,208 +45,154 @@ async function fetchHtml(url, { retries = 3, delayMs = 1000 } = {}) {
   throw new Error(`GET ${url} failed after ${retries + 1} tries: ${lastErr?.message ?? ""}`);
 }
 
-function normText(t) {
-  return (t ?? "")
+const norm = (t) =>
+  String(t ?? "")
     .replace(/\u00A0/g, " ")
     .replace(/\s+/g, " ")
-    .replace(/^[\s\n\t]+|[\s\n\t]+$/g, "");
-}
+    .trim();
 
-function toNumber(v) {
+function num(v) {
   if (v == null) return null;
   const s = String(v).replace(/[,%]/g, "");
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
 }
 
-function findNearestTableByHeading($, headingText) {
-  // 見出しテキストにマッチする要素を広く拾って、その近傍/後続のtableを返す
-  const $cands = $(
-    `h1,h2,h3,h4,strong,b,legend,th,td,div,span,p:contains("${headingText}")`
-  );
-  for (const el of $cands.toArray()) {
-    const $el = $(el);
-    // 直後 or 親の後続
-    let $tbl = $el.nextAll("table").first();
-    if (!$tbl || $tbl.length === 0) $tbl = $el.parent().nextAll("table").first();
-    // 同コンテナから最初のtable
-    if ((!$tbl || $tbl.length === 0) && $el.closest("section,article,div").length) {
-      $tbl = $el.closest("section,article,div").find("table").first();
-    }
-    if ($tbl && $tbl.length) return $tbl;
-  }
-  return null;
-}
-
 function parseTable($tbl) {
   const headers = [];
-  $tbl.find("thead th, thead td").each((_, th) => headers.push(normText($(th).text())));
-  if (headers.length === 0) {
-    const firstRow = $tbl.find("tr").first();
-    firstRow.find("th,td").each((_, th) => headers.push(normText($(th).text())));
+  // theadが無いケース対策
+  const $theadCells = $tbl.find("thead th, thead td");
+  if ($theadCells.length) {
+    $theadCells.each((_, th) => headers.push(norm($(th).text())));
+  } else {
+    const $first = $tbl.find("tr").first();
+    $first.find("th,td").each((_, th) => headers.push(norm($(th).text())));
   }
   const rows = [];
   $tbl.find("tbody tr").each((_, tr) => {
     const cells = [];
-    $(tr).find("th,td").each((_, td) => cells.push(normText($(td).text())));
+    $(tr)
+      .find("th,td")
+      .each((_, td) => cells.push(norm($(td).text())));
     if (cells.length) rows.push(cells);
   });
   return { headers, rows };
 }
 
-function headerIndexMap(headers, keys) {
-  const map = {};
-  for (const k of keys) {
-    const idx = headers.findIndex((h) => h.includes(k));
-    map[k] = idx >= 0 ? idx : -1;
+// ---------- parsers: index2 ----------
+function parseCourseStatsFromIndex2($) {
+  // table.tRacerCourse が最優先
+  let $tbl = $("table.tRacerCourse").first();
+  if (!$tbl.length) {
+    // 見出しフォールバック
+    const $h = $(":contains('コース別成績')").filter((_, el) => /コース別成績/.test($(el).text())).first();
+    if ($h.length) $tbl = $h.nextAll("table").first();
   }
-  return map;
-}
-
-// --------------------------------------------------
-// パーサ: index2 (コース別成績 / 決まり手)
-// --------------------------------------------------
-function parseIndex2CourseStats($) {
-  const $tbl =
-    findNearestTableByHeading($, "コース別成績") ||
-    findNearestTableByHeading($, "コース成績");
-  if (!$tbl) return null;
+  if (!$tbl.length) return null;
 
   const { headers, rows } = parseTable($tbl);
-  const idx = headerIndexMap(headers, [
-    "コース", "出走数", "勝率", "1着率", "２連対率", "3連対率", "平均ST", "平均ST順",
-  ]);
+  const idx = {
+    course: headers.findIndex((h) => h.includes("コース")),
+    race: headers.findIndex((h) => h.includes("出走")),
+    winCnt: headers.findIndex((h) => h.includes("1着数")),
+    winRate: headers.findIndex((h) => h.includes("1着率")),
+    top2: headers.findIndex((h) => h.includes("2連対率")),
+    top3: headers.findIndex((h) => h.includes("3連対率")),
+    st: headers.findIndex((h) => h.includes("平均ST")),
+    stRank: headers.findIndex((h) => h.includes("平均ST順")),
+  };
 
-  const out = [];
+  const items = [];
   for (const r of rows) {
-    const courseTxt = idx["コース"] >= 0 ? r[idx["コース"]] : r[0] ?? "";
-    const m = courseTxt.match(/([1-6])/);
+    const m = (r[idx.course] ?? r[0] ?? "").match(/([1-6])コース/);
     if (!m) continue;
-    out.push({
+    items.push({
       course: Number(m[1]),
-      starts: idx["出走数"] >= 0 ? toNumber(r[idx["出走数"]]) : null,
-      winRate: idx["勝率"] >= 0 ? toNumber(r[idx["勝率"]]) : null,
-      top1Rate: idx["1着率"] >= 0 ? toNumber(r[idx["1着率"]]) : null,
-      top2Rate: idx["２連対率"] >= 0 ? toNumber(r[idx["２連対率"]]) : null,
-      top3Rate: idx["3連対率"] >= 0 ? toNumber(r[idx["3連対率"]]) : null,
-      avgST: idx["平均ST"] >= 0 ? toNumber(r[idx["平均ST"]]) : null,
-      avgSTRank: idx["平均ST順"] >= 0 ? toNumber(r[idx["平均ST順"]]) : null,
+      starts: num(r[idx.race]),
+      winCount: num(r[idx.winCnt]),
+      winRate: num(r[idx.winRate]),
+      top2Rate: num(r[idx.top2]),
+      top3Rate: num(r[idx.top3]),
+      avgST: idx.st >= 0 ? num(r[idx.st]) : null,
+      avgSTRank: idx.stRank >= 0 ? num(r[idx.stRank]) : null,
       raw: r,
     });
   }
-  out.sort((a, b) => a.course - b.course);
-  return out.length ? out : null;
+  items.sort((a, b) => a.course - b.course);
+  return items.length ? items : null;
 }
 
-function parseIndex2Kimarite($) {
-  const $tbl =
-    findNearestTableByHeading($, "コース別決まり手") ||
-    findNearestTableByHeading($, "決まり手（コース別）") ||
-    findNearestTableByHeading($, "決まり手");
-  if (!$tbl) return null;
+function parseKimariteFromIndex2($) {
+  let $tbl = $("table.tRacerTech").first();
+  if (!$tbl.length) {
+    const $h = $(":contains('コース別決まり手')")
+      .filter((_, el) => /決まり手/.test($(el).text()))
+      .first();
+    if ($h.length) $tbl = $h.nextAll("table").first();
+  }
+  if (!$tbl.length) return null;
 
   const { headers, rows } = parseTable($tbl);
-  const kimariteKeys = headers.slice(2); // [コース,出走数, ...決まり手列]
-  const out = [];
+  const keys = headers.slice(3); // 1列目=コース,2=出走数,3=1着数, 以降=各決まり手
+  const items = [];
   for (const r of rows) {
-    const courseTxt = r[0] ?? "";
-    const m = courseTxt.match(/([1-6])/);
+    const m = (r[0] ?? "").match(/([1-6])コース/);
     if (!m) continue;
     const detail = {};
-    kimariteKeys.forEach((k, i) => {
-      const v = r[i + 2]; // 2列目以降
+    keys.forEach((k, i) => {
+      const v = r[3 + i];
+      const pct = v?.match(/([-+]?\d+(?:\.\d+)?)\s*%/);
       const cnt = v?.match(/(\d+)/);
-      const pct = v?.match(/([-+]?\d+(\.\d+)?)\s*%/);
       detail[k] = {
-        count: cnt ? toNumber(cnt[1]) : null,
-        rate: pct ? toNumber(pct[1]) : null,
+        count: cnt ? num(cnt[1]) : num(v),
+        rate: pct ? num(pct[1]) : null,
         raw: v ?? null,
       };
     });
-    out.push({ course: Number(m[1]), detail, raw: r });
+    items.push({ course: Number(m[1]), detail, raw: r });
   }
-  out.sort((a, b) => a.course - b.course);
-  return out.length ? out : null;
+  items.sort((a, b) => a.course - b.course);
+  return items.length ? items : null;
 }
 
-// --------------------------------------------------
-// パーサ: rdemo (展示タイム順位別成績)
-// --------------------------------------------------
-function parseRdemoExTime($) {
-  const $tbl =
-    findNearestTableByHeading($, "展示タイム順位別成績") ||
-    findNearestTableByHeading($, "展示タイム順位");
-  if (!$tbl) return null;
+// ---------- parsers: rdemo ----------
+function parseExTimeRankFromRdemo($) {
+  // 見出しは「直近6か月の展示タイム順位別成績」
+  // テーブルはクラスが安定しないのでヘッダで拾う
+  let $tbl = $("table:contains('順位')").filter((_, t) => {
+    const { headers } = parseTable($(t));
+    return headers.some((h) => /順位/.test(h)) && headers.some((h) => /2連対率/.test(h));
+  }).first();
+
+  if (!$tbl.length) {
+    const $h = $(":contains('展示タイム順位')").first();
+    if ($h.length) $tbl = $h.nextAll("table").first();
+  }
+  if (!$tbl.length) return null;
 
   const { headers, rows } = parseTable($tbl);
-  const idx = headerIndexMap(headers, ["順位", "勝率", "2連対率", "3連対率", "出走数", "1着数", "2着数", "3着数"]);
-  const out = [];
+  const idxRank = headers.findIndex((h) => h.includes("順位"));
+  const idxWin = headers.findIndex((h) => h.includes("1着率"));
+  const idxTop2 = headers.findIndex((h) => h.includes("2連対率"));
+  const idxTop3 = headers.findIndex((h) => h.includes("3連対率"));
+
+  const items = [];
   for (const r of rows) {
-    const rankTxt = idx["順位"] >= 0 ? r[idx["順位"]] : r[0] ?? "";
-    const m = rankTxt.match(/([1-6])/);
+    const m = (r[idxRank] ?? r[0] ?? "").match(/([1-6])位/);
     if (!m) continue;
-    out.push({
+    items.push({
       rank: Number(m[1]),
-      starts: idx["出走数"] >= 0 ? toNumber(r[idx["出走数"]]) : null,
-      firsts: idx["1着数"] >= 0 ? toNumber(r[idx["1着数"]]) : null,
-      seconds: idx["2着数"] >= 0 ? toNumber(r[idx["2着数"]]) : null,
-      thirds: idx["3着数"] >= 0 ? toNumber(r[idx["3着数"]]) : null,
-      winRate: idx["勝率"] >= 0 ? toNumber(r[idx["勝率"]]) : null,
-      top2Rate: idx["2連対率"] >= 0 ? toNumber(r[idx["2連対率"]]) : null,
-      top3Rate: idx["3連対率"] >= 0 ? toNumber(r[idx["3連対率"]]) : null,
+      winRate: num(r[idxWin]),
+      top2Rate: num(r[idxTop2]),
+      top3Rate: num(r[idxTop3]),
       raw: r,
     });
   }
-  out.sort((a, b) => a.rank - b.rank);
-  return out.length ? out : null;
+  items.sort((a, b) => a.rank - b.rank);
+  return items.length ? items : null;
 }
 
-// --------------------------------------------------
-// 1選手分の取得
-// --------------------------------------------------
-async function fetchOne(regno) {
-  const reg = String(regno).trim();
-  const urlIndex2 = `https://boatrace-db.net/racer/index2/regno/${reg}/`;
-  const urlRdemo  = `https://boatrace-db.net/racer/rdemo/regno/${reg}/`;
-
-  // index2
-  let courseStats = null;
-  let courseKimarite = null;
-  try {
-    const html = await fetchHtml(urlIndex2, { retries: 3, delayMs: 1500 });
-    const $ = load(html);
-    courseStats = parseIndex2CourseStats($);
-    courseKimarite = parseIndex2Kimarite($);
-  } catch (e) {
-    console.warn(`warn: index2 fetch/parse failed for ${reg}: ${e.message}`);
-  }
-
-  // rdemo
-  let exTimeRank = null;
-  try {
-    const html = await fetchHtml(urlRdemo, { retries: 3, delayMs: 1500 });
-    const $ = load(html);
-    exTimeRank = parseRdemoExTime($);
-  } catch (e) {
-    console.warn(`warn: rdemo fetch/parse failed for ${reg}: ${e.message}`);
-  }
-
-  return {
-    regno: Number(reg),
-    fetchedAt: new Date().toISOString(),
-    sources: {
-      index2: urlIndex2,
-      rdemo: urlRdemo,
-    },
-    courseStats,     // [{course, starts, winRate, top1Rate, top2Rate, top3Rate, avgST, avgSTRank, raw}]
-    courseKimarite,  // [{course, detail:{逃げ:{count,rate},…}, raw}]
-    exTimeRank,      // [{rank, starts, firsts, seconds, thirds, winRate, top2Rate, top3Rate, raw}]
-  };
-}
-
-// --------------------------------------------------
-// today 配下から今日の出走選手を列挙
-// --------------------------------------------------
+// ---------- collect racers from today ----------
 async function collectRacersFromToday() {
   const set = new Set();
   for (const root of TODAY_ROOTS) {
@@ -276,10 +205,7 @@ async function collectRacersFromToday() {
     for (const d of entries) {
       if (!d.isDirectory()) continue;
       const dayDir = path.join(root, d.name);
-      let files = [];
-      try {
-        files = await fs.readdir(dayDir);
-      } catch {}
+      const files = await fs.readdir(dayDir).catch(() => []);
       for (const f of files) {
         if (!f.endsWith(".json")) continue;
         const full = path.join(dayDir, f);
@@ -301,83 +227,94 @@ async function ensureDir(p) {
   await fs.mkdir(p, { recursive: true });
 }
 
-async function writeAndStage(relPath, data) {
-  const abs = path.join(PUBLIC_DIR, relPath);
-  await fs.mkdir(path.dirname(abs), { recursive: true });
-  await fs.writeFile(abs, data, "utf8");
-  await exec(`git add ${JSON.stringify(relPath)}`);
-  return abs;
+// ---------- main fetch ----------
+async function fetchOne(regno) {
+  // index2（通算のコース別＆決まり手）
+  const index2Url = `https://boatrace-db.net/racer/index2/regno/${regno}/`;
+  // rdemo（展示タイム順位別）
+  const rdemoUrl = `https://boatrace-db.net/racer/rdemo/regno/${regno}/`;
+
+  let courseStats = null;
+  let courseKimarite = null;
+  let exTimeRank = null;
+
+  try {
+    const html = await fetchHtml(index2Url);
+    const $ = load(html);
+    courseStats = parseCourseStatsFromIndex2($);
+    courseKimarite = parseKimariteFromIndex2($);
+    if (!courseStats && !courseKimarite) {
+      console.warn(`warn: index2 fetch/parse failed for ${regno}`);
+    }
+  } catch (e) {
+    console.warn(`warn: index2 fetch/parse failed for ${regno}: ${e.message}`);
+  }
+
+  try {
+    const html = await fetchHtml(rdemoUrl);
+    const $ = load(html);
+    exTimeRank = parseExTimeRankFromRdemo($);
+    if (!exTimeRank) {
+      console.warn(`warn: rdemo fetch/parse failed for ${regno}`);
+    }
+  } catch (e) {
+    console.warn(`warn: rdemo fetch/parse failed for ${regno}: ${e.message}`);
+  }
+
+  return {
+    regno: Number(regno),
+    source: { index2: index2Url, rdemo: rdemoUrl },
+    fetchedAt: new Date().toISOString(),
+    courseStats,
+    courseKimarite,
+    exTimeRank,
+  };
 }
 
-// --------------------------------------------------
-// メイン
-// --------------------------------------------------
 async function main() {
-  // Git user は workflow 側で設定済みを想定
+  await ensureDir(OUTPUT_DIR);
+
+  // 単発テスト: RACERS="5044,3898" のように指定
   let racers = [];
-  if (process.env.RACERS?.trim()) {
-    racers = process.env.RACERS.split(",").map((s) => s.trim()).filter(Boolean);
+  const env = process.env.RACERS?.trim();
+  if (env) {
+    racers = env.split(",").map((s) => s.trim()).filter(Boolean);
   } else {
     racers = await collectRacersFromToday();
   }
 
-  if (STATS_BATCH > 0 && racers.length > STATS_BATCH) {
-    racers = racers.slice(0, STATS_BATCH);
-    console.log(`batch mode: process first ${STATS_BATCH} racers`);
-  }
-
   if (racers.length === 0) {
-    console.log("No racers to fetch. (Set RACERS or put today programs)");
+    console.log("No racers to fetch. (Set RACERS env or put today programs)");
     return;
   }
 
-  await ensureDir(OUTPUT_DIR);
-
+  // 途中停止しても進捗がコミットされるよう1件ずつ書き出す
   let ok = 0, ng = 0;
-  let staged = false;
-
   for (const regno of racers) {
     try {
       const data = await fetchOne(regno);
-      const rel = path.join("stats", "v1", "racers", `${regno}.json`);
-      await writeAndStage(path.join("public", rel), JSON.stringify(data, null, 2));
-      console.log(`✅ wrote ${rel}`);
+      const outPath = path.join(OUTPUT_DIR, `${regno}.json`);
+      await fs.writeFile(outPath, JSON.stringify(data, null, 2), "utf8");
+      console.log(`✅ wrote ${path.relative(PUBLIC_DIR, outPath)}`);
       ok++;
-      staged = true;
-
-      if (PUSH_EACH) {
-        await exec(`git commit -m "chore: stats ${regno} [skip ci]" || true`);
-        await exec(`git push || true`);
-        staged = false;
-      }
-
-      await sleep(STATS_DELAY_MS);
+      // サーバの「3秒」指示に合わせて丁寧に
+      await sleep(3000);
     } catch (e) {
       console.warn(`❌ ${regno}: ${e.message}`);
       ng++;
     }
   }
 
-  // メタ
-  const meta = {
-    status: 200,
-    fetchedAt: new Date().toISOString(),
-    racers: racers.map(Number),
-    success: ok,
-    failed: ng,
-    delayMs: STATS_DELAY_MS,
-    batch: STATS_BATCH,
-  };
-  await writeAndStage(
-    path.join("public", "debug", "stats-meta.json"),
-    JSON.stringify(meta, null, 2)
+  await ensureDir(path.join(PUBLIC_DIR, "debug"));
+  await fs.writeFile(
+    path.join(PUBLIC_DIR, "debug", "stats-meta.json"),
+    JSON.stringify(
+      { status: 200, fetchedAt: new Date().toISOString(), racers: racers.map(Number), success: ok, failed: ng },
+      null,
+      2
+    ),
+    "utf8"
   );
-  staged = true;
-
-  if (staged) {
-    await exec(`git commit -m "chore: publish stats (${ok} ok/${ng} ng) [skip ci]" || true`);
-    await exec(`git push || true`);
-  }
 }
 
 main().catch((e) => {
