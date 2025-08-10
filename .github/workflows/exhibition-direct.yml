@@ -1,35 +1,30 @@
-name: Test Exhibition Direct (Full Auto)
+name: Test Exhibition Direct (T-15 auto)
 
 on:
-  # 手動実行：空ならJST今日・全場・全Rで動く
   workflow_dispatch:
     inputs:
       date:
-        description: "YYYYMMDD（空ならJST今日）"
+        description: "YYYYMMDD（空ならJSTの今日）"
         required: false
         default: ""
-      pids:
-        description: "01..24 のカンマ or ALL（空ならALL）"
+      pid:
+        description: "場コード 01..24 / 'ALL' も可（空なら ALL）"
         required: false
         default: "ALL"
-      races:
-        description: "1..12 のカンマ/範囲 or ALL（空ならALL）"
+      race:
+        description: "※手動指定時だけ使う。通常は自動T-15で無視"
         required: false
-        default: "ALL"
-  # 毎分トリガ（UTC）。時間帯は後段のゲートでJST判定して外なら即スキップ
+        default: ""
   schedule:
-    - cron: "* * * * *"
+    - cron: "* * * * *"   # 毎分。JSTウィンドウはジョブ内で判定
 
 permissions:
   contents: write
 
-concurrency:
-  group: exhibition-direct
-  cancel-in-progress: false
-
 jobs:
   run:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -39,70 +34,104 @@ jobs:
       - name: Install deps
         run: npm ci || npm i --no-audit --no-fund
 
-      # JST日付と時間帯ゲート、入力のデフォルト補完
-      - name: Prepare date & targets (JST)
-        id: prep
+      # JSTの現在時刻を計算し、07:30〜22:00の間だけ実行するフラグを出す
+      - name: Compute JST window
+        id: jst
         shell: bash
         run: |
-          set -euo pipefail
+          # JST now
+          JST_NOW="$(date -u -d '+9 hour' +'%Y-%m-%d %H:%M:%S')"
+          HOUR=$(date -u -d '+9 hour' +%H)
+          MIN=$(date -u -d '+9 hour' +%M)
 
-          IN_DATE="${{ inputs.date || '' }}"
-          IN_PIDS="${{ inputs.pids || '' }}"
-          IN_RACES="${{ inputs.races || '' }}"
-
-          DATE_JST="$(TZ=Asia/Tokyo date +%Y%m%d)"
-          H="$(TZ=Asia/Tokyo date +%H)"
-          M="$(TZ=Asia/Tokyo date +%M)"
-          MINUTES=$((10#$H*60 + 10#$M))
-
-          # 実行許可は 07:30 <= JST < 22:00
-          START=$((7*60 + 30))
-          END=$((22*60))
-          RUN=0
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            RUN=1
-          else
-            if [ $MINUTES -ge $START ] && [ $MINUTES -lt $END ]; then
-              RUN=1
+          IN_WINDOW=false
+          if [ "$HOUR" -ge 7 ] && [ "$HOUR" -lt 22 ]; then
+            # 07:30〜21:59
+            if [ "$HOUR" -gt 7 ] || [ "$MIN" -ge 30 ]; then
+              IN_WINDOW=true
             fi
+          elif [ "$HOUR" -eq 22 ]; then
+            # 22:00 ちょうどもOK（念のため。必要なければ削ってOK）
+            IN_WINDOW=true
           fi
 
-          DATE="${IN_DATE:-$DATE_JST}"
-          PIDS="${IN_PIDS:-ALL}"
-          RACES="${IN_RACES:-ALL}"
+          # 手動実行時は常に実行
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            IN_WINDOW=true
+          fi
 
-          echo "date=${DATE}"  >> "$GITHUB_OUTPUT"
-          echo "pids=${PIDS}"  >> "$GITHUB_OUTPUT"
-          echo "races=${RACES}" >> "$GITHUB_OUTPUT"
-          echo "run=${RUN}"    >> "$GITHUB_OUTPUT"
+          # デフォルト DATE（入力が空のとき）
+          DEF_DATE="$(date -u -d '+9 hour' +%Y%m%d)"
 
-          echo "JST now: $(TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M') / RUN=$RUN"
-          echo "Targets -> date=$DATE pids=$PIDS races=$RACES"
+          echo "jst_now=$JST_NOW"            >> $GITHUB_OUTPUT
+          echo "in_window=$IN_WINDOW"        >> $GITHUB_OUTPUT
+          echo "default_date=$DEF_DATE"      >> $GITHUB_OUTPUT
 
-      - name: Skip outside JST window
-        if: steps.prep.outputs.run != '1'
-        run: echo "Outside JST 07:30-22:00 -> skip."
+          echo "JST_NOW=$JST_NOW"
+          echo "IN_WINDOW=$IN_WINDOW"
+          echo "DEF_DATE=$DEF_DATE"
 
-      - name: Run exhibition crawler
-        if: steps.prep.outputs.run == '1'
+      - name: Early exit when out of window
+        if: ${{ steps.jst.outputs.in_window != 'true' }}
         run: |
-          set -euo pipefail
-          node scripts/fetch-exhibition-direct.js \
-            "${{ steps.prep.outputs.date }}" \
-            "${{ steps.prep.outputs.pids }}" \
-            "${{ steps.prep.outputs.races }}" \
-            --skip-existing
+          echo "Out of JST window (07:30-22:00). Skip."
+          exit 0
+
+      - name: Resolve inputs (DATE / PIDS / RACES mode)
+        id: args
+        shell: bash
+        run: |
+          DATE_IN="${{ inputs.date }}"
+          PID_IN="${{ inputs.pid }}"
+          RACE_IN="${{ inputs.race }}"
+
+          # DATE
+          if [ -z "$DATE_IN" ]; then
+            DATE="${{ steps.jst.outputs.default_date }}"
+          else
+            DATE="$DATE_IN"
+          fi
+
+          # PIDS
+          if [ -z "$PID_IN" ] || [ "$PID_IN" = "ALL" ]; then
+            PIDS="$(printf '%02d,' $(seq 1 24) | sed 's/,$//')"
+          else
+            PIDS="$PID_IN"
+          fi
+
+          # RACES は自動T-15に任せる（手動でrace指定した時だけそれを使う）
+          if [ -n "$RACE_IN" ]; then
+            RACES="$RACE_IN"
+          else
+            RACES="AUTO_T15"
+          fi
+
+          echo "DATE=$DATE"   >> $GITHUB_OUTPUT
+          echo "PIDS=$PIDS"   >> $GITHUB_OUTPUT
+          echo "RACES=$RACES" >> $GITHUB_OUTPUT
+
+          echo "Resolved: DATE=$DATE PIDS=$PIDS RACES=$RACES"
+
+      - name: Run direct exhibition crawler (AUTO_T15)
+        env:
+          TARGET_DATE:  ${{ steps.args.outputs.DATE }}
+          TARGET_PIDS:  ${{ steps.args.outputs.PIDS }}
+          TARGET_RACES: ${{ steps.args.outputs.RACES }}
+          # 窓の設定：締切 -15分を狙う（±2分許容）
+          WINDOW_OFFSET_MIN: "-15"
+          WINDOW_TOLERANCE_MIN: "2"
+        run: |
+          node scripts/fetch-exhibition-direct.js --skip-existing
 
       - name: Commit & push results
-        if: steps.prep.outputs.run == '1'
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           if ! git diff --cached --quiet; then
-            git commit -m "exhibition direct: ${{ steps.prep.outputs.date }} ${{ steps.prep.outputs.pids }} ${{ steps.prep.outputs.races }} [skip ci]"
+            git commit -m "exhibition direct auto T-15: ${{ steps.args.outputs.DATE }} ${{ steps.args.outputs.PIDS }} [skip ci]"
             git pull --rebase || true
-            git push
+            git push || true
           else
             echo "No changes."
           fi
