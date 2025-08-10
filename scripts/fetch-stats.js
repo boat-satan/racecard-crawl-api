@@ -20,15 +20,32 @@ const __dirname  = path.dirname(__filename);
 const PUBLIC_DIR    = path.resolve(__dirname, "..", "public");
 const OUTPUT_DIR_V2 = path.join(PUBLIC_DIR, "stats", "v2", "racers"); // ★日付なし固定保存
 
-// polite wait
-const WAIT_MS_BETWEEN_RACERS       = Number(process.env.STATS_DELAY_MS || 3000);
-const WAIT_MS_BETWEEN_COURSE_PAGES = Number(process.env.COURSE_WAIT_MS || 3000);
+// polite wait（最低3秒を保証）
+const RAW_DELAY_RACER = Number(process.env.STATS_DELAY_MS || 3000);
+const RAW_DELAY_COURSE = Number(process.env.COURSE_WAIT_MS || 3000);
+const WAIT_MS_BETWEEN_RACERS       = Math.max(3000, isFinite(RAW_DELAY_RACER) ? RAW_DELAY_RACER : 3000);
+const WAIT_MS_BETWEEN_COURSE_PAGES = Math.max(3000, isFinite(RAW_DELAY_COURSE) ? RAW_DELAY_COURSE : 3000);
 
 // env
 const ENV_RACERS       = process.env.RACERS?.trim() || "";
 const ENV_RACERS_LIMIT = Number(process.env.RACERS_LIMIT ?? "");
 const ENV_BATCH        = Number(process.env.STATS_BATCH ?? "");
 const FRESH_HOURS      = Number(process.env.FRESH_HOURS || 12);
+
+// 🔽 追加: 出走表スキャン用フィルタ（ワークフローから渡す）
+const PID_IN   = (process.env.FILTER_PID  || "ALL").trim();
+const RACE_IN  = (process.env.FILTER_RACE || "ALL").trim();
+const PID_FILTERS =
+  PID_IN.toUpperCase() === "ALL"
+    ? null
+    : PID_IN.split(",").map(s => s.trim()).filter(Boolean)
+        .map(s => (/^\d+$/.test(s) ? s.padStart(2,"0") : s)); // "02" に正規化
+const RACE_FILTERS =
+  RACE_IN.toUpperCase() === "ALL"
+    ? null
+    : RACE_IN.split(",").map(s => String(s).trim().toUpperCase())
+        .map(s => (s.endsWith("R") ? s : `${s}R`))
+        .map(s => s.replace(/[^\d]/g,"") + "R"); // "1"→"1R"
 
 // -------------------------------
 // ユーティリティ
@@ -224,7 +241,7 @@ function* candidateProgramRoots(){
     const dates = listDateDirs(base);
     if (dates.length) yield path.join(base, dates[0]);
   }
-  // 2) today ディレクトリ（今回ここに出がち）
+  // 2) today ディレクトリ
   for (const base of bases) {
     const todayDir = path.join(base, "today");
     if (fssync.existsSync(todayDir)) yield todayDir;
@@ -233,19 +250,22 @@ function* candidateProgramRoots(){
   for (const base of bases) yield base;
 }
 
-// 出走選手収集
+// 出走選手収集（PID/RACEフィルタ適用）
 async function collectRacersFromPrograms(){
   const set=new Set();
   const readJson=(p)=>{ try{ return JSON.parse(fssync.readFileSync(p,"utf8")); } catch{ return null; } };
 
   for (const root of candidateProgramRoots()){
     if (!fssync.existsSync(root)) continue;
-    // 直下にPIDディレクトリがある前提だが、直置きファイルも拾う
     const entries = fssync.readdirSync(root, { withFileTypes: true });
 
-    // 1) 直置き race json
+    // 1) 直置き race json（RACE フィルタのみ適用可能）
     for (const e of entries) {
       if (e.isFile() && e.name.endsWith(".json") && e.name !== "index.json") {
+        if (RACE_FILTERS) {
+          const label = e.name.replace(/\.json$/,"");
+          if (!RACE_FILTERS.includes(label)) continue;
+        }
         const j = readJson(path.join(root, e.name));
         const boats = j?.entries || j?.boats || [];
         for (const b of boats) {
@@ -254,11 +274,23 @@ async function collectRacersFromPrograms(){
         }
       }
     }
-    // 2) PID配下
-    for (const e of entries) {
-      if (!e.isDirectory()) continue;
-      const pidDir = path.join(root, e.name);
-      const files = fssync.readdirSync(pidDir).filter(f=>f.endsWith(".json") && f!=="index.json");
+
+    // 2) PID配下（PID/RACE 両方のフィルタを適用）
+    const pidDirs = entries
+      .filter(e => e.isDirectory())
+      .map(e => e.name)
+      .filter(pid => !PID_FILTERS || PID_FILTERS.includes(pid));
+
+    for (const pid of pidDirs) {
+      const pidDir = path.join(root, pid);
+      const files = fssync.readdirSync(pidDir)
+        .filter(f => f.endsWith(".json") && f !== "index.json")
+        .filter(f => {
+          if (!RACE_FILTERS) return true;
+          const label = f.replace(/\.json$/,"");
+          return RACE_FILTERS.includes(label);
+        });
+
       for (const f of files) {
         const j = readJson(path.join(pidDir, f));
         const boats = j?.entries || j?.boats || [];
@@ -268,8 +300,11 @@ async function collectRacersFromPrograms(){
         }
       }
     }
-    if (set.size) break; // どこかで見つかればそれを採用
+
+    if (set.size) break; // 見つかったら採用
   }
+
+  console.log(`filters: pid=${PID_FILTERS ? PID_FILTERS.join(",") : "ALL"}, race=${RACE_FILTERS ? RACE_FILTERS.join(",") : "ALL"} -> ${set.size} racers`);
   return [...set];
 }
 
@@ -389,7 +424,7 @@ async function main(){
       console.warn(`❌ ${regno}: ${e.message}`);
       ng++;
     }
-    await sleep(WAIT_MS_BETWEEN_RACERS);
+    await sleep(WAIT_MS_BETWEEN_RACERS); // ★最低3秒
   }
 
   await ensureDir(path.join(PUBLIC_DIR, "debug"));
