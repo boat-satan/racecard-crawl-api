@@ -2,11 +2,11 @@
 // Node v20 (fetch 同梱)
 // 出力：
 //   - public/programs-slim/v2/<date>/<pid>/<race>.json（軽量）+ index.json
-//   - public/programs/v2/<date>/<pid>/<race>.json（フル：元データ寄せ）
+//   - public/programs/v2/<date>/<pid>/<race>.json（フル）
 // 環境変数：
-//   TARGET_DATE=today | YYYYMMDD / YYYY-MM-DD
-//   TARGET_PID=02 | 場名
-//   TARGET_RACE=1..12 | "1R" など
+//   TARGET_DATE=today | YYYYMMDD / YYYY-MM-DD（既定: today）
+//   TARGET_PID=ALL | 02 | 場名 | カンマ区切り（既定: ALL → 全場）
+//   TARGET_RACE=ALL | 1..12 | "1R" | カンマ区切り（既定: ALL → 全R）
 
 import fs from "node:fs";
 import path from "node:path";
@@ -16,166 +16,77 @@ const BASE_OUT_SLIM = "public/programs-slim/v2";
 const BASE_OUT_FULL = "public/programs/v2";
 const DEBUG_OUT     = "public/debug";
 
-// ---------- helpers ----------
 const ensureDir = (p) => fs.mkdirSync(p, { recursive: true });
+const to2 = (s) => String(s).padStart(2, "0");
 const outDirSlim = (date, pid) => path.join(BASE_OUT_SLIM, date, pid);
 const outDirFull = (date, pid) => path.join(BASE_OUT_FULL, date, pid);
-const to2 = (s) => String(s).padStart(2, "0");
 
-// inputs
+// ---------- 入力 ----------
 const DATE_IN = (process.env.TARGET_DATE || "today").trim();
 const DATE = DATE_IN.toLowerCase() === "today" ? "today" : DATE_IN.replace(/-/g, "");
-const PID_IN = (process.env.TARGET_PID || "02").trim();  // "02" or 場名
-const PID = /^\d+$/.test(PID_IN) ? to2(PID_IN) : PID_IN;
-const RACE_Q = (process.env.TARGET_RACE || "1").trim();
-const RACE = /R$/i.test(RACE_Q) ? RACE_Q.toUpperCase() : `${RACE_Q}R`;
-const RNO  = String(RACE_Q).replace(/[^\d]/g, ""); // 数字だけ（1..12）
 
+const PID_IN = (process.env.TARGET_PID || "ALL").trim();
+const WANT_ALL_PID = PID_IN.toUpperCase() === "ALL";
+const PID_FILTERS = WANT_ALL_PID
+  ? null
+  : PID_IN.split(",").map(s => s.trim()).filter(Boolean).map(s => (/^\d+$/.test(s) ? to2(s) : s));
+
+const RACE_IN = (process.env.TARGET_RACE || "ALL").trim();
+const WANT_ALL_RACE = RACE_IN.toUpperCase() === "ALL";
+const RACE_FILTERS = WANT_ALL_RACE
+  ? null
+  : RACE_IN.split(",").map(s => String(s).trim().toUpperCase())
+      .map(s => s.endsWith("R") ? s : `${s}R`)
+      .map(s => s.replace(/[^\d]/g, "") + "R"); // "1"→"1R"
+
+// 取得元
 const SRC = DATE === "today"
   ? "https://boatraceopenapi.github.io/programs/v2/today.json"
   : `https://boatraceopenapi.github.io/programs/v2/${DATE}.json`;
 
 console.log("fetch:", SRC);
 
-// ---------- main ----------
-try {
-  const res = await fetch(SRC);
-  const status = res.status;
-  const text = await res.text();
+// ---------- ユーティリティ ----------
+const pickRaceLabel = (v) => {
+  const r = v.race ?? v.Race ?? v.race_number ?? v.RaceNumber;
+  if (r == null) return null;
+  const n = String(r).replace(/[^\d]/g, "");
+  return n ? `${Number(n)}R` : null;
+};
+const pickStadiumCode = (v) => {
+  const code = v.race_stadium_number ?? v.stadium_number ?? v.stadium ?? v.stadiumCode;
+  return code != null ? to2(code) : null;
+};
+const pickStadiumName = (v) => v.race_stadium_name ?? v.stadium_name ?? v.stadiumName ?? null;
 
-  // デバッグ保存
-  ensureDir(DEBUG_OUT);
-  fs.writeFileSync(`${DEBUG_OUT}/src-${DATE}.txt`, text);
-  fs.writeFileSync(`${DEBUG_OUT}/meta-${DATE}.json`, JSON.stringify({ status }, null, 2));
-  console.log("debug:", `${DEBUG_OUT}/src-${DATE}.txt`);
+function emitOneRace(date, stadiumCode, stadiumName, raceLabel, raceDataLike) {
+  // スリム用の最低限エントリ
+  const entriesSlim = (raceDataLike?.boats ?? raceDataLike?.entries ?? raceDataLike?.Entries ?? []).map(b => ({
+    lane: b.racer_boat_number ?? b.lane ?? null,
+    name: b.racer_name ?? b.name ?? null,
+    class: b.racer_class_number ?? b.class ?? null,
+  }));
 
-  if (status !== 200) throw new Error(`source fetch ${status}`);
+  // 締切
+  const deadline =
+    raceDataLike?.race_closed_at ??
+    raceDataLike?.deadline ??
+    null;
 
-  // JSON 化 & 配列抽出（複数スキーマ対応）
-  let raw; try { raw = JSON.parse(text); } catch { raw = null; }
-  let programs = null;
-  if (Array.isArray(raw)) programs = raw;
-  else if (raw && Array.isArray(raw.programs)) programs = raw.programs; // v2標準
-  else if (raw && Array.isArray(raw.venues))   programs = raw.venues;
-  else if (raw && Array.isArray(raw.items))    programs = raw.items;
-
-  const dirSlim = outDirSlim(DATE, PID);
-  ensureDir(dirSlim);
-
-  if (!programs) {
-    fs.writeFileSync(path.join(dirSlim, "index.json"),
-      JSON.stringify({
-        stadium: PID,
-        stadiumName: null,
-        races: [],
-        reason: "unexpected source format",
-        sampleKeys: raw ? Object.keys(raw) : null
-      }, null, 2)
-    );
-    console.log("write:", path.join(dirSlim, "index.json"));
-    process.exit(0);
-  }
-
-  // ----- レースデータの探し方（2系統） -----
-  let raceData = null;
-  let stadiumName = null;
-  let stadiumCode = PID;
-
-  // A) レース配列（race_stadium_number, race_number を直接持つ）
-  if (programs?.length && (programs[0].race_stadium_number !== undefined || programs[0].race_number !== undefined)) {
-    raceData = programs.find(p =>
-      (String(p.race_stadium_number ?? p.stadium_number ?? p.stadium)?.padStart(2, "0") === PID) &&
-      (String(p.race_number) === String(RNO))
-    );
-    if (raceData) {
-      stadiumName = raceData.race_stadium_name ?? raceData.stadium_name ?? null;
-      stadiumCode = to2(raceData.race_stadium_number ?? raceData.stadium_number ?? PID);
-    }
-  }
-
-  // B) 従来の「場 → races」形式
-  if (!raceData) {
-    const venue = programs.find(v =>
-      v.stadium === PID || v.stadiumCode === PID || v.stadium_number === PID ||
-      v.stadiumName === PID || v.stadium_name === PID
-    );
-    if (venue) {
-      stadiumName = venue.stadiumName ?? venue.stadium_name ?? null;
-      stadiumCode = venue.stadium ?? venue.stadiumCode ?? venue.stadium_number ?? PID;
-      const racesArr = venue.races ?? venue.Races ?? [];
-      raceData = racesArr.find(x => String(x.race ?? x.Race).replace(/[^\d]/g, "") === String(RNO));
-    }
-  }
-
-  // ------ payload（スリム基準） ------
-  let payload;
-  if (raceData) {
-    if (raceData.boats) {
-      // A 直持ち（v2標準）
-      payload = {
-        date: DATE,
-        stadium: to2(stadiumCode),
-        stadiumName: stadiumName,
-        race: `${Number(raceData.race_number)}R`,
-        deadline: raceData.race_closed_at ?? null,
-        entries: (raceData.boats || []).map(b => ({
-          lane: b.racer_boat_number ?? null,
-          number: b.racer_number ?? null,
-          name: b.racer_name ?? null,
-          class: b.racer_class_number ?? null,
-          branch: b.racer_branch_number ?? null
-        }))
-      };
-    } else {
-      // B venue.races
-      const r = raceData;
-      payload = {
-        date: DATE,
-        stadium: to2(stadiumCode),
-        stadiumName: stadiumName,
-        race: (r.race ?? r.Race ?? RACE).toString().replace(/[^\d]/g, "") + "R",
-        deadline: r.deadline ?? null,
-        entries: (r.entries ?? r.Entries ?? []).map(e => ({
-          lane: e.lane ?? null,
-          number: e.number ?? null,
-          name: e.name ?? null,
-          class: e.class ?? null,
-          branch: e.branch ?? null
-        }))
-      };
-    }
-  } else {
-    payload = {
-      date: DATE,
-      stadium: to2(stadiumCode),
-      stadiumName: stadiumName,
-      race: RACE,
-      deadline: null,
-      entries: [],
-      reason: "race not found"
-    };
-  }
-
-  // ---------- “フル” と “スリム” を同時保存 ----------
-  // フル用（source を最大限活かして保存）
-  const fullPayload = (() => {
-    const base = {
-      schemaVersion: "2.0",
-      generatedAt: new Date().toISOString(),
-      date: payload.date,
-      stadium: payload.stadium,
-      stadiumName: payload.stadiumName ?? null,
-      race: payload.race,
-      deadline: payload.deadline ?? null
-    };
-    if (raceData) {
-      // v2標準に多いフィールドを拾う（無ければ null）
-      base.gradeNumber = raceData.race_grade_number ?? null;
-      base.title       = raceData.race_title ?? null;
-      base.subtitle    = raceData.race_subtitle ?? null;
-      base.distance    = raceData.race_distance ?? null;
-    }
-    base.entries = (raceData?.boats || payload.entries || []).map(b => ({
+  // フル用（できるだけ元を活かす）
+  const fullPayload = {
+    schemaVersion: "2.0",
+    generatedAt: new Date().toISOString(),
+    date,
+    stadium: stadiumCode,
+    stadiumName: stadiumName ?? null,
+    race: raceLabel,
+    deadline: deadline,
+    gradeNumber: raceDataLike?.race_grade_number ?? null,
+    title:       raceDataLike?.race_title ?? null,
+    subtitle:    raceDataLike?.race_subtitle ?? null,
+    distance:    raceDataLike?.race_distance ?? null,
+    entries: (raceDataLike?.boats ?? raceDataLike?.entries ?? raceDataLike?.Entries ?? []).map(b => ({
       lane: b.racer_boat_number ?? b.lane ?? null,
       number: b.racer_number ?? b.number ?? null,
       name: b.racer_name ?? b.name ?? null,
@@ -199,67 +110,122 @@ try {
       boatNumber: b.racer_assigned_boat_number ?? null,
       boatTop2: b.racer_assigned_boat_top_2_percent ?? null,
       boatTop3: b.racer_assigned_boat_top_3_percent ?? null
-    }));
-    return base;
-  })();
+    }))
+  };
 
-  // 保存先ディレクトリ
-  const fullDir = outDirFull(DATE, payload.stadium);
+  // 保存
+  const slimDir = outDirSlim(date, stadiumCode);
+  const fullDir = outDirFull(date, stadiumCode);
+  ensureDir(slimDir);
   ensureDir(fullDir);
 
-  // フル保存
-  fs.writeFileSync(path.join(fullDir, `${payload.race}.json`), JSON.stringify(fullPayload, null, 2));
-
-  // スリム保存（API互換：最低限）
-  const slimDir = outDirSlim(DATE, payload.stadium);
-  ensureDir(slimDir);
-
-  const racePathSlim = path.join(slimDir, `${payload.race}.json`);
+  // race.json
   fs.writeFileSync(
-    racePathSlim,
-    JSON.stringify(
-      {
-        race: payload.race,
-        deadline: payload.deadline ?? null,
-        entries: (payload.entries || []).map(e => ({
-          lane: e.lane,
-          name: e.name,
-          class: e.class ?? null
-        }))
-      },
-      null,
-      2
-    )
+    path.join(slimDir, `${raceLabel}.json`),
+    JSON.stringify({ race: raceLabel, deadline, entries: entriesSlim }, null, 2)
+  );
+  fs.writeFileSync(
+    path.join(fullDir, `${raceLabel}.json`),
+    JSON.stringify(fullPayload, null, 2)
   );
 
-  // 場の index.json（スリム）
+  // index.json（スリム）
   const idxPath = path.join(slimDir, "index.json");
-  let idx = { stadium: payload.stadium, stadiumName: payload.stadiumName ?? null, races: [] };
+  let idx = { stadium: stadiumCode, stadiumName: stadiumName ?? null, races: [] };
   if (fs.existsSync(idxPath)) {
-    try {
-      idx = JSON.parse(fs.readFileSync(idxPath, "utf8"));
-    } catch {
-      idx = { stadium: payload.stadium, stadiumName: payload.stadiumName ?? null, races: [] };
-    }
+    try { idx = JSON.parse(fs.readFileSync(idxPath, "utf8")); } catch {}
   }
-  const slimEntry = {
-    race: payload.race,
-    deadline: payload.deadline ?? null,
-    entries: (payload.entries || []).map(x => ({ lane: x.lane, name: x.name, class: x.class ?? null }))
-  };
-  const i = idx.races.findIndex(rr => rr.race === payload.race);
+  const slimEntry = { race: raceLabel, deadline, entries: entriesSlim };
+  const i = idx.races.findIndex(rr => rr.race === raceLabel);
   if (i >= 0) idx.races[i] = slimEntry; else idx.races.push(slimEntry);
   fs.writeFileSync(idxPath, JSON.stringify(idx, null, 2));
 
-  console.log("write slim:", racePathSlim);
-  console.log("write full:", path.join(fullDir, `${payload.race}.json`));
+  console.log(`write: ${path.join(slimDir, `${raceLabel}.json`)}`);
+}
+
+// ---------- main ----------
+try {
+  const res = await fetch(SRC);
+  const status = res.status;
+  const text = await res.text();
+
+  // デバッグ保存
+  ensureDir(DEBUG_OUT);
+  fs.writeFileSync(`${DEBUG_OUT}/src-${DATE}.txt`, text);
+  fs.writeFileSync(`${DEBUG_OUT}/meta-${DATE}.json`, JSON.stringify({ status }, null, 2));
+  console.log("debug:", `${DEBUG_OUT}/src-${DATE}.txt`);
+
+  if (status !== 200) throw new Error(`source fetch ${status}`);
+
+  // JSON 化 & スキーマ吸収
+  let raw; try { raw = JSON.parse(text); } catch { raw = null; }
+  let programs = null;
+  if (Array.isArray(raw)) programs = raw;
+  else if (raw && Array.isArray(raw.programs)) programs = raw.programs; // v2標準
+  else if (raw && Array.isArray(raw.venues))   programs = raw.venues;   // venue配列
+  else if (raw && Array.isArray(raw.items))    programs = raw.items;
+
+  if (!programs) {
+    // フォーマット不明でも最低限 today/ALL 用の置き土産
+    const slimRoot = path.join(BASE_OUT_SLIM, DATE);
+    ensureDir(slimRoot);
+    fs.writeFileSync(
+      path.join(slimRoot, "index.json"),
+      JSON.stringify({ date: DATE, races: [], reason: "unexpected source format", sampleKeys: raw ? Object.keys(raw) : null }, null, 2)
+    );
+    console.log("no programs found.");
+    process.exit(0);
+  }
+
+  // --- 2系統の吸収 ---
+  // A) フラット（各要素が race_stadium_number / race_number を持つ）
+  if (programs?.length && (programs[0].race_stadium_number !== undefined || programs[0].race_number !== undefined)) {
+    for (const p of programs) {
+      const stadiumCode = pickStadiumCode(p);
+      const raceLabel   = pickRaceLabel(p);
+      const stadiumName = pickStadiumName(p);
+
+      if (!stadiumCode || !raceLabel) continue;
+
+      // 絞り込み
+      if (PID_FILTERS && !PID_FILTERS.includes(stadiumCode) && !PID_FILTERS.includes(pickStadiumName(p) ?? "")) continue;
+      if (RACE_FILTERS && !RACE_FILTERS.includes(raceLabel)) continue;
+
+      emitOneRace(DATE, stadiumCode, stadiumName, raceLabel, p);
+    }
+    process.exit(0);
+  }
+
+  // B) venue配列（各 venue に races をぶら下げる）
+  for (const v of programs) {
+    const stadiumCode =
+      to2(v.stadium ?? v.stadiumCode ?? v.stadium_number ?? "");
+    const stadiumName = v.stadiumName ?? v.stadium_name ?? null;
+
+    if (!stadiumCode) continue;
+
+    // PID 絞り込み（コード or 名称）
+    if (PID_FILTERS && !PID_FILTERS.includes(stadiumCode) && !PID_FILTERS.includes(stadiumName ?? "")) continue;
+
+    const racesArr = v.races ?? v.Races ?? [];
+    for (const r of racesArr) {
+      const raceLabel = pickRaceLabel(r);
+      if (!raceLabel) continue;
+      if (RACE_FILTERS && !RACE_FILTERS.includes(raceLabel)) continue;
+
+      // venue.races 形式を emitOneRace が読める形にそのまま渡す
+      emitOneRace(DATE, stadiumCode, stadiumName, raceLabel, r);
+    }
+  }
+
+  console.log("done.");
 } catch (err) {
-  // エラー時も index.json を最低限出す
-  const dirSlim = outDirSlim(DATE, PID);
-  ensureDir(dirSlim);
-  fs.writeFileSync(
-    path.join(dirSlim, "index.json"),
-    JSON.stringify({ stadium: PID, stadiumName: null, races: [], error: String(err) }, null, 2)
-  );
   console.error("error:", String(err));
+  // 最低限のダンプ
+  const slimRoot = path.join(BASE_OUT_SLIM, DATE);
+  ensureDir(slimRoot);
+  fs.writeFileSync(
+    path.join(slimRoot, "index.json"),
+    JSON.stringify({ date: DATE, error: String(err) }, null, 2)
+  );
 }
