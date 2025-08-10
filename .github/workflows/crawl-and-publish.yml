@@ -4,18 +4,34 @@ name: Crawl & Publish
 on:
   workflow_dispatch:
     inputs:
+      date:
+        description: "TARGET_DATE: today | YYYYMMDD | YYYY-MM-DD（既定: today）"
+        required: false
+        default: "today"
+      pid:
+        description: "TARGET_PID: ALL | 02 | 場名 | カンマ区切り（既定: ALL）"
+        required: false
+        default: "ALL"
+      race:
+        description: "TARGET_RACE: ALL | 1..12 | 1R | カンマ区切り（既定: ALL）"
+        required: false
+        default: "ALL"
       racers:
-        description: "RACERS (例: 4349,3156) 空ならtodayの全出走者"
+        description: "RACERS: 登録番号カンマ区切り（空なら指定日の全出走者から収集）"
         required: false
         default: ""
       batch:
-        description: "一度に処理する人数 (空=制限なし)"
+        description: "STATS_BATCH: 一度に処理する人数（空=制限なし）"
         required: false
         default: ""
       delayMs:
-        description: "1選手ごとの待機(ms)"
+        description: "STATS_DELAY_MS: 1選手ごとの待機(ms)"
         required: false
         default: "3000"
+      freshHours:
+        description: "FRESH_HOURS: 既存JSONが新しければスキップする時間(時)"
+        required: false
+        default: "12"
   schedule:
     - cron: "0 20 * * *"  # 05:00 JST
 
@@ -50,15 +66,23 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config pull.rebase true
 
-      - name: Run crawler (programs today)
+      # 全場/全R/指定日の出走表を出力
+      - name: Run crawler (programs)
+        env:
+          TARGET_DATE: ${{ inputs.date || 'today' }}
+          TARGET_PID:  ${{ inputs.pid  || 'ALL' }}
+          TARGET_RACE: ${{ inputs.race || 'ALL' }}
         run: node scripts/crawl.js
 
+      # 出走表から参照して選手statsを日付配下に増分取得
       - name: Fetch racer stats (incremental write)
         env:
-          RACERS: ${{ inputs.racers }}
-          STATS_BATCH: ${{ inputs.batch }}
-          STATS_DELAY_MS: ${{ inputs.delayMs || '3000' }}
-          STATS_OVERWRITE: "0"   # 既存はスキップ（必要なら手動実行で1に）
+          TARGET_DATE:      ${{ inputs.date || 'today' }}
+          RACERS:           ${{ inputs.racers }}
+          STATS_BATCH:      ${{ inputs.batch }}
+          STATS_DELAY_MS:   ${{ inputs.delayMs || '3000' }}
+          FRESH_HOURS:      ${{ inputs.freshHours || '12' }}
+          STATS_OVERWRITE:  "0"   # 既存はスキップ（必要なら手動実行で1に）
         run: node scripts/fetch-stats.js
 
       - name: Commit & Push changes (with rebase & retry)
@@ -70,7 +94,9 @@ jobs:
             exit 0
           fi
 
-          git commit -m "Update programs & racer stats [skip ci]"
+          # コミットメッセージに日付を入れておくと履歴が追いやすい
+          DATE_VAL="${{ inputs.date || 'today' }}"
+          git commit -m "Update programs & racer stats (${DATE_VAL}) [skip ci]"
 
           n=0
           until [ $n -ge 5 ]
