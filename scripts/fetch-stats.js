@@ -240,9 +240,7 @@ function parseEntryKimariteAllBoats($) {
   if (!$tbl) return null;
   const { headers, rows } = parseTable($, $tbl);
 
-  // 行は1行（全艇合計）になることが多い想定。複数行でも合算。
-  const keys = headers.slice(0); // 先頭から全部
-  // ただしヘッダの最初が「決まり手」なら除外して残りをキー化
+  const keys = headers.slice(0);
   const kStart = keys[0].includes("決まり手") ? 1 : 0;
   const detailKeys = keys.slice(kStart).map(normalizeKimariteKey);
 
@@ -333,6 +331,20 @@ function isFresh(file, hours = 12) {
   }
 }
 
+// 差分用: 全艇決まり手(detail) から 他艇(=負け)決まり手 を引いて 自艇勝ち決まり手 を算出
+function computeSelfWinKimarite(allBoatsDetail, loseKimarite) {
+  if (!allBoatsDetail) return null;
+  const keys = Object.keys(allBoatsDetail);
+  const out = {};
+  for (const k of keys) {
+    const a = Number(allBoatsDetail[k] ?? 0);
+    const l = Number(loseKimarite?.[k] ?? 0);
+    const v = a - l;
+    out[k] = v >= 0 ? v : 0; // マイナスは0で丸め
+  }
+  return out;
+}
+
 // -------------------------------
 // 1選手分
 // -------------------------------
@@ -345,9 +357,7 @@ async function fetchOne(regno) {
   try {
     const html = await fetchHtml(uRcourse);
     const $ = load(html);
-
-    // （一覧テーブルは場面により欠落もあるため、ここでは使わない or 予備として残す）
-    // ここでは null のままでも良い
+    // ここでは未使用（サイト差異が多いため）
     courseStatsList = null;
   } catch (e) {
     console.warn(`warn: rcourse list fetch/parse failed for ${regno}: ${e.message}`);
@@ -364,9 +374,21 @@ async function fetchOne(regno) {
       const $ = load(html);
 
       const avgST = parseAvgSTFromCoursePage($);
-      const loseKimarite = parseLoseKimariteFromCoursePage($); // 他艇の合計っぽいテーブル
-      const matrix = parseEntryMatrixFromCoursePage($);        // ★ 自艇/他艇を含む全艇成績
-      const kimariteAllBoats = parseEntryKimariteAllBoats($);  // ★ 全艇決まり手（カウント）
+      const loseKimarite = parseLoseKimariteFromCoursePage($); // 他艇が勝った決まり手（=自艇の負け要因）
+      const matrix = parseEntryMatrixFromCoursePage($);        // 自艇/他艇 含む全艇成績
+      const kimariteAllBoats = parseEntryKimariteAllBoats($);  // 全艇決まり手（カウント）
+
+      // ★ 追加: 自艇勝ち決まり手（種類別カウント）
+      const winKimariteSelf = computeSelfWinKimarite(kimariteAllBoats, loseKimarite);
+
+      // ★ 追加: 自艇サマリ（便利フィールド）
+      const selfSummary = matrix?.self ? {
+        course: matrix.self.course,
+        starts: matrix.self.starts,
+        firstCount: matrix.self.firstCount,
+        secondCount: matrix.self.secondCount,
+        thirdCount: matrix.self.thirdCount,
+      } : null;
 
       entryCourse.push({
         course: c,
@@ -374,6 +396,9 @@ async function fetchOne(regno) {
         kimariteAllBoats: kimariteAllBoats ?? null,
         avgST: avgST ?? null,
         loseKimarite: loseKimarite ?? null,
+        // 差分追加
+        winKimariteSelf: winKimariteSelf ?? null,
+        selfSummary,
       });
 
       await sleep(WAIT_MS_BETWEEN_COURSE_PAGES);
@@ -385,6 +410,8 @@ async function fetchOne(regno) {
         kimariteAllBoats: null,
         avgST: null,
         loseKimarite: null,
+        winKimariteSelf: null,
+        selfSummary: null,
       });
     }
   }
@@ -406,8 +433,8 @@ async function fetchOne(regno) {
     fetchedAt: new Date().toISOString(),
     // 予備（今は null）
     courseStats: courseStatsList,
-    // ★ 主データ：自艇nコースページ由来
-    entryCourse,     // [{course, matrix:{rows[], self}, kimariteAllBoats, avgST, loseKimarite}]
+    // 主データ：自艇nコースページ由来
+    entryCourse,     // [{course, matrix:{rows[], self}, kimariteAllBoats, avgST, loseKimarite, winKimariteSelf, selfSummary}]
     exTimeRank,      // [{rank, winRate, top2Rate, top3Rate}]
     meta: { errors: [] },
   };
