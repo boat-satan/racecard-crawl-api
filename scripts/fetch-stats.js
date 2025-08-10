@@ -1,14 +1,14 @@
 // scripts/fetch-stats.js
 // Node v20 / ESM / cheerio v1.x
-// 出力: public/stats/v1/racers/<regno>.json
-// 参照:
-//   - rcourse 直近6か月: https://boatrace-db.net/racer/rcourse/regno/<regno>/
-//   - rcourse 各コース:  https://boatrace-db.net/racer/rcourse/regno/<regno>/course/<n>/ (n=1..6)
-//   - rdemo   展示順位:  https://boatrace-db.net/racer/rdemo/regno/<regno>/
+// 出力: public/stats/v2/racers/<regno>.json  ← v2 に変更
+// 直近 today の出走表から対象選手を集める or 環境変数で指定
+// スキップ: 既存ファイルの mtime が 12 時間以内なら書き込みスキップ
+// リクエスト間隔: 選手ごと 3s / 各コース詳細ページ 3s
+// リトライ: 404 は 1 回だけ、その他(403/429/5xx/ネット)は 2 回まで指数バックオフ
 
 import { load } from "cheerio";
 import fs from "node:fs/promises";
-import fssync from "node:fs";
+import fss from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -23,15 +23,17 @@ const TODAY_ROOTS = [
   path.join(PUBLIC_DIR, "programs", "v2", "today"),
   path.join(PUBLIC_DIR, "programs-slim", "v2", "today"),
 ];
-const OUTPUT_DIR = path.join(PUBLIC_DIR, "stats", "v1", "racers");
 
-// polite wait（最低でも3秒空ける）
-const WAIT_MS_BETWEEN_RACERS = Math.max(3000, Number(process.env.STATS_DELAY_MS || 3000));
-const WAIT_MS_BETWEEN_COURSE_PAGES = Math.max(3000, Number(process.env.COURSE_WAIT_MS || 3000));
+// ★ 出力先を v2 に変更
+const OUTPUT_DIR = path.join(PUBLIC_DIR, "stats", "v2", "racers");
 
-// 既存を"新しければ"スキップ（デフォ 12h）
+// polite wait（デフォルト 3s）
+const WAIT_MS_BETWEEN_RACERS = Number(process.env.STATS_DELAY_MS || 3000);
+const WAIT_MS_BETWEEN_COURSE_PAGES = Number(process.env.COURSE_WAIT_MS || 3000);
+
+// スキップ閾値（12 時間）
 const FRESH_HOURS = Number(process.env.FRESH_HOURS || 12);
-const FRESH_MS = FRESH_HOURS * 3600 * 1000;
+const FRESH_MS = FRESH_HOURS * 60 * 60 * 1000;
 
 // env
 const ENV_RACERS       = process.env.RACERS?.trim() || "";
@@ -43,22 +45,37 @@ const ENV_BATCH        = Number(process.env.STATS_BATCH ?? "");
 // -------------------------------
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+async function existsFresh(file, freshMs) {
+  try {
+    const st = await fs.stat(file);
+    const age = Date.now() - st.mtimeMs;
+    return age >= 0 && age < freshMs;
+  } catch {
+    return false;
+  }
+}
+
 /**
- * fetchHtml: UA/Referer/言語ヘッダ付き。
- * リトライ方針:
- *  - 404 は即失敗（再試行しない）
- *  - 403/429/5xx/ネットワークは「最大1回だけ」再試行
+ * fetchHtml: UA/Referer/言語ヘッダ付き、リトライ制御
+ * - 404 は 1 回だけ再試行（=合計最大 2 回）
+ * - 403/429/5xx/ネット系は 2 回再試行（=合計最大 3 回）
  */
-async function fetchHtml(
-  url,
-  { retries = 1, baseDelayMs = 2000, timeoutMs = 20000 } = {}
-) {
-  const makeCtl = () => new AbortController();
+async function fetchHtml(url, {
+  retries404 = 1,
+  retriesOther = 2,
+  baseDelayMs = 2500,
+  timeoutMs = 20000,
+} = {}) {
+  const controller = () => new AbortController();
 
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    const ac = makeCtl();
-    const timer = setTimeout(() => ac.abort(), timeoutMs);
+  // 内部ヘルパー
+  const waitBackoff = (attempt, factor = 1.6) =>
+    sleep(Math.round(baseDelayMs * Math.pow(factor, attempt) * (0.8 + Math.random() * 0.4)));
 
+  let attempt = 0;
+  for (;;) {
+    const ac = controller();
+    const t = setTimeout(() => ac.abort(), timeoutMs);
     try {
       const res = await fetch(url, {
         signal: ac.signal,
@@ -71,42 +88,53 @@ async function fetchHtml(
           "cache-control": "no-cache",
         },
       });
-
-      clearTimeout(timer);
+      clearTimeout(t);
 
       if (res.ok) return await res.text();
 
-      // 404 は即あきらめ
-      if (res.status === 404) {
-        const body = await res.text().catch(() => "");
-        throw new Error(`HTTP 404 @ ${url} ${body?.slice(0, 120)}`);
+      const body = await res.text().catch(() => "");
+      const status = res.status;
+
+      // 404 は 1 回だけ
+      if (status === 404) {
+        if (attempt >= retries404) {
+          throw new Error(`HTTP 404 @ ${url}`);
+        }
+        attempt++;
+        await waitBackoff(attempt, 1.3);
+        continue;
       }
 
-      // リトライ上限 or 非再試行系
-      const retriable = [403, 429, 500, 502, 503, 504].includes(res.status);
-      if (!(retriable && attempt < retries)) {
-        const body = await res.text().catch(() => "");
-        throw new Error(`HTTP ${res.status} ${res.statusText} @ ${url} ${body?.slice(0, 120)}`);
+      // 403/429/5xx は 2 回まで
+      if ([403, 429, 500, 502, 503, 504].includes(status)) {
+        if (attempt >= retriesOther) {
+          throw new Error(`HTTP ${status} @ ${url} ${body?.slice(0, 120)}`);
+        }
+        attempt++;
+        await waitBackoff(attempt, status === 429 || status === 503 ? 2.0 : 1.6);
+        continue;
       }
 
-      // 再試行前待機（指数+ジッター）
-      const delay = Math.round(baseDelayMs * Math.pow(1.8, attempt) * (0.8 + Math.random() * 0.4));
-      await sleep(delay);
-      continue;
+      // その他は即失敗
+      throw new Error(`HTTP ${status} ${res.statusText} @ ${url}`);
+
     } catch (err) {
-      clearTimeout(timer);
-      if (attempt >= retries) {
+      clearTimeout(t);
+      // ネットワーク/タイムアウト等は 2 回まで
+      if (attempt >= retriesOther) {
         throw new Error(`NET fetch failed @ ${url}: ${err.message}`);
       }
-      const delay = Math.round(baseDelayMs * Math.pow(1.6, attempt) * (0.8 + Math.random() * 0.4));
-      await sleep(delay);
+      attempt++;
+      await waitBackoff(attempt, 1.6);
     }
   }
-  throw new Error(`unreachable fetch loop for ${url}`);
 }
 
 function normText(t) {
-  return (t ?? "").replace(/\u00A0/g, " ").replace(/\s+/g, " ").trim();
+  return (t ?? "")
+    .replace(/\u00A0/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 function toNumber(v) {
   if (v == null) return null;
@@ -142,12 +170,14 @@ function mustTableByHeader($, keyLikes) {
   return null;
 }
 function normalizeKimariteKey(k) {
-  return k.replace("ま差し", "まくり差し").replace("捲り差し", "まくり差し").replace("捲り", "まくり");
+  return k
+    .replace("ま差し", "まくり差し")
+    .replace("捲り差し", "まくり差し")
+    .replace("捲り", "まくり");
 }
 
 // -------------------------------
-// rcourse（直近6か月）: コース別成績/決まり手（一覧ページ）
-// ※この表は「進入コース=1〜6（自艇/他艇混在）」の集計ブロック
+// rcourse（直近6か月）: コース別成績/決まり手（一覧）
 // -------------------------------
 function parseCourseStatsFromRcourse($) {
   const $tbl = mustTableByHeader($, ["コース", "出走数", "1着率", "2連対率", "3連対率"]);
@@ -166,7 +196,7 @@ function parseCourseStatsFromRcourse($) {
     if (!m) continue;
     items.push({
       course: Number(m[1]),
-      label: ct, // "1コース（自艇）" / "2コース（他艇）" など
+      // ※この表は「<n>コース進入時の全艇成績」ではなく「当選手の<n>コースでの成績」の要約
       starts: iStarts >= 0 ? toNumber(r[iStarts]) : null,
       top1Rate: iTop1 >= 0 ? toNumber(r[iTop1]) : null,
       top2Rate: iTop2 >= 0 ? toNumber(r[iTop2]) : null,
@@ -202,46 +232,15 @@ function parseKimariteFromRcourse($) {
         raw: v ?? null,
       };
     });
-    items.push({ course: Number(m[1]), label: ct, detail, raw: r });
+    items.push({ course: Number(m[1]), detail, raw: r });
   }
   items.sort((a,b)=>a.course-b.course);
   return items.length ? items : null;
 }
 
 // -------------------------------
-// rcourse/course/{n}: 「進入コース=n」のときの詳細
-//  - 一覧テーブル: 「nコース進入時の全艇成績」= 自艇/他艇の成績が並ぶ
-//  - 同ページ下部の「負け決まり手」なども合算用に読む
+// rcourse/course/{n}: 平均ST & 負け決まり手（自艇= n コース進入時の相手側）
 // -------------------------------
-function parseCourseInDetail($) {
-  const $tbl = mustTableByHeader($, ["コース", "出走数", "1着数", "1着率", "2連対率", "3連対率"]);
-  if (!$tbl) return null;
-  const { headers, rows } = parseTable($, $tbl);
-
-  const iCourse = headerIndex(headers, "コース");
-  const iStarts = headerIndex(headers, "出走数");
-  const iTop1   = headerIndex(headers, "1着率");
-  const iTop2   = headerIndex(headers, "2連対率");
-  const iTop3   = headerIndex(headers, "3連対率");
-
-  const lines = [];
-  for (const r of rows) {
-    const label = r[iCourse] || "";
-    const m = label.match(/([1-6])/);
-    if (!m) continue;
-    lines.push({
-      lane: Number(m[1]),
-      label, // "3コース（自艇）" / "1コース（他艇）" ...
-      starts: iStarts >= 0 ? toNumber(r[iStarts]) : null,
-      top1Rate: iTop1 >= 0 ? toNumber(r[iTop1]) : null,
-      top2Rate: iTop2 >= 0 ? toNumber(r[iTop2]) : null,
-      top3Rate: iTop3 >= 0 ? toNumber(r[iTop3]) : null,
-      raw: r,
-    });
-  }
-  return lines.length ? lines : null;
-}
-
 function parseAvgSTFromCoursePage($) {
   const $tbl = mustTableByHeader($, ["月日", "場", "レース", "ST", "結果"]);
   if (!$tbl) return null;
@@ -264,6 +263,7 @@ function parseAvgSTFromCoursePage($) {
 }
 
 function parseLoseKimariteFromCoursePage($) {
+  // 「<n>コース進入時の全艇決まり手」の表
   const $tbl = mustTableByHeader($, ["コース", "出走数", "1着数", "逃げ", "差し", "まくり"]);
   if (!$tbl) return null;
 
@@ -274,7 +274,7 @@ function parseLoseKimariteFromCoursePage($) {
   const lose = Object.fromEntries(keys.map(k => [k, 0]));
   for (const r of rows) {
     const label = r[iCourse] || "";
-    if (label.includes("（自艇）")) continue; // 他艇の決まり手を合算
+    if (label.includes("（自艇）")) continue; // 相手側のみ
     keys.forEach((k, i) => {
       const v = r[3 + i];
       const num = v ? Number((v.match(/(\d+)/) || [])[1]) : NaN;
@@ -320,7 +320,6 @@ async function fetchOne(regno) {
   const uRcourse = `https://boatrace-db.net/racer/rcourse/regno/${regno}/`;
   const uRdemo   = `https://boatrace-db.net/racer/rdemo/regno/${regno}/`;
 
-  // 一覧（全体の1〜6コースブロック）
   let courseStats = null;
   let courseKimarite = null;
   try {
@@ -332,8 +331,8 @@ async function fetchOne(regno) {
     console.warn(`warn: rcourse list fetch/parse failed for ${regno}: ${e.message}`);
   }
 
-  // 各「進入コース=1..6」のページ詳細を収集
-  const courseInDetails = []; // [{inCourse, allLanes:[{lane,label,starts,top1Rate,...}], avgST, loseKimarite}]
+  // 各コース詳細（平均ST/負け決まり手）… 自艇 = n コース進入時視点
+  const courseDetails = [];
   const coursePages = {};
   for (let c = 1; c <= 6; c++) {
     const url = `https://boatrace-db.net/racer/rcourse/regno/${regno}/course/${c}/`;
@@ -341,20 +340,19 @@ async function fetchOne(regno) {
     try {
       const html = await fetchHtml(url);
       const $ = load(html);
-      const allLanes = parseCourseInDetail($);
       const avgST = parseAvgSTFromCoursePage($);
       const loseKimarite = parseLoseKimariteFromCoursePage($);
-      courseInDetails.push({
-        inCourse: c,
-        allLanes: allLanes ?? null,
+      courseDetails.push({
+        course: c,
         avgST: avgST ?? null,
         loseKimarite: loseKimarite ?? null,
       });
+      await sleep(WAIT_MS_BETWEEN_COURSE_PAGES);
     } catch (e) {
       console.warn(`warn: course page parse failed regno=${regno} course=${c}: ${e.message}`);
-      courseInDetails.push({ inCourse: c, allLanes: null, avgST: null, loseKimarite: null });
+      courseDetails.push({ course: c, avgST: null, loseKimarite: null });
+      await sleep(WAIT_MS_BETWEEN_COURSE_PAGES);
     }
-    await sleep(WAIT_MS_BETWEEN_COURSE_PAGES);
   }
 
   // 展示タイム順位別
@@ -368,16 +366,13 @@ async function fetchOne(regno) {
   }
 
   return {
-    version: "2.0",
+    schemaVersion: "2.0",
     regno: Number(regno),
     sources: { rcourse: uRcourse, rdemo: uRdemo, coursePages },
     fetchedAt: new Date().toISOString(),
-    // 一覧（「1コース（自艇）/2コース（他艇）…」の塊）
-    courseStats,     // [{course,label,starts,top1Rate,top2Rate,top3Rate,winRate:null}]
-    courseKimarite,  // [{course,label,detail:{逃げ:{count,rate},…}}]
-    // 「進入コース=n」ページから取った詳細（自艇/他艇の行が並ぶ）
-    courseInDetails, // [{inCourse, allLanes:[{lane,label,starts,top1Rate,top2Rate,top3Rate}], avgST, loseKimarite:{逃げ:xx,…}}]
-    // 展示タイム順位別
+    courseStats,     // [{course, starts, top1Rate, top2Rate, top3Rate, ...}]
+    courseKimarite,  // [{course, detail:{逃げ:{count,rate},…}}]
+    courseDetails,   // [{course, avgST, loseKimarite:{逃げ:xx,…}}] 自艇=n時の相手決まり手合算
     exTimeRank,      // [{rank, winRate, top2Rate, top3Rate}]
   };
 }
@@ -403,14 +398,9 @@ async function collectRacersFromToday() {
         const full = path.join(dayDir, f);
         try {
           const json = JSON.parse(await fs.readFile(full, "utf8"));
-          const boats =
-            json?.boats ||
-            json?.program?.boats ||
-            json?.entries ||
-            json?.Entries ||
-            [];
+          const boats = json?.boats || json?.program?.boats || [];
           for (const b of boats) {
-            const r = b.racer_number ?? b.number ?? b.racerNumber ?? b.racer?.number;
+            const r = b.racer_number ?? b.racerNumber ?? b.racer?.number;
             if (r) set.add(String(r));
           }
         } catch {}
@@ -422,13 +412,6 @@ async function collectRacersFromToday() {
 
 async function ensureDir(p) {
   await fs.mkdir(p, { recursive: true });
-}
-
-function isFresh(file) {
-  try {
-    const st = fssync.statSync(file);
-    return Date.now() - st.mtimeMs < FRESH_MS;
-  } catch { return false; }
 }
 
 // -------------------------------
@@ -454,23 +437,21 @@ async function main() {
   }
 
   console.log(
-    `process ${racers.length} racers` +
-      (ENV_RACERS ? " (env RACERS specified)" : "") +
-      (ENV_RACERS_LIMIT ? ` (limit=${ENV_RACERS_LIMIT})` : "") +
-      (ENV_BATCH ? ` (batch=${ENV_BATCH})` : "") +
-      ` | wait: racer=${WAIT_MS_BETWEEN_RACERS}ms, coursePage=${WAIT_MS_BETWEEN_COURSE_PAGES}ms, fresh=${FRESH_HOURS}h`
+    `process ${racers.length} racers (incremental, fresh<${FRESH_HOURS}h)` +
+      (ENV_RACERS ? " [env RACERS specified]" : "") +
+      (ENV_RACERS_LIMIT ? ` [limit=${ENV_RACERS_LIMIT}]` : "") +
+      (ENV_BATCH ? ` [batch=${ENV_BATCH}]` : "")
   );
 
   await ensureDir(OUTPUT_DIR);
 
-  let ok = 0, ng = 0, skipped = 0;
+  let ok = 0, ng = 0, skip = 0;
   for (const regno of racers) {
     const outPath = path.join(OUTPUT_DIR, `${regno}.json`);
 
-    if (isFresh(outPath)) {
+    if (await existsFresh(outPath, FRESH_MS)) {
       console.log(`⏭  skip fresh ${path.relative(PUBLIC_DIR, outPath)}`);
-      skipped++;
-      await sleep(WAIT_MS_BETWEEN_RACERS);
+      skip++;
       continue;
     }
 
@@ -496,18 +477,17 @@ async function main() {
         racers: racers.map((r) => Number(r)),
         success: ok,
         failed: ng,
-        skipped,
-        waitMs: {
-          betweenRacers: WAIT_MS_BETWEEN_RACERS,
-          betweenCoursePages: WAIT_MS_BETWEEN_COURSE_PAGES,
-        },
-        freshHours: FRESH_HOURS,
+        skippedFresh: skip,
+        outputDir: path.relative(PUBLIC_DIR, OUTPUT_DIR),
+        freshHours: FRESH_HOURS
       },
       null,
       2
     ),
     "utf8"
   );
+
+  console.log(`done: ok=${ok} ng=${ng} skip=${skip}`);
 }
 
 main().catch((e) => {
