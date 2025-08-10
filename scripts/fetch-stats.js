@@ -192,27 +192,53 @@ function parseEntryMatrixFromCoursePage($){
   return result;
 }
 
+// ---- ここから修正：勝ち決まり手（自艇行の横列）抽出 ----
+
+// 表記ゆれ対応付きで「決まり手」テーブルを探す
+function findKimariteTable($) {
+  const need = ["逃げ","差し","まくり","まくり差し","抜き","恵まれ"];
+  const tables = $("table").toArray();
+  for (const el of tables) {
+    const { headers } = parseTable($, $(el));
+    const normHeaders = headers.map(normalizeKimariteKey);
+    const ok = need.every(k => normHeaders.some(h => h.includes(k)));
+    if (ok) return { $el: $(el), headers, normHeaders };
+  }
+  return null;
+}
+
 // 「全艇決まり手」（自艇行の横列＝勝ち決まり手）
 function parseEntryKimariteRows($){
-  const $tbl = mustTableByHeader($, ["決まり手","逃げ","差し","まくり","まくり差し","抜き","恵まれ"]); if(!$tbl) return null;
-  const { headers, rows } = parseTable($, $tbl);
-  const kStart = headers[0]?.includes("決まり手") ? 1 : 0;
-  const keys   = headers.slice(kStart).map(normalizeKimariteKey);
+  const found = findKimariteTable($);
+  if (!found) return null;
+  const { $el, normHeaders } = found;
+  const { rows } = parseTable($, $el);
+
+  // 「逃げ」列の位置から右側を決まり手列として読む（前に「出走数」「1着数」等があってもOK）
+  const start = Math.max(0, normHeaders.findIndex(h => h.includes("逃げ")));
+  const keys  = normHeaders.slice(start).map(normalizeKimariteKey);
 
   const resultRows=[];
   for(const r of rows){
-    const label=r[0]||""; const m=label.match(/([1-6])\s*コース/); if(!m) continue;
-    const course=Number(m[1]); const isSelf=label.includes("（自艇）");
+    const label=r[0]||"";
+    const m=label.match(/([1-6])\s*コース/);
+    if(!m) continue;
+    const course=Number(m[1]);
+    const isSelf=label.includes("（自艇）");
+
     const detail={};
     for(let i=0;i<keys.length;i++){
-      const v=r[kStart+i]; const num=v?Number((v.match(/(\d+)/)||[])[1]):NaN;
-      detail[keys[i]]=Number.isFinite(num)?num:0;
+      const v=r[start+i];
+      const num=v ? Number((v.match(/(\d+)/)||[])[1]) : NaN;
+      detail[keys[i]] = Number.isFinite(num) ? num : 0;
     }
     resultRows.push({ course, isSelf, detail, raw:r });
   }
   resultRows.sort((a,b)=>a.course-b.course);
   return { rows: resultRows };
 }
+
+// ---- 修正ここまで ----
 
 // rdemo: 展示タイム順位
 function parseExTimeRankFromRdemo($){
