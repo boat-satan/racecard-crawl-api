@@ -8,11 +8,11 @@ on:
         required: true
         default: "today"
       pid:
-        description: "01..24"
+        description: "場コード 01..24"
         required: true
-        default: "04"
+        default: "02"
       race:
-        description: "1R..12R"
+        description: "レース番号 1R..12R"
         required: true
         default: "1R"
 
@@ -22,6 +22,7 @@ permissions:
 jobs:
   run:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -32,38 +33,112 @@ jobs:
       - name: Install deps
         run: npm ci || npm i --no-audit --no-fund
 
-      - name: Resolve params (JST 'today')
-        id: p
+      - name: Resolve params (JST 'today' / normalize)
+        id: params
         shell: bash
         run: |
-          DATE_IN='${{ inputs.date }}'
-          if [ "$DATE_IN" = "today" ]; then
-            DATE_IN=$(TZ=Asia/Tokyo date +%Y%m%d)
+          set -euo pipefail
+
+          # date
+          DATE_IN="${{ inputs.date }}"
+          if [ -z "$DATE_IN" ] || [ "$DATE_IN" = "today" ]; then
+            DATE=$(TZ=Asia/Tokyo date +'%Y%m%d')
+          else
+            DATE="${DATE_IN//-/}"   # 2025-08-10 も許容
           fi
-          PID=$(printf '%02d\n' $((10#${{ inputs.pid }})))
-          RACE=$(echo '${{ inputs.race }}' | tr '[:lower:]' '[:upper:]')
-          echo "date=$DATE_IN"  >> $GITHUB_OUTPUT
-          echo "pid=$PID"       >> $GITHUB_OUTPUT
-          echo "race=$RACE"     >> $GITHUB_OUTPUT
-          echo "Resolved: DATE=$DATE_IN PID=$PID RACE=$RACE"
+
+          # pid -> 2桁
+          PID="$(printf '%02d\n' $((10#${{ inputs.pid }})))"
+
+          # race -> 大文字 + 末尾R
+          R_IN="${{ inputs.race }}"
+          R_UP="$(echo "$R_IN" | tr 'a-z' 'A-Z')"
+          case "$R_UP" in
+            *R) RACE="$R_UP" ;;
+            *)  RACE="${R_UP}R" ;;
+          esac
+
+          echo "DATE=$DATE" | tee -a $GITHUB_ENV
+          echo "PID=$PID"   | tee -a $GITHUB_ENV
+          echo "RACE=$RACE" | tee -a $GITHUB_ENV
+
+          # 期待するファイルパス
+          echo "PROG=public/programs/v2/$DATE/$PID/$RACE.json"       | tee -a $GITHUB_ENV
+          echo "EXH=public/exhibition/v1/$DATE/$PID/$RACE.json"     | tee -a $GITHUB_ENV
+          echo "OUT=public/integrated/v1/$DATE/$PID/$RACE.json"     | tee -a $GITHUB_ENV
+
+          echo "Resolved: DATE=$DATE PID=$PID RACE=$RACE"
+
+      # ▼ ここが追加：元ファイルが無ければ最小限 crawl して補う
+      - name: Ensure source exists (crawl-if-missing)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          need_prog=0
+          need_exh=0
+
+          [ -f "$PROG" ] || need_prog=1
+          [ -f "$EXH"  ] || need_exh=1
+
+          if [ $need_prog -eq 0 ] && [ $need_exh -eq 0 ]; then
+            echo "All sources already present. (program & exhibition)"
+            exit 0
+          fi
+
+          echo "Some sources missing. program:$need_prog exhibition:$need_exh"
+
+          # --- 出走表（program）不足時のみ取得 ---
+          if [ $need_prog -eq 1 ]; then
+            echo ">> crawling program for $DATE/$PID/$RACE"
+            # 既存リポのスクリプト名に合わせて順に試行（存在するものが実行される）
+            if [ -f scripts/crawl-once.mjs ]; then
+              node scripts/crawl-once.mjs --date "$DATE" --pid "$PID" --race "$RACE"
+            elif [ -f scripts/fetch-program.mjs ]; then
+              node scripts/fetch-program.mjs "$DATE" "$PID" "$RACE"
+            elif [ -f scripts/fetch-program.js ]; then
+              node scripts/fetch-program.js "$DATE" "$PID" "$RACE"
+            else
+              echo "No program crawler script found." >&2
+              exit 1
+            fi
+          fi
+
+          # --- 展示（exhibition）不足時のみ取得 ---
+          if [ $need_exh -eq 1 ]; then
+            echo ">> crawling exhibition for $DATE/$PID/$RACE"
+            if [ -f scripts/fetch-exhibition-direct.js ]; then
+              node scripts/fetch-exhibition-direct.js "$DATE" "$PID" "$RACE" --skip-existing
+            elif [ -f scripts/fetch-exhibition.mjs ]; then
+              node scripts/fetch-exhibition.mjs "$DATE" "$PID" "$RACE"
+            else
+              echo "No exhibition crawler script found." >&2
+              exit 1
+            fi
+          fi
+
+          # 最終確認
+          [ -f "$PROG" ] || { echo "Program still missing: $PROG" >&2; exit 1; }
+          [ -f "$EXH"  ] || { echo "Exhibition still missing: $EXH" >&2; exit 1; }
 
       - name: Integrate once
-        env:
-          DATE: ${{ steps.p.outputs.date }}
-          PID:  ${{ steps.p.outputs.pid }}
-          RACE: ${{ steps.p.outputs.race }}
+        shell: bash
         run: |
+          set -euo pipefail
+          echo "Running integrate for $DATE/$PID/$RACE"
           node scripts/integrate-once.mjs --date "$DATE" --pid "$PID" --race "$RACE"
-          echo "=== listing ==="
+          echo "=== listing integrated ==="
           ls -la "public/integrated/v1/$DATE/$PID" || true
 
       - name: Commit & push
+        shell: bash
         run: |
+          set -euo pipefail
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           if ! git diff --cached --quiet; then
-            git commit -m "integrated: ${{ steps.p.outputs.date }} ${{ steps.p.outputs.pid }} ${{ steps.p.outputs.race }} [skip ci]"
+            git commit -m "integrated: $DATE $PID $RACE [skip ci]"
             git pull --rebase
             git push
           else
