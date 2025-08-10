@@ -1,15 +1,12 @@
 {
   "status": 200,
-  "fetchedAt": "2025-08-09T23:57:35.247Z",
+  "fetchedAt": "2025-08-10T00:19:40.326Z",
   "racers": [
     3072
   ],
-  "success": 0,
+  "success": 1,
   "failed": 0,
-  "skipped": 1,
-  "waitMs": {
-    "betweenRacers": 3000,
-    "betweenCoursePages": 3000
-  },
+  "skippedFresh": 0,
+  "outputDir": "stats/v2/racers",
   "freshHours": 12
 }
