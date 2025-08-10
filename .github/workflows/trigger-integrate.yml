@@ -1,89 +1,40 @@
-name: Trigger Integrate (with venue check)
+name: Trigger Integrate and Publish
 
 on:
   workflow_dispatch:
     inputs:
       date:
-        description: "開催日 YYYYMMDD or 'today'（未指定/ today はJSTの今日）"
-        required: false
+        description: "開催日 (YYYYMMDD or 'today')"
+        required: true
         default: "today"
       pid:
-        description: "場コード 01..24（例: 02=戸田）"
+        description: "場コード 01..24"
         required: true
-        default: "02"
+        default: "04"
       race:
-        description: "レース番号 1R..12R（例: 1R）"
+        description: "レース番号 1R..12R"
         required: true
         default: "1R"
 
 permissions:
+  actions: write
   contents: read
-  workflows: write   # これが dispatch に必要
 
 jobs:
-  run:
+  trigger:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Resolve DATE (JST)
-        id: date
-        shell: bash
+      - name: Dispatch integrate-and-publish
         run: |
-          IN="${{ inputs.date }}"
-          if [ -z "$IN" ] || [ "$IN" = "today" ]; then
-            OUT="$(TZ=Asia/Tokyo date +%Y%m%d)"
-          else
-            OUT="$IN"
-          fi
-          echo "date=$OUT" >> $GITHUB_OUTPUT
-          echo "Using DATE=$OUT"
-
-      # 開催確認: programs/v2/<DATE>/<PID>/ ディレクトリが存在するかを GitHub Contents API で確認
-      - name: Check venue directory exists
-        id: check
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DATE: ${{ steps.date.outputs.date }}
-          PID:  ${{ inputs.pid }}
-        run: |
-          API="https://api.github.com/repos/boat-satan/racecard-crawl-api/contents/public/programs/v2/${DATE}/${PID}?ref=main"
-          code=$(curl -sS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -o /dev/null -w "%{http_code}" "$API")
-          echo "HTTP=$code for $API"
-          if [ "$code" = "200" ]; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Early exit if not scheduled today at this venue
-        if: ${{ steps.check.outputs.exists != 'true' }}
-        run: |
-          echo "programs/v2/${{ steps.date.outputs.date }}/${{ inputs.pid }}/ が見つからないため、当該日の開催なし/未公開として終了します。"
-          exit 0
-
-      # venue OK → Integrate and Publish を dispatch
-      - name: Dispatch Integrate and Publish
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DATE: ${{ steps.date.outputs.date }}
-          PID:  ${{ inputs.pid }}
-          RACE: ${{ inputs.race }}
-        run: |
-          WF_ID=180322421  # Integrate and Publish の workflow_id
-          OWNER=boat-satan
-          REPO=racecard-crawl-api
-          BODY=$(jq -n --arg ref "main" --arg date "$DATE" --arg pid "$PID" --arg race "$RACE" \
-                   '{ref:$ref, inputs:{date:$date, pid:$pid, race:$race}}')
-          echo "Dispatch body: $BODY"
           curl -sS -X POST \
-            -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            -d "$BODY" \
-            "https://api.github.com/repos/${OWNER}/${REPO}/actions/workflows/${WF_ID}/dispatches" \
-            -o /dev/null -w "HTTP %{http_code}\n"
-
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/boat-satan/racecard-crawl-api/actions/workflows/180322421/dispatches \
+            -d "$(jq -n \
+                  --arg ref "main" \
+                  --arg date "${{ github.event.inputs.date }}" \
+                  --arg pid  "${{ github.event.inputs.pid }}" \
+                  --arg race "${{ github.event.inputs.race }}" \
+                  '{ref:$ref, inputs:{date:$date, pid:$pid, race:$race}}')"
       - name: Note
-        run: |
-          echo "トリガー済みです。Actions の 'Integrate and Publish' で実行を確認してください。"
+        run: echo "Dispatched integrate-and-publish with inputs: date=${{ github.event.inputs.date }} pid=${{ github.event.inputs.pid }} race=${{ github.event.inputs.race }}"
