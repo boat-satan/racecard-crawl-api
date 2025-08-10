@@ -7,13 +7,12 @@ on:
         description: "上書き用: YYYYMMDD（未指定ならJST今日）"
         required: false
       pids:
-        description: "場コード（カンマ区切り / 例: 01,04,24）。未指定は 04"
+        description: "場コード（カンマ区切り / 例: 01,04,24）。未指定は 全場"
         required: false
       force:
         description: "時間帯外でも実行するなら 1"
         required: false
   schedule:
-    # 任意: 1分おきに起動（時間帯外は早期終了）
     - cron: "*/1 * * * *"
 
 permissions:
@@ -43,7 +42,7 @@ jobs:
           echo "JST_NOW=$(TZ=Asia/Tokyo date +'%Y-%m-%d %H:%M:%S')" | tee -a $GITHUB_ENV
           echo "IN_WINDOW=$IN_WINDOW" | tee -a $GITHUB_ENV
           echo "DEF_DATE=$DEF_DATE"   | tee -a $GITHUB_ENV
-          echo "PIDS=${{ inputs.pids || '04' }}" | tee -a $GITHUB_ENV
+          echo "PIDS=${{ inputs.pids || '01,02,03,04,05,06,07,08,09,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24' }}" | tee -a $GITHUB_ENV
 
       - name: Early exit when out of window
         if: ${{ !inputs.force && env.IN_WINDOW != 'true' }}
@@ -59,7 +58,6 @@ jobs:
           echo "DATE=$DATE" | tee -a $GITHUB_ENV
           echo "Resolved: DATE=$DATE PIDS=$PIDS RACES=AUTO_T15"
 
-      # ★ 修正ポイント：race を 'auto' で明示的に渡す ★
       - name: Run direct exhibition crawler (AUTO_T15)
         shell: bash
         run: |
