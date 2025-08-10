@@ -1,21 +1,27 @@
 # .github/workflows/exhibition-direct.yml
-name: Test Exhibition Direct
+name: Exhibition Direct Auto
 
 on:
+  # JST 07:30〜22:00 に毎分実行（UTC換算）
+  schedule:
+    - cron: '30-59 22 * * *'  # UTC22:30〜22:59 = JST07:30〜07:59
+    - cron: '* 23 * * *'      # UTC23:00〜23:59 = JST08:00〜08:59
+    - cron: '* 0-12 * * *'    # UTC00:00〜12:59 = JST09:00〜21:59
+    - cron: '0 13 * * *'      # UTC13:00 = JST22:00
   workflow_dispatch:
     inputs:
       date:
-        description: "YYYYMMDD（例: 20250809）"
-        required: true
+        description: "YYYYMMDD（例: 20250809、空なら今日JST）"
+        required: false
         default: ""
       pid:
-        description: "場コード 01..24（例: 02）"
-        required: true
-        default: "02"
+        description: "場コード（01..24、空なら全場）"
+        required: false
+        default: ""
       race:
-        description: "レース番号（例: 5R または 5）"
-        required: true
-        default: "1R"
+        description: "レース番号（例: 1R、空なら全レース）"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -32,30 +38,49 @@ jobs:
       - name: Install deps
         run: npm ci || npm i --no-audit --no-fund
 
-      # デバッグ（入力確認）
-      - name: Echo inputs
+      - name: Prepare date & targets
+        id: prep
         run: |
-          echo "date=${{ inputs.date }}"
-          echo "pid=${{ inputs.pid }}"
-          echo "race=${{ inputs.race }}"
+          # 今日の日付（JST）
+          DATE_INPUT="${{ inputs.date }}"
+          if [ -z "$DATE_INPUT" ]; then
+            DATE=$(date -d '9 hours' +%Y%m%d)
+          else
+            DATE="$DATE_INPUT"
+          fi
 
-      # 展示後 直接クロール（CLI 引数で渡す）
-      - name: Run direct exhibition crawler
+          # 全場 or 単場
+          if [ -z "${{ inputs.pid }}" ]; then
+            PIDS=$(seq -w 1 24)
+          else
+            PIDS=$(printf "%02d" "${{ inputs.pid }}")
+          fi
+
+          # 全レース or 単レース
+          if [ -z "${{ inputs.race }}" ]; then
+            RACES=$(seq 1 12 | sed 's/$/R/')
+          else
+            R=$(echo "${{ inputs.race }}" | sed -E 's/[Rr]$//')
+            RACES="${R}R"
+          fi
+
+          echo "DATE=$DATE" >> $GITHUB_ENV
+          echo "PIDS=$PIDS" >> $GITHUB_ENV
+          echo "RACES=$RACES" >> $GITHUB_ENV
+
+      - name: Run exhibition crawler
         run: |
           set -euo pipefail
-          DATE="${{ inputs.date }}"
-          PID="${{ inputs.pid }}"
-          IN_RACE="${{ inputs.race }}"
-          # race を 1..12 / 1R..12R どちらでも受け取れるように正規化
-          RACE="$(echo "$IN_RACE" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g; s/[Rr]$//')"
-          if ! [[ "$RACE" =~ ^([1-9]|1[0-2])$ ]]; then
-            echo "race の形式が不正です: $IN_RACE" >&2
-            exit 1
-          fi
-          RACE="${RACE}R"
-
-          echo "-> exec: node scripts/fetch-exhibition-direct.js $DATE $PID $RACE"
-          node scripts/fetch-exhibition-direct.js "$DATE" "$PID" "$RACE" --skip-existing
+          for PID in $PIDS; do
+            for RACE in $RACES; do
+              echo "=== ${DATE}/${PID}/${RACE} ==="
+              if node scripts/fetch-exhibition-direct.js "$DATE" "$PID" "$RACE" --skip-existing; then
+                echo " -> success"
+              else
+                echo " -> no data or error"
+              fi
+            done
+          done
 
       - name: Commit & push results
         run: |
@@ -63,7 +88,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           if ! git diff --cached --quiet; then
-            git commit -m "exhibition direct: ${{ inputs.date }} ${{ inputs.pid }} ${{ inputs.race }} [skip ci]"
+            git commit -m "exhibition direct auto: $DATE [skip ci]"
             git pull --rebase
             git push
           else
