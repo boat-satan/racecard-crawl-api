@@ -24,17 +24,28 @@ jobs:
   trigger:
     runs-on: ubuntu-latest
     steps:
+      - name: Build dispatch payload
+        shell: bash
+        run: |
+          cat > body.json <<'JSON'
+          {
+            "ref": "main",
+            "inputs": {
+              "date": "${{ github.event.inputs.date }}",
+              "pid":  "${{ github.event.inputs.pid }}",
+              "race": "${{ github.event.inputs.race }}"
+            }
+          }
+          JSON
+          echo "---- body.json ----"
+          cat body.json
+
       - name: Dispatch integrate-and-publish
+        shell: bash
         run: |
           curl -sS -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             https://api.github.com/repos/boat-satan/racecard-crawl-api/actions/workflows/180322421/dispatches \
-            -d "$(jq -n \
-                  --arg ref "main" \
-                  --arg date "${{ github.event.inputs.date }}" \
-                  --arg pid  "${{ github.event.inputs.pid }}" \
-                  --arg race "${{ github.event.inputs.race }}" \
-                  '{ref:$ref, inputs:{date:$date, pid:$pid, race:$race}}')"
-      - name: Note
-        run: echo "Dispatched integrate-and-publish with inputs: date=${{ github.event.inputs.date }} pid=${{ github.event.inputs.pid }} race=${{ github.event.inputs.race }}"
+            --data @body.json
+          echo "Dispatched with inputs: date=${{ github.event.inputs.date }} pid=${{ github.event.inputs.pid }} race=${{ github.event.inputs.race }}"
