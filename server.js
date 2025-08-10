@@ -1,29 +1,26 @@
 // server.js
 // Node v20 / ESM
-// 目的: 出走表(program)・展示(exhibition)・スタッツ(stats)を読み込み、
-//       レース単位で統合JSONを返すAPIを提供する（保存はしない最小版）
-//
-// エンドポイント:
-//   GET /api/integrated/:date/:pid/:race
-//     例) /api/integrated/20250810/04/1R
-//
-// ディレクトリ前提:
-//   public/programs/v2/<date>/<pid>/<race>.json        (or programs-slim/v2/...)
-//   public/exhibition/v1/<date>/<pid>/<race>.json
-//   public/stats/v2/racers/<regno>.json
-//
-// 注: スタッツは「展示の進入コース n に対応する entryCourse[n]」と
-//     「展示順位別(exTimeRank)」のみを抽出して返します。
+// 統合API: 出走表 + 展示データ + スタッツ を統合して返す
+//  - GET /api/integrate/v1/:date/:pid/:race
+//    例: /api/integrate/v1/20250810/04/1R
+//  - 既存の静的ファイルも /public 配下を配信
 
-import { createServer } from "node:http";
+import express from "express";
+import path from "node:path";
 import fs from "node:fs/promises";
 import fssync from "node:fs";
-import path from "node:path";
-import url from "node:url";
+import { fileURLToPath } from "node:url";
 
-const ROOT = process.cwd();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname  = path.dirname(__filename);
 
-// ---------- ヘルパ ----------
+const app = express();
+const PORT = Number(process.env.PORT || 3000);
+
+// ルート
+const PUBLIC_DIR = path.join(__dirname, "public");
+
+// -------- ヘルパ --------
 const to2 = (s) => String(s).padStart(2, "0");
 const normRace = (r) => (String(r).toUpperCase().endsWith("R") ? String(r).toUpperCase() : `${r}R`);
 
@@ -35,155 +32,157 @@ async function readJsonIfExists(p) {
     return null;
   }
 }
-function exists(p) {
-  try { return fssync.existsSync(p); } catch { return false; }
+
+function pickProgramEntryShape(p) {
+  // programs の形揺れ対応
+  if (!p) return [];
+  const list = p.entries || p.boats || [];
+  return list.map((e) => ({
+    lane: Number(e.lane ?? e.course ?? e.c ?? e.slip ?? null),
+    number: Number(e.number ?? e.racer_number ?? e.id ?? null),
+    name: e.name ?? e.racer_name ?? null,
+    // そのまま残す
+    raw: e,
+  }));
 }
 
-// programs の検索（programs/v2 → programs-slim/v2）
-function findProgramPath(date, pid, race) {
-  const candidates = [
-    path.join(ROOT, "public", "programs", "v2", date, pid, `${race}.json`),
-    path.join(ROOT, "public", "programs-slim", "v2", date, pid, `${race}.json`),
-  ];
-  return candidates.find(exists) || candidates[0]; // なければ一つ目を返す（後で404にする）
+function pickExhibitionEntryShape(x) {
+  if (!x) return [];
+  const list = x.entries || [];
+  return list.map((e) => ({
+    lane: Number(e.lane ?? null),
+    number: Number(e.number ?? null),
+    exRank: e.exhibition?.rank ?? e.exRank ?? null,
+    exTime: e.exhibition?.time ?? e.exTime ?? e.tenjiTime ?? null,
+    startCourse: e.exhibition?.startCourse ?? e.startCourse ?? null,
+    startTiming: e.exhibition?.startTiming ?? e.startTiming ?? e.st ?? null,
+    // そのまま残す
+    raw: e,
+  }));
 }
 
-function exPath(date, pid, race) {
-  return path.join(ROOT, "public", "exhibition", "v1", date, pid, `${race}.json`);
-}
-
-function statsPath(regno) {
-  return path.join(ROOT, "public", "stats", "v2", "racers", `${regno}.json`);
-}
-
-// lane/番号対応のユーティリティ
-function getEntryNumberOfLane(programJson, lane) {
-  const entries = programJson?.entries || programJson?.boats || [];
-  const hit = entries.find(e => Number(e.lane ?? e.boat ?? e.racer_boat_number) === Number(lane));
-  return hit ? Number(hit.number ?? hit.racer_number ?? hit.id) : null;
-}
-
-// 展示からコース(進入)推定: startCourse があればそれ、なければ lane フォールバック
-function getStartCourseFromExEntry(exEntry) {
-  const sc = exEntry?.exhibition?.startCourse ?? exEntry?.startCourse;
-  const ln = exEntry?.lane ?? exEntry?.racer_boat_number ?? exEntry?.boat;
-  return sc != null ? Number(sc) : (ln != null ? Number(ln) : null);
-}
-
-// スタッツからコース別要約を抽出
-function pickStatsForCourse(statsJson, courseNum) {
-  if (!statsJson || !Array.isArray(statsJson.entryCourse)) return null;
-  const ec = statsJson.entryCourse.find(c => Number(c.course) === Number(courseNum));
+function sliceStatsForCourse(stats, courseN) {
+  if (!stats || !courseN) return null;
+  const ec = stats.entryCourse?.find((c) => c.course === Number(courseN));
   if (!ec) return null;
+
   return {
-    course: Number(courseNum),
-    avgST: ec.avgST ?? null,
+    course: Number(courseN),
+    // 自艇行の要約
     selfSummary: ec.selfSummary ?? null,
-    matrixSelf: ec.matrix?.self ?? null,
+    // 勝ち決まり手（自艇行の横列）
     winKimariteSelf: ec.winKimariteSelf ?? null,
+    // 負け決まり手（他艇合計）
     loseKimarite: ec.loseKimarite ?? null,
+    // 補足: 行列（必要ならクライアントで使えるよう最低限）
+    matrixSelf: ec.matrix?.self ?? null,
   };
 }
 
-// ---------- ハンドラ ----------
-async function handleIntegrated(req, res, params) {
-  const date = params.date.replace(/-/g, "");
-  const pid = to2(params.pid);
-  const race = normRace(params.race);
-
-  // 入力ファイルパス
-  const programFile = findProgramPath(date, pid, race);
-  const exhibitionFile = exPath(date, pid, race);
-
-  // 読み込み
-  const program = await readJsonIfExists(programFile);
-  const exhibition = await readJsonIfExists(exhibitionFile);
-
-  // 存在チェック
-  if (!program) {
-    res.writeHead(404, { "content-type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify({ error: "program not found", path: path.relative(ROOT, programFile) }, null, 2));
-    return;
-  }
-  if (!exhibition) {
-    res.writeHead(404, { "content-type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify({ error: "exhibition not found", path: path.relative(ROOT, exhibitionFile) }, null, 2));
-    return;
-  }
-
-  // laneごとに番号と進入コースを確定 → スタッツ読み込み＆必要部分だけ抽出
-  const exEntries = exhibition.entries || [];
-  const statsByLane = {};
-
-  for (const ex of exEntries) {
-    const lane = ex?.lane != null ? Number(ex.lane) : null;
-    const number =
-      ex?.number != null ? Number(ex.number) : (lane != null ? getEntryNumberOfLane(program, lane) : null);
-    const courseNum = getStartCourseFromExEntry(ex);
-
-    if (!number || !courseNum) continue;
-
-    // スタッツ読み込み（キャッシュ簡易化）
-    const spath = statsPath(number);
-    const statsJson = await readJsonIfExists(spath);
-
-    // 必要部分だけ
-    const picked = pickStatsForCourse(statsJson, courseNum);
-    const exTimeRank = statsJson?.exTimeRank ?? null;
-
-    statsByLane[lane] = {
-      number,
-      course: courseNum,
-      stats: picked,
-      exTimeRank,
-      statsSource: exists(spath) ? path.relative(ROOT, spath) : null,
-    };
-  }
-
-  // 統合オブジェクト
-  const payload = {
-    schemaVersion: "1.0",
-    generatedAt: new Date().toISOString(),
-    input: { date, pid, race },
-    sources: {
-      program: path.relative(ROOT, programFile),
-      exhibition: path.relative(ROOT, exhibitionFile),
-    },
-    // そのまま欲しい人向けに原本も返す（必要に応じて front で省略可）
-    program,
-    exhibition,
-    // GPTs へ渡す要点: lane→(racer, 進入コースのスタッツ要約, 展示順位別)
-    statsByLane,
+function pickExRankStats(stats, exRank) {
+  if (!stats || !exRank) return null;
+  const item = stats.exTimeRank?.find((r) => Number(r.rank) === Number(exRank));
+  if (!item) return null;
+  return {
+    rank: Number(item.rank),
+    winRate: item.winRate ?? null,
+    top2Rate: item.top2Rate ?? null,
+    top3Rate: item.top3Rate ?? null,
   };
-
-  res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify(payload, null, 2));
 }
 
-// ---------- ルーター ----------
-const server = createServer(async (req, res) => {
+// -------- 統合API --------
+app.get("/api/integrate/v1/:date/:pid/:race", async (req, res) => {
   try {
-    const u = url.parse(req.url, true);
-    const m = req.method || "GET";
+    const date = String(req.params.date).replace(/-/g, "");
+    const pid  = to2(req.params.pid);
+    const race = normRace(req.params.race);
 
-    // /api/integrated/:date/:pid/:race
-    const rx = /^\/api\/integrated\/([^/]+)\/([^/]+)\/([^/]+)\/?$/;
-    const mm = u.pathname.match(rx);
-    if (m === "GET" && mm) {
-      const [, date, pid, race] = mm;
-      await handleIntegrated(req, res, { date, pid, race });
-      return;
+    // 1) 出走表（programs / programs-slim のどちらかに存在する方を採用）
+    const programPaths = [
+      path.join(PUBLIC_DIR, "programs", "v2", date, pid, `${race}.json`),
+      path.join(PUBLIC_DIR, "programs-slim", "v2", date, pid, `${race}.json`),
+      // today や直下構成にも“保険”で対応
+      path.join(PUBLIC_DIR, "programs", "v2", "today", pid, `${race}.json`),
+      path.join(PUBLIC_DIR, "programs-slim", "v2", "today", pid, `${race}.json`),
+      path.join(PUBLIC_DIR, "programs", "v2", pid, `${race}.json`),
+      path.join(PUBLIC_DIR, "programs-slim", "v2", pid, `${race}.json`),
+    ];
+    let program = null, programFile = null;
+    for (const p of programPaths) {
+      if (fssync.existsSync(p)) { program = await readJsonIfExists(p); programFile = p; break; }
+    }
+    if (!program) return res.status(404).json({ error: "program not found" });
+
+    // 2) 展示データ
+    const exhibitionFile = path.join(PUBLIC_DIR, "exhibition", "v1", date, pid, `${race}.json`);
+    const exhibition = await readJsonIfExists(exhibitionFile);
+    if (!exhibition) return res.status(404).json({ error: "exhibition not found" });
+
+    const progEntries = pickProgramEntryShape(program);
+    const exEntries   = pickExhibitionEntryShape(exhibition);
+
+    // 3) エントリーごとにスタッツをスライス
+    const mergedEntries = [];
+    for (const pe of progEntries) {
+      const ex = exEntries.find((e) => e.number === pe.number) || null;
+      // スタッツ読み出し
+      const statsFile = path.join(PUBLIC_DIR, "stats", "v2", "racers", `${pe.number}.json`);
+      const stats = fssync.existsSync(statsFile) ? await readJsonIfExists(statsFile) : null;
+
+      const courseN = ex?.startCourse ?? null; // 展示スタ展の進入コース（あれば）
+      const statsForCourse = courseN ? sliceStatsForCourse(stats, courseN) : null;
+      const exRankStats = ex?.exRank ? pickExRankStats(stats, ex.exRank) : null;
+
+      mergedEntries.push({
+        lane: pe.lane ?? ex?.lane ?? null,
+        number: pe.number,
+        name: pe.name ?? null,
+
+        // 展示（最低限）
+        exhibition: ex
+          ? {
+              rank: ex.exRank ?? null,
+              time: ex.exTime ?? null,
+              startCourse: ex.startCourse ?? null,
+              startTiming: ex.startTiming ?? null,
+            }
+          : null,
+
+        // スタッツ（展示の進入コースに合わせて切り出し）
+        stats: {
+          forCourse: statsForCourse, // selfSummary / winKimariteSelf / loseKimarite / matrixSelf
+          exRankStats,               // 展示順位別の成績（該当順位のみ）
+        },
+      });
     }
 
-    res.writeHead(404, { "content-type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify({ error: "not found" }, null, 2));
+    const payload = {
+      schemaVersion: "1.0",
+      generatedAt: new Date().toISOString(),
+      params: { date, pid, race },
+      sources: {
+        program: programFile ? path.relative(PUBLIC_DIR, programFile) : null,
+        exhibition: path.relative(PUBLIC_DIR, exhibitionFile),
+        statsDir: "stats/v2/racers/",
+      },
+      // そのままも返す（必要に応じてクライアントで参照）
+      program: { stadium: program?.stadiumName ?? program?.stadium ?? null, raw: program },
+      exhibition: { raw: exhibition },
+      entries: mergedEntries,
+    };
+
+    res.set("cache-control", "public, max-age=30"); // ひとまず軽いキャッシュ
+    res.json(payload);
   } catch (e) {
-    res.writeHead(500, { "content-type": "application/json; charset=utf-8" });
-    res.end(JSON.stringify({ error: e.message }, null, 2));
+    console.error(e);
+    res.status(500).json({ error: String(e?.message || e) });
   }
 });
 
-const PORT = Number(process.env.PORT || 3000);
-server.listen(PORT, () => {
-  console.log(`Integrated API listening on http://localhost:${PORT}`);
+// -------- 静的配信 --------
+app.use(express.static(PUBLIC_DIR, { extensions: ["html"] }));
+
+app.listen(PORT, () => {
+  console.log(`server listening on http://localhost:${PORT}`);
 });
