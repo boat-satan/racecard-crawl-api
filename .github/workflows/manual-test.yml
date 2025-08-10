@@ -19,6 +19,7 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout
@@ -32,41 +33,50 @@ jobs:
       - name: Install deps
         run: |
           npm ci || npm install
-          npm i express
-          npm i -D wait-on
 
-      - name: Start API (background)
-        env:
-          PORT: 3000
-        run: |
-          node server.js & echo $! > server.pid
-          npx wait-on http://127.0.0.1:3000
-
-      - name: Hit integrate endpoint
+      # ← ここで起動〜待機〜叩くまでを一気にやる
+      - name: Start API and hit endpoint
         env:
           DATE: ${{ github.event.inputs.date }}
           PID:  ${{ github.event.inputs.pid }}
           RACE: ${{ github.event.inputs.race }}
         run: |
+          set -euxo pipefail
+          # 起動をバックグラウンド化して PID 保存＆ログ保存
+          node server.js > server.log 2>&1 & echo $! > server.pid
+
+          # 最大60秒待機（/ready が無ければ / を叩いてもOK）
+          for i in {1..60}; do
+            if curl -fsS "http://127.0.0.1:3000/ready" >/dev/null 2>&1 || \
+               curl -fsS "http://127.0.0.1:3000" >/dev/null 2>&1; then
+              echo "API is up"; break
+            fi
+            echo "waiting API (${i}s) ..."
+            sleep 1
+          done
+
           echo "Request: ${DATE}/${PID}/${RACE}"
           curl -sS "http://127.0.0.1:3000/api/integrate/v1/${DATE}/${PID}/${RACE}" -o response.json
+
           echo "=== API response (first 2000 chars) ==="
           head -c 2000 response.json || true
           echo
-          # 念のため生成先を確認
+          echo "=== integrated files ==="
           ls -la public/integrated/v1 || true
           find public/integrated/v1 -type f -maxdepth 3 || true
 
       - name: Stop API
         if: always()
         run: |
-          kill $(cat server.pid) || true
+          kill $(cat server.pid) 2>/dev/null || true
 
-      - name: Upload integrated JSON
+      - name: Upload artifacts (response + server log)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: integrated-json
           path: |
             public/integrated/v1/**/*.json
             response.json
+            server.log
           if-no-files-found: warn
