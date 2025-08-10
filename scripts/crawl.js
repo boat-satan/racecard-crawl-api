@@ -23,7 +23,16 @@ const outDirFull = (date, pid) => path.join(BASE_OUT_FULL, date, pid);
 
 // ---------- 入力 ----------
 const DATE_IN = (process.env.TARGET_DATE || "today").trim();
-const DATE = DATE_IN.toLowerCase() === "today" ? "today" : DATE_IN.replace(/-/g, "");
+const USE_TODAY_ENDPOINT = DATE_IN.toLowerCase() === "today";
+function resolveJstYmd() {
+  const now = new Date();
+  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const y = jst.getUTCFullYear();
+  const m = String(jst.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(jst.getUTCDate()).padStart(2, "0");
+  return `${y}${m}${d}`;
+}
+const DATE = USE_TODAY_ENDPOINT ? resolveJstYmd() : DATE_IN.replace(/-/g, "");
 
 const PID_IN = (process.env.TARGET_PID || "ALL").trim();
 const WANT_ALL_PID = PID_IN.toUpperCase() === "ALL";
@@ -37,10 +46,10 @@ const RACE_FILTERS = WANT_ALL_RACE
   ? null
   : RACE_IN.split(",").map(s => String(s).trim().toUpperCase())
       .map(s => s.endsWith("R") ? s : `${s}R`)
-      .map(s => s.replace(/[^\d]/g, "") + "R"); // "1"→"1R"
+      .map(s => s.replace(/[^\d]/g, "") + "R");
 
 // 取得元
-const SRC = DATE === "today"
+const SRC = USE_TODAY_ENDPOINT
   ? "https://boatraceopenapi.github.io/programs/v2/today.json"
   : `https://boatraceopenapi.github.io/programs/v2/${DATE}.json`;
 
@@ -60,7 +69,7 @@ const pickStadiumCode = (v) => {
 const pickStadiumName = (v) => v.race_stadium_name ?? v.stadium_name ?? v.stadiumName ?? null;
 
 function emitOneRace(date, stadiumCode, stadiumName, raceLabel, raceDataLike) {
-  // スリム用の最低限エントリ
+  // スリム用
   const entriesSlim = (raceDataLike?.boats ?? raceDataLike?.entries ?? raceDataLike?.Entries ?? []).map(b => ({
     lane: b.racer_boat_number ?? b.lane ?? null,
     name: b.racer_name ?? b.name ?? null,
@@ -68,12 +77,9 @@ function emitOneRace(date, stadiumCode, stadiumName, raceLabel, raceDataLike) {
   }));
 
   // 締切
-  const deadline =
-    raceDataLike?.race_closed_at ??
-    raceDataLike?.deadline ??
-    null;
+  const deadline = raceDataLike?.race_closed_at ?? raceDataLike?.deadline ?? null;
 
-  // フル用（できるだけ元を活かす）
+  // フル用
   const fullPayload = {
     schemaVersion: "2.0",
     generatedAt: new Date().toISOString(),
@@ -119,7 +125,6 @@ function emitOneRace(date, stadiumCode, stadiumName, raceLabel, raceDataLike) {
   ensureDir(slimDir);
   ensureDir(fullDir);
 
-  // race.json
   fs.writeFileSync(
     path.join(slimDir, `${raceLabel}.json`),
     JSON.stringify({ race: raceLabel, deadline, entries: entriesSlim }, null, 2)
@@ -166,7 +171,7 @@ try {
   else if (raw && Array.isArray(raw.items))    programs = raw.items;
 
   if (!programs) {
-    // フォーマット不明でも最低限 today/ALL 用の置き土産
+    // today/DATE 直下の最低限置き土産
     const slimRoot = path.join(BASE_OUT_SLIM, DATE);
     ensureDir(slimRoot);
     fs.writeFileSync(
@@ -177,18 +182,15 @@ try {
     process.exit(0);
   }
 
-  // --- 2系統の吸収 ---
-  // A) フラット（各要素が race_stadium_number / race_number を持つ）
+  // A) フラット
   if (programs?.length && (programs[0].race_stadium_number !== undefined || programs[0].race_number !== undefined)) {
     for (const p of programs) {
       const stadiumCode = pickStadiumCode(p);
       const raceLabel   = pickRaceLabel(p);
       const stadiumName = pickStadiumName(p);
-
       if (!stadiumCode || !raceLabel) continue;
 
-      // 絞り込み
-      if (PID_FILTERS && !PID_FILTERS.includes(stadiumCode) && !PID_FILTERS.includes(pickStadiumName(p) ?? "")) continue;
+      if (PID_FILTERS && !PID_FILTERS.includes(stadiumCode) && !PID_FILTERS.includes(stadiumName ?? "")) continue;
       if (RACE_FILTERS && !RACE_FILTERS.includes(raceLabel)) continue;
 
       emitOneRace(DATE, stadiumCode, stadiumName, raceLabel, p);
@@ -196,15 +198,11 @@ try {
     process.exit(0);
   }
 
-  // B) venue配列（各 venue に races をぶら下げる）
+  // B) venue配列
   for (const v of programs) {
-    const stadiumCode =
-      to2(v.stadium ?? v.stadiumCode ?? v.stadium_number ?? "");
+    const stadiumCode = to2(v.stadium ?? v.stadiumCode ?? v.stadium_number ?? "");
     const stadiumName = v.stadiumName ?? v.stadium_name ?? null;
-
     if (!stadiumCode) continue;
-
-    // PID 絞り込み（コード or 名称）
     if (PID_FILTERS && !PID_FILTERS.includes(stadiumCode) && !PID_FILTERS.includes(stadiumName ?? "")) continue;
 
     const racesArr = v.races ?? v.Races ?? [];
@@ -212,8 +210,6 @@ try {
       const raceLabel = pickRaceLabel(r);
       if (!raceLabel) continue;
       if (RACE_FILTERS && !RACE_FILTERS.includes(raceLabel)) continue;
-
-      // venue.races 形式を emitOneRace が読める形にそのまま渡す
       emitOneRace(DATE, stadiumCode, stadiumName, raceLabel, r);
     }
   }
@@ -221,7 +217,6 @@ try {
   console.log("done.");
 } catch (err) {
   console.error("error:", String(err));
-  // 最低限のダンプ
   const slimRoot = path.join(BASE_OUT_SLIM, DATE);
   ensureDir(slimRoot);
   fs.writeFileSync(
