@@ -1,13 +1,15 @@
 // scripts/fetch-exhibition-direct.js
-// Usage 例:
-//   TARGET_DATE=20250809 TARGET_PIDS=02 TARGET_RACES=7R node scripts/fetch-exhibition-direct.js --skip-existing
-//   node scripts/fetch-exhibition-direct.js 20250809 02 1..12
+// Usage:
+//   node scripts/fetch-exhibition-direct.js 20250809 ALL ALL           # 全場・全R
+//   node scripts/fetch-exhibition-direct.js 20250809 02,04 1..12       # 複数場・範囲R
+//   node scripts/fetch-exhibition-direct.js 20250809 02 1,3,5,7        # 個別R
+//   TARGET_DATE=20250809 TARGET_PIDS=ALL TARGET_RACES=ALL node scripts/fetch-exhibition-direct.js --skip-existing
 //
-// 出力先: public/exhibition/v1/<date>/<pid>/<race>.json
-//
-// 取得対象: beforeinfo（直前情報）
-// 出力形式:
-// { date, pid, race, source, mode:"beforeinfo", generatedAt, entries:[{ lane, number, name, weight, tenjiTime, tilt, st, stFlag }] }
+// 出力: public/exhibition/v1/<date>/<pid>/<race>.json
+// 取得: beforeinfo（直前情報）
+// 形式:
+// { date, pid, race, source, mode: "beforeinfo", generatedAt,
+//   entries: [{ lane, number, name, weight, tenjiTime, tilt, st, stFlag }] }
 
 import fs from "node:fs";
 import fsp from "node:fs/promises";
@@ -24,18 +26,13 @@ function log(...args) {
 
 function usageAndExit() {
   console.error(
-    "Usage: node scripts/fetch-exhibition-direct.js <YYYYMMDD?> <pid:01..24|ALL?> <race: 1R|1..12|1,3,5R|ALL?>\n" +
-      " or set env TARGET_DATE / TARGET_PIDS / TARGET_RACES (省略時は: 今日JST/全場/全R)"
+    "Usage: node scripts/fetch-exhibition-direct.js <YYYYMMDD> <pid:01..24|ALL|comma> <race: 1..12|1..12範囲|comma|ALL>\n" +
+      "  examples:\n" +
+      "    node ... 20250809 ALL ALL\n" +
+      "    node ... 20250809 02,04 1..12\n" +
+      "    TARGET_DATE=20250809 TARGET_PIDS=02 TARGET_RACES=1,3,5 node ..."
   );
   process.exit(1);
-}
-
-function jstTodayYYYYMMDD() {
-  const now = new Date(Date.now() + 9 * 3600 * 1000);
-  const y = now.getUTCFullYear();
-  const m = String(now.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(now.getUTCDate()).padStart(2, "0");
-  return `${y}${m}${d}`;
 }
 
 function normRaceToken(tok) {
@@ -45,7 +42,7 @@ function normRaceToken(tok) {
 function expandRaces(expr) {
   if (!expr) return [];
   if (String(expr).toUpperCase() === "ALL") {
-    return Array.from({ length: 12 }, (_, i) => i + 1);
+    return Array.from({ length: 12 }, (_, i) => i + 1); // 1..12
   }
   const parts = String(expr).split(",").map((s) => s.trim()).filter(Boolean);
   const out = new Set();
@@ -73,40 +70,34 @@ async function writeJSON(file, data) {
   await fsp.writeFile(file, JSON.stringify(data, null, 2));
 }
 
-// ---------- 入力（★デフォルトを追加） ----------
+// ---------- 引数/環境 ----------
 const argvDate = process.argv[2];
 const argvPid  = process.argv[3];
 const argvRace = process.argv[4];
 
-const DATE_IN  = (process.env.TARGET_DATE || argvDate || "").trim();
-const PIDS_IN  = (process.env.TARGET_PIDS || argvPid  || "").trim();
-const RACES_IN = (process.env.TARGET_RACES || argvRace || "").trim();
+const DATE       = process.env.TARGET_DATE  || argvDate  || "";
+const PIDS_RAW   = process.env.TARGET_PIDS  || argvPid   || "";
+const RACES_EXPR = process.env.TARGET_RACES || argvRace  || "";
 const SKIP_EXISTING = process.argv.includes("--skip-existing");
 
-// ★ 日付 未指定→JST今日
-const DATE = DATE_IN || jstTodayYYYYMMDD();
-
-// ★ PID 未指定 or "ALL" → 01..24
 let PIDS = [];
-if (!PIDS_IN || PIDS_IN.toUpperCase() === "ALL") {
-  PIDS = Array.from({ length: 24 }, (_, i) => String(i + 1).padStart(2, "0"));
+if (String(PIDS_RAW).toUpperCase() === "ALL") {
+  PIDS = Array.from({ length: 24 }, (_, i) => String(i + 1).padStart(2, "0")); // 01..24
 } else {
-  PIDS = PIDS_IN.split(",")
+  PIDS = String(PIDS_RAW)
+    .split(",")
     .map((s) => s.trim())
-    .filter(Boolean)
-    .map((s) => (s.toUpperCase() === "ALL" ? null : s))
-    .filter(Boolean)
-    .map((s) => String(s).padStart(2, "0"));
+    .filter(Boolean);
 }
 
-// ★ レース 未指定 or "ALL" → 1..12
-const RACES = RACES_IN ? expandRaces(RACES_IN) : Array.from({ length: 12 }, (_, i) => i + 1);
+if (!DATE || PIDS.length === 0 || !RACES_EXPR) usageAndExit();
 
-if (!DATE || PIDS.length === 0 || RACES.length === 0) usageAndExit();
+const RACES = expandRaces(RACES_EXPR);
+if (RACES.length === 0) usageAndExit();
 
 log(`date=${DATE} pids=${PIDS.join(",")} races=${RACES.join(",")}`);
 
-// ---------- core ----------
+// ---------- 取得 & 解析 ----------
 async function fetchBeforeinfo({ date, pid, raceNo }) {
   const url = `https://www.boatrace.jp/owpc/pc/race/beforeinfo?hd=${date}&jcd=${pid}&rno=${raceNo}`;
   log("GET", url);
@@ -116,7 +107,10 @@ async function fetchBeforeinfo({ date, pid, raceNo }) {
       "accept-language": "ja,en;q=0.8",
     },
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    // 404など -> 例外にして上位で握りつぶす（ファイルは作らない）
+    throw new Error(`HTTP ${res.status} ${res.statusText}`);
+  }
   const html = await res.text();
   return { url, html };
 }
@@ -138,13 +132,13 @@ function parseBeforeinfo(html, { date, pid, raceNo, url }) {
   });
 
   const entries = [];
-  const tbodies = $('table.is-w748 tbody'); // 左の直前情報表
+  const tbodies = $("table.is-w748 tbody"); // 左の直前情報表は tbody×6
 
   tbodies.each((i, tbody) => {
     const lane = i + 1;
     const $tb = $(tbody);
 
-    // 番号/名前
+    // 選手番号/名前
     let number = "";
     let name = "";
     const profAs = $tb.find('a[href*="toban="]');
@@ -156,13 +150,11 @@ function parseBeforeinfo(html, { date, pid, raceNo, url }) {
       if (t) name = t;
     });
 
-    // 重量/展示T/チルト
+    // 1行目の <td> 群から「kg を含むセル」を起点に weight / tenji / tilt
     const firstRowTds = $tb.find("tr").first().find("td").toArray();
     let weight = "", tenjiTime = "", tilt = "";
-    const texts = firstRowTds.map(td =>
-      ($(td).text() || "").replace(/\s+/g, "").trim()
-    );
-    const kgIdx = texts.findIndex(t => /kg$/i.test(t));
+    const texts = firstRowTds.map((td) => ($(td).text() || "").replace(/\s+/g, "").trim());
+    const kgIdx = texts.findIndex((t) => /kg$/i.test(t));
     if (kgIdx !== -1) {
       weight    = texts[kgIdx]     || "";
       tenjiTime = texts[kgIdx + 1] || "";
@@ -199,7 +191,14 @@ async function main() {
   for (const pid of PIDS) {
     for (const raceNo of RACES) {
       const outPath = path.join(
-        __dirname, "..", "public", "exhibition", "v1", DATE, pid, `${raceNo}R.json`
+        __dirname,
+        "..",
+        "public",
+        "exhibition",
+        "v1",
+        DATE,
+        pid,
+        `${raceNo}R.json`
       );
 
       if (SKIP_EXISTING && fs.existsSync(outPath)) {
@@ -210,18 +209,11 @@ async function main() {
       try {
         const { url, html } = await fetchBeforeinfo({ date: DATE, pid, raceNo });
         const data = parseBeforeinfo(html, { date: DATE, pid, raceNo, url });
-
-        // データ無しページ防御: entries が6行未満ならスキップ（空/準備中想定）
-        if (!data.entries || data.entries.length < 6) {
-          log("no usable data (entries<6):", DATE, pid, `${raceNo}R`);
-          continue;
-        }
-
         await writeJSON(outPath, data);
         log("saved:", path.relative(process.cwd(), outPath));
       } catch (err) {
-        // 404/その他はスキップ（ファイル生成なし）
-        log(`skip: date=${DATE} pid=${pid} race=${raceNo} -> ${String(err)}`);
+        // 404/非公開等はログだけ出してスキップ（ファイル生成しない）
+        console.error(`Failed: date=${DATE} pid=${pid} race=${raceNo} -> ${String(err)}`);
       }
     }
   }
