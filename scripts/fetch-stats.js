@@ -12,7 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 // -------------------------------
-// 定数
+// 定数/入出力
 // -------------------------------
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -21,10 +21,8 @@ const PUBLIC_DIR    = path.resolve(__dirname, "..", "public");
 const OUTPUT_DIR_V2 = path.join(PUBLIC_DIR, "stats", "v2", "racers"); // ★日付なし固定保存
 
 // polite wait（最低3秒を保証）
-const RAW_DELAY_RACER = Number(process.env.STATS_DELAY_MS || 3000);
-const RAW_DELAY_COURSE = Number(process.env.COURSE_WAIT_MS || 3000);
-const WAIT_MS_BETWEEN_RACERS       = Math.max(3000, isFinite(RAW_DELAY_RACER) ? RAW_DELAY_RACER : 3000);
-const WAIT_MS_BETWEEN_COURSE_PAGES = Math.max(3000, isFinite(RAW_DELAY_COURSE) ? RAW_DELAY_COURSE : 3000);
+const WAIT_MS_BETWEEN_RACERS       = Math.max(3000, Number(process.env.STATS_DELAY_MS || 3000));
+const WAIT_MS_BETWEEN_COURSE_PAGES = Math.max(3000, Number(process.env.COURSE_WAIT_MS || 3000));
 
 // env
 const ENV_RACERS       = process.env.RACERS?.trim() || "";
@@ -32,33 +30,38 @@ const ENV_RACERS_LIMIT = Number(process.env.RACERS_LIMIT ?? "");
 const ENV_BATCH        = Number(process.env.STATS_BATCH ?? "");
 const FRESH_HOURS      = Number(process.env.FRESH_HOURS || 12);
 
-// 🔽 追加: 出走表スキャン用フィルタ（ワークフローから渡す）
-const PID_IN   = (process.env.FILTER_PID  || "ALL").trim();
-const RACE_IN  = (process.env.FILTER_RACE || "ALL").trim();
-const PID_FILTERS =
-  PID_IN.toUpperCase() === "ALL"
-    ? null
-    : PID_IN.split(",").map(s => s.trim()).filter(Boolean)
-        .map(s => (/^\d+$/.test(s) ? s.padStart(2,"0") : s)); // "02" に正規化
-const RACE_FILTERS =
-  RACE_IN.toUpperCase() === "ALL"
-    ? null
-    : RACE_IN.split(",").map(s => String(s).trim().toUpperCase())
-        .map(s => (s.endsWith("R") ? s : `${s}R`))
-        .map(s => s.replace(/[^\d]/g,"") + "R"); // "1"→"1R"
+// 絞り込み（PID/RACE）— 例: TARGET_PID="02,06", TARGET_RACE="1,3R,12"
+const PID_IN = (process.env.TARGET_PID || "").trim();
+const PID_FILTERS = PID_IN && PID_IN.toUpperCase() !== "ALL"
+  ? PID_IN.split(",").map(s=>s.trim()).filter(Boolean).map(s => (/^\d+$/.test(s) ? s.padStart(2,"0") : s))
+  : null;
+
+const RACE_IN = (process.env.TARGET_RACE || "").trim();
+const RACE_FILTERS = RACE_IN && RACE_IN.toUpperCase() !== "ALL"
+  ? RACE_IN.split(",").map(s => String(s).trim().toUpperCase())
+      .map(s => s.endsWith("R") ? s : `${s}R`)
+      .map(s => s.replace(/[^\d]/g, "") + "R")
+  : null;
+
+if (PID_FILTERS)  console.log("filters: pid =", PID_FILTERS.join(","));
+if (RACE_FILTERS) console.log("filters: race =", RACE_FILTERS.join(","));
 
 // -------------------------------
 // ユーティリティ
 // -------------------------------
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * fetchHtml: UA/Referer付き、リトライは1回だけ
+ */
 async function fetchHtml(url, {
-  retries = 1, baseDelayMs = 2500, timeoutMs = 20000,
+  retries = 1,            // ★リトライ 1 回
+  baseDelayMs = 3000,     // ★失敗時の待機も最低3秒
+  timeoutMs = 45000,
 } = {}) {
-  const mkAC = () => new AbortController();
   for (let attempt = 0; attempt <= retries; attempt++) {
-    const ac = mkAC();
-    const t = setTimeout(() => ac.abort(), timeoutMs);
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), timeoutMs);
     try {
       const res = await fetch(url, {
         signal: ac.signal,
@@ -70,33 +73,42 @@ async function fetchHtml(url, {
           "cache-control": "no-cache",
         },
       });
-      if (res.ok) { clearTimeout(t); return await res.text(); }
-      const retriable = [401,403,404,429,500,502,503,504].includes(res.status);
+      const body = await res.text().catch(() => "");
+      clearTimeout(timer);
+
+      if (res.ok) return body;
+
+      const retriable = [401,404,429,500,502,503,504].includes(res.status);
       if (!retriable || attempt === retries) {
-        const body = await res.text().catch(()=> "");
-        clearTimeout(t);
-        throw new Error(`HTTP ${res.status} ${res.statusText} @ ${url} ${body?.slice(0,120)}`);
+        throw new Error(`HTTP ${res.status} ${res.statusText} @ ${url}`);
       }
-      const factor = [403,404,429,503].includes(res.status) ? 2.0 : 1.4;
-      const delay  = Math.round((baseDelayMs * Math.pow(factor, attempt)) * (0.8 + Math.random()*0.4));
-      clearTimeout(t);
-      await sleep(delay);
+      await sleep(baseDelayMs); // リトライ前に最低3秒
     } catch (err) {
-      clearTimeout(t);
+      clearTimeout(timer);
       if (attempt === retries) throw new Error(`GET failed after ${retries+1} tries: ${url} :: ${err.message}`);
-      const delay = Math.round((baseDelayMs * Math.pow(1.6, attempt)) * (0.8 + Math.random()*0.4));
-      await sleep(delay);
+      await sleep(baseDelayMs);
     }
   }
   throw new Error("unreachable");
 }
 
 function normText(t){ return (t ?? "").replace(/\u00A0/g," ").replace(/\s+/g," ").trim(); }
-function toNumber(v){ if(v==null) return null; const n = Number(String(v).replace(/[,%]/g,"")); return Number.isFinite(n)?n:null; }
+function toNumber(v){
+  if(v==null) return null;
+  const n = Number(String(v).replace(/[,%]/g,""));
+  return Number.isFinite(n) ? n : null;
+}
 function parseTable($, $tbl){
   const headers=[]; $tbl.find("thead th, thead td").each((_,th)=>headers.push(normText($(th).text())));
-  if(!headers.length){ const first=$tbl.find("tr").first(); first.find("th,td").each((_,td)=>headers.push(normText($(td).text()))); }
-  const rows=[]; $tbl.find("tbody tr").each((_,tr)=>{ const cells=[]; $(tr).find("th,td").each((_,td)=>cells.push(normText($(td).text()))); if(cells.length) rows.push(cells); });
+  if(!headers.length){
+    const first=$tbl.find("tr").first();
+    first.find("th,td").each((_,td)=>headers.push(normText($(td).text())));
+  }
+  const rows=[];
+  $tbl.find("tbody tr").each((_,tr)=>{
+    const cells=[]; $(tr).find("th,td").each((_,td)=>cells.push(normText($(td).text())));
+    if(cells.length) rows.push(cells);
+  });
   return { headers, rows };
 }
 const headerIndex = (hs,key)=>hs.findIndex(h=>h.includes(key));
@@ -112,7 +124,9 @@ function normalizeKimariteKey(k){
   return k.replace("ま差し","まくり差し").replace("捲り差し","まくり差し").replace("捲り","まくり");
 }
 
-// --- 各コースページのパーサ ---
+// -------------------------------
+// 各ページパーサ
+// -------------------------------
 function parseAvgSTFromCoursePage($){
   const $tbl = mustTableByHeader($, ["月日","場","レース","ST","結果"]); if(!$tbl) return null;
   const { headers, rows } = parseTable($, $tbl);
@@ -120,7 +134,7 @@ function parseAvgSTFromCoursePage($){
   let sum=0,cnt=0;
   for(const r of rows){
     const st=r[iST]; if(!st) continue;
-    if(/^[FL]/i.test(st)) continue;
+    if(/^[FL]/i.test(st)) continue; // F/Lは除外
     const m = st.match(/-?\.?\d+(?:\.\d+)?/); if(!m) continue;
     const n=Number(m[0]); if(Number.isFinite(n)){ sum+=Math.abs(n); cnt++; }
   }
@@ -135,7 +149,7 @@ function parseLoseKimariteFromCoursePage($){
   const lose = Object.fromEntries(keys.map(k=>[k,0]));
   for(const r of rows){
     const label = r[iCourse] || "";
-    if(label.includes("（自艇）")) continue;
+    if(label.includes("（自艇）")) continue; // 他艇のみ
     keys.forEach((k,i)=>{
       const v=r[3+i]; const num=v?Number((v.match(/(\d+)/)||[])[1]):NaN;
       if(Number.isFinite(num)) lose[k]+=num;
@@ -220,7 +234,7 @@ function parseExTimeRankFromRdemo($){
 }
 
 // -------------------------------
-// 出走表の探索ルート（最新日付 → today → フラット直下）
+// 出走表の探索ルート（最新YYYYMMDD → today → 直下）
 // -------------------------------
 function listDateDirs(base){
   try{
@@ -250,22 +264,22 @@ function* candidateProgramRoots(){
   for (const base of bases) yield base;
 }
 
-// 出走選手収集（PID/RACEフィルタ適用）
+// 出走選手収集（PID/RACEフィルタ対応）
 async function collectRacersFromPrograms(){
   const set=new Set();
   const readJson=(p)=>{ try{ return JSON.parse(fssync.readFileSync(p,"utf8")); } catch{ return null; } };
 
+  let usedRoot = null;
+
   for (const root of candidateProgramRoots()){
     if (!fssync.existsSync(root)) continue;
+
     const entries = fssync.readdirSync(root, { withFileTypes: true });
 
-    // 1) 直置き race json（RACE フィルタのみ適用可能）
+    // 1) 直置き race json
     for (const e of entries) {
       if (e.isFile() && e.name.endsWith(".json") && e.name !== "index.json") {
-        if (RACE_FILTERS) {
-          const label = e.name.replace(/\.json$/,"");
-          if (!RACE_FILTERS.includes(label)) continue;
-        }
+        if (RACE_FILTERS && !RACE_FILTERS.includes(e.name.replace(".json","").toUpperCase())) continue;
         const j = readJson(path.join(root, e.name));
         const boats = j?.entries || j?.boats || [];
         for (const b of boats) {
@@ -275,24 +289,29 @@ async function collectRacersFromPrograms(){
       }
     }
 
-    // 2) PID配下（PID/RACE 両方のフィルタを適用）
-    const pidDirs = entries
-      .filter(e => e.isDirectory())
-      .map(e => e.name)
-      .filter(pid => !PID_FILTERS || PID_FILTERS.includes(pid));
+    // 2) PID配下
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      const pidDirName = e.name; // "02" 等
+      // PIDフィルタ：ディレクトリ名 or stadiumName(index.json) の両対応
+      if (PID_FILTERS && !PID_FILTERS.includes(pidDirName)) {
+        // stadiumNameでの照合（任意）
+        const idxPath = path.join(root, pidDirName, "index.json");
+        let okByName = false;
+        if (fssync.existsSync(idxPath)) {
+          try {
+            const idx = JSON.parse(fssync.readFileSync(idxPath, "utf8"));
+            const name = idx?.stadiumName ?? "";
+            if (name && PID_FILTERS.some(pf => pf === name)) okByName = true;
+          } catch {}
+        }
+        if (!okByName) continue;
+      }
 
-    for (const pid of pidDirs) {
-      const pidDir = path.join(root, pid);
-      const files = fssync.readdirSync(pidDir)
-        .filter(f => f.endsWith(".json") && f !== "index.json")
-        .filter(f => {
-          if (!RACE_FILTERS) return true;
-          const label = f.replace(/\.json$/,"");
-          return RACE_FILTERS.includes(label);
-        });
-
+      const files = fssync.readdirSync(path.join(root, pidDirName)).filter(f=>f.endsWith(".json") && f!=="index.json");
       for (const f of files) {
-        const j = readJson(path.join(pidDir, f));
+        if (RACE_FILTERS && !RACE_FILTERS.includes(f.replace(".json","").toUpperCase())) continue;
+        const j = readJson(path.join(root, pidDirName, f));
         const boats = j?.entries || j?.boats || [];
         for (const b of boats) {
           const r = b.number ?? b.racer_number ?? b.racer?.number;
@@ -301,10 +320,10 @@ async function collectRacersFromPrograms(){
       }
     }
 
-    if (set.size) break; // 見つかったら採用
+    if (set.size) { usedRoot = root; break; } // どこかで見つかればそれを採用
   }
 
-  console.log(`filters: pid=${PID_FILTERS ? PID_FILTERS.join(",") : "ALL"}, race=${RACE_FILTERS ? RACE_FILTERS.join(",") : "ALL"} -> ${set.size} racers`);
+  if (usedRoot) console.log("program root:", path.relative(PUBLIC_DIR, usedRoot));
   return [...set];
 }
 
@@ -364,8 +383,13 @@ async function fetchOne(regno){
 
   // 展示タイム順位
   let exTimeRank=null;
-  try{ const html=await fetchHtml(uRdemo); const $=load(html); exTimeRank = parseExTimeRankFromRdemo($); }
-  catch(e){ console.warn(`warn: rdemo fetch/parse failed for ${regno}: ${e.message}`); }
+  try{
+    const html=await fetchHtml(uRdemo);
+    const $=load(html);
+    exTimeRank = parseExTimeRankFromRdemo($);
+  } catch(e){
+    console.warn(`warn: rdemo fetch/parse failed for ${regno}: ${e.message}`);
+  }
 
   return {
     schemaVersion: "2.0",
@@ -400,7 +424,8 @@ async function main(){
     return;
   }
 
-  console.log(`process ${racers.length} racers (incremental, fresh<=${FRESH_HOURS}h)` +
+  console.log(
+    `process ${racers.length} racers (incremental, fresh<=${FRESH_HOURS}h)` +
     (ENV_RACERS ? " [env RACERS specified]" : "") +
     (ENV_RACERS_LIMIT ? ` [limit=${ENV_RACERS_LIMIT}]` : "") +
     (ENV_BATCH ? ` [batch=${ENV_BATCH}]` : "")
@@ -424,7 +449,7 @@ async function main(){
       console.warn(`❌ ${regno}: ${e.message}`);
       ng++;
     }
-    await sleep(WAIT_MS_BETWEEN_RACERS); // ★最低3秒
+    await sleep(WAIT_MS_BETWEEN_RACERS); // ★確実に3秒以上
   }
 
   await ensureDir(path.join(PUBLIC_DIR, "debug"));
