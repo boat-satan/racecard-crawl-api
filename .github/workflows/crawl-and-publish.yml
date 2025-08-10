@@ -17,7 +17,7 @@ on:
         required: false
         default: "ALL"
       racers:
-        description: "RACERS: 登録番号カンマ区切り（空なら指定日の全出走者から収集）"
+        description: "RACERS: 登録番号カンマ区切り（空なら出走表から自動収集）"
         required: false
         default: ""
       batch:
@@ -66,7 +66,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config pull.rebase true
 
-      # 全場/全R/指定日の出走表を出力
+      # 指定日の出走表を出力（ALL/PID/RACEで絞り込み可能）
       - name: Run crawler (programs)
         env:
           TARGET_DATE: ${{ inputs.date || 'today' }}
@@ -74,15 +74,19 @@ jobs:
           TARGET_RACE: ${{ inputs.race || 'ALL' }}
         run: node scripts/crawl.js
 
-      # 出走表から参照して選手statsを日付配下に増分取得
+      # 出走表から選手を収集して stats を増分更新
+      # 保存先: public/stats/v2/racers/<regno>.json（=日付なし）
       - name: Fetch racer stats (incremental write)
         env:
-          TARGET_DATE:      ${{ inputs.date || 'today' }}
-          RACERS:           ${{ inputs.racers }}
+          TARGET_DATE:      ${{ inputs.date || 'today' }}     # 参照用
+          RACERS:           ${{ inputs.racers }}              # 指定があれば最優先
           STATS_BATCH:      ${{ inputs.batch }}
           STATS_DELAY_MS:   ${{ inputs.delayMs || '3000' }}
           FRESH_HOURS:      ${{ inputs.freshHours || '12' }}
-          STATS_OVERWRITE:  "0"   # 既存はスキップ（必要なら手動実行で1に）
+          STATS_OVERWRITE:  "0"
+          # ★ ここでフィルタを fetch-stats.js にも渡す
+          FILTER_PID:       ${{ inputs.pid  || 'ALL' }}
+          FILTER_RACE:      ${{ inputs.race || 'ALL' }}
         run: node scripts/fetch-stats.js
 
       - name: Commit & Push changes (with rebase & retry)
@@ -94,7 +98,6 @@ jobs:
             exit 0
           fi
 
-          # コミットメッセージに日付を入れておくと履歴が追いやすい
           DATE_VAL="${{ inputs.date || 'today' }}"
           git commit -m "Update programs & racer stats (${DATE_VAL}) [skip ci]"
 
