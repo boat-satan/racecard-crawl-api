@@ -49,30 +49,58 @@ function findRacecardPath(){
   return null;
 }
 
-// スタッツ: 指定コースだけ抜粋 + 展示順位別データ
+// --- ここだけ差し替え：スタッツ抽出 + 欠損フォールバック実装 ---
 function sliceStatsForCourse(stats, courseN){
   if (!stats) return null;
-  const entryCourse = Array.isArray(stats.entryCourse)? stats.entryCourse : [];
-  const hit = entryCourse.find(ec => Number(ec.course) === Number(courseN));
-  if (!hit) return { course: Number(courseN), notFound: true };
+  const n = Number(courseN);
+  const entryCourse = Array.isArray(stats.entryCourse) ? stats.entryCourse : [];
+  const hit = entryCourse.find(ec => Number(ec.course) === n);
+  const kAll = hit?.kimariteAllBoats?.rows || stats.kimariteAllBoats?.rows || [];
 
-  // 必要なサマリだけ抜粋
-  const picked = {
-    course: hit.course,
-    avgST: hit.avgST ?? null,
-    loseKimarite: hit.loseKimarite ?? null,
-    winKimariteSelf: hit.winKimariteSelf ?? null,
-    selfSummary: hit.selfSummary ?? null,
-    // 参考: 他艇含む決まり手の行そのものも欲しければこれを渡す
-    // kimariteAllBoats: hit.kimariteAllBoats ?? null,
+  // フォールバック計算ヘルパ
+  const pickSelfDetail = () => {
+    const selfRow = (kAll || []).find(r => Number(r.course) === n && r.isSelf && r.detail);
+    return selfRow?.detail || null;
+  };
+  const sumLoseDetail = () => {
+    const init = { "逃げ":0,"差し":0,"まくり":0,"まくり差し":0,"抜き":0,"恵まれ":0 };
+    for (const r of (kAll || [])) {
+      if (Number(r.course) !== n) continue;
+      if (r.isSelf) continue;
+      const d = r.detail || {};
+      for (const k of Object.keys(init)) init[k] += Number(d[k] ?? 0);
+    }
+    return init;
   };
 
+  if (!hit) {
+    return {
+      entryCourse: { course: n, avgST: null, selfSummary: null, winKimariteSelf: null, loseKimarite: null, matrixSelf: null },
+      exTimeRank: stats.exTimeRank ?? null,
+      regno: stats.regno ?? null,
+      fetchedAt: stats.fetchedAt ?? null,
+      schemaVersion: stats.schemaVersion ?? null,
+      notFound: true
+    };
+  }
+
+  const winSelf    = hit.winKimariteSelf ?? pickSelfDetail();
+  const loseAll    = hit.loseKimarite    ?? sumLoseDetail();
+  const matrixSelf = hit.matrix?.self ?? null;
+
   return {
-    entryCourse: picked,
+    entryCourse: {
+      course: n,
+      avgST: hit.avgST ?? null,
+      selfSummary: hit.selfSummary ?? null,
+      winKimariteSelf: winSelf ?? null,
+      loseKimarite: loseAll ?? null,
+      matrixSelf
+    },
     exTimeRank: stats.exTimeRank ?? null,
     regno: stats.regno ?? null,
     fetchedAt: stats.fetchedAt ?? null,
-    schemaVersion: stats.schemaVersion ?? null,
+    schemaVersion: stats.schemaVersion ?? null
   };
 }
 
