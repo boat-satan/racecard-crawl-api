@@ -1,221 +1,213 @@
-// scripts/api/server.js
+// scripts/api/integrate.js
 // Node v20 / ESM
-//
-// 目的:
-//  - HTTPで /api/merged?date=YYYYMMDD&pid=NN&race=1..12 を受け取り
-//    出走表 + 展示 + (展示進入コースに合わせた)スタッツ要約 を統合して JSON を返す。
-//  - 事前に保存された public/merged/v1/<date>/<pid>/<race>.json があれば
-//    ?cache=1 でそれを優先返却。無ければその場で統合して返す。
-//    （将来的に別バッチで保存運用しても、オンデマンドでもOK）
-//
-// 起動:
-//   node scripts/api/server.js
-//   PORT=8787 node scripts/api/server.js
-//
-// 例:
-//   curl 'http://localhost:8787/api/merged?date=20250810&pid=04&race=1'
-//   curl 'http://localhost:8787/api/merged?date=today&pid=04&race=1&cache=1'
+// 統合ロジック本体（サーバから呼ぶ）
+// 入力: date, pid, race, options
+// 出力: 統合JSON（ファイルにも保存）
 
-import http from "node:http";
-import url from "node:url";
+import fs from "node:fs";
+import fsp from "node:fs/promises";
 import path from "node:path";
-import fs from "node:fs/promises";
-import fssync from "node:fs";
-import { fileURLToPath } from "node:url";
-import { buildRacerStatsForCourse, normalizeCourseNumber } from "../lib/extract-stats.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname  = path.dirname(__filename);
-
-const ROOT = path.resolve(__dirname, "..", "..");
+const ROOT = process.cwd();
 const PUB  = path.join(ROOT, "public");
 
-// 既定の格納ルート（環境変数で差し替え可）
-const PROG_ROOT   = process.env.PROG_ROOT   || path.join(PUB, "programs", "v2");
-const PROG_SLIM   = process.env.PROG_SLIM   || path.join(PUB, "programs-slim", "v2");
-const EXHIB_ROOT  = process.env.EXHIB_ROOT  || path.join(PUB, "exhibition", "v1");
-const STATS_ROOT  = process.env.STATS_ROOT  || path.join(PUB, "stats", "v2", "racers");
-const MERGED_ROOT = process.env.MERGED_ROOT || path.join(PUB, "merged", "v1");
+// 既定の入出力場所
+const SRC_RACECARD   = (date,pid,race) => path.join(PUB, "programs",      "v2", date, pid, `${race}.json`);
+const SRC_EXHIBITION = (date,pid,race) => path.join(PUB, "exhibition",    "v1", date, pid, `${race}.json`);
+const SRC_STATS_DIR  = path.join(PUB, "stats", "v2", "racers");
+const OUT_INTEGRATED = (date,pid,race) => path.join(PUB, "integrated", "v1", date, pid, `${race}.json`);
 
-const PORT = Number(process.env.PORT || 8787);
-
-// ---------- small utils ----------
-const exists = (p) => { try { fssync.accessSync(p); return true; } catch { return false; } };
-const readJSON = async (p) => JSON.parse(await fs.readFile(p, "utf8"));
-const to2 = (s) => String(s).padStart(2, "0");
-const ok = (res, obj) => {
-  const body = JSON.stringify(obj, null, 2);
-  res.writeHead(200, {
-    "content-type": "application/json; charset=utf-8",
-    "access-control-allow-origin": "*",
-  });
-  res.end(body);
-};
-const bad = (res, code, msg, extra={}) => {
-  const body = JSON.stringify({ status: code, error: msg, ...extra }, null, 2);
-  res.writeHead(code, {
-    "content-type": "application/json; charset=utf-8",
-    "access-control-allow-origin": "*",
-  });
-  res.end(body);
+const to2 = s => String(s).padStart(2,"0");
+const normRace = (r) => {
+  if (!r) return null;
+  const n = String(r).replace(/[^\d]/g,"");
+  if (!n) return null;
+  const i = Number(n);
+  if (!Number.isFinite(i) || i<1 || i>12) return null;
+  return `${i}R`;
 };
 
-// ---------- source loaders ----------
-function* candidateProgramFiles(date, pid, race) {
-  yield path.join(PROG_ROOT, date, pid, `${race}.json`);
-  yield path.join(PROG_SLIM, date, pid, `${race}.json`);
-  yield path.join(PROG_ROOT, "today", pid, `${race}.json`);
-  yield path.join(PROG_SLIM, "today", pid, `${race}.json`);
-  yield path.join(PROG_ROOT, pid, `${race}.json`);
-  yield path.join(PROG_SLIM, pid, `${race}.json`);
+function isFresh(p, hours){
+  try{
+    const st = fs.statSync(p);
+    return (Date.now() - st.mtimeMs) <= hours*3600*1000;
+  }catch{ return false; }
 }
-async function loadProgram(date, pid, race) {
-  for (const f of candidateProgramFiles(date, pid, race)) {
-    if (exists(f)) return await readJSON(f);
+
+async function readJson(p){
+  try{
+    const t = await fsp.readFile(p, "utf8");
+    return JSON.parse(t);
+  }catch(e){
+    const code = (e && e.code) || "READ_ERROR";
+    const msg = code === "ENOENT" ? `not found: ${p}` : `invalid json: ${p}`;
+    const err = new Error(msg);
+    err.code = code;
+    err.path = p;
+    throw err;
   }
-  throw new Error(`program not found for ${date}/${pid}/${race}`);
-}
-async function loadExhibition(date, pid, race) {
-  const file = path.join(EXHIB_ROOT, date, pid, `${race}.json`);
-  if (!exists(file)) throw new Error(`exhibition not found: ${file}`);
-  return await readJSON(file);
-}
-async function loadStats(regno) {
-  const file = path.join(STATS_ROOT, `${regno}.json`);
-  if (!exists(file)) return null;
-  try { return await readJSON(file); } catch { return null; }
 }
 
-// ---------- pickers / builders ----------
-function pickLaneAndRegno(entry) {
-  const lane  = entry?.lane ?? entry?.boat_number ?? entry?.racer_boat_number ?? entry?.boat ?? null;
-  const regno = entry?.number ?? entry?.racer_number ?? entry?.racer?.number ?? entry?.id ?? null;
-  return { lane: lane != null ? Number(lane) : null, regno: regno != null ? Number(regno) : null };
+// 展示から startCourse を推定（lane優先 → startCourse → 不明なら lane）
+function pickStartCourse(exEntry){
+  const lane = Number(exEntry?.lane) || null;
+  const sc   = Number(exEntry?.exhibition?.startCourse ?? exEntry?.startCourse) || null;
+  return sc || lane || null;
 }
-function pickStartCourseFromExEntry(exEntry) {
-  const sc = exEntry?.exhibition?.startCourse ?? exEntry?.startCourse ?? null;
-  return normalizeCourseNumber(sc);
-}
-function buildStatsSlice(stats, startCourse) {
-  if (!stats || !startCourse) return null;
-  return buildRacerStatsForCourse(stats, startCourse);
-}
-function mergeOne(programEntry, exhibitionEntry, statsSlice) {
-  const { lane, regno } = pickLaneAndRegno(programEntry);
-  const ex = exhibitionEntry?.exhibition ?? null;
-  return {
-    lane,
-    regno,
-    rawProgram: programEntry ?? null,
-    exhibition: ex ? {
-      time: ex.time ?? null,
-      rank: ex.rank ?? null,
-      startTiming: ex.startTiming ?? null,
-      startCourse: ex.startCourse ?? null,
-      pitOut: ex.pitOut ?? null,
-      lapRank: ex.lapRank ?? null,
-      note: ex.note ?? null,
-    } : null,
-    stats: statsSlice ?? null,
-  };
-}
-async function mergeRace(date, pid, race) {
-  const program   = await loadProgram(date, pid, race);
-  const exhibition= await loadExhibition(date, pid, race);
 
-  const progEntries = program?.entries || program?.boats || [];
-  const exEntries   = exhibition?.entries || [];
+// 指定コースのスタッツだけを抽出
+function sliceStatsForCourse(fullStats, courseNo){
+  if (!fullStats || !Number.isFinite(courseNo)) return null;
+  const ec = Array.isArray(fullStats.entryCourse) ? fullStats.entryCourse : fullStats.entryCourse && fullStats.entryCourse.course ? [fullStats.entryCourse] : [];
+  const found = ec.find(c => c.course === courseNo) || null;
+  return found ? {
+    course: found.course,
+    avgST: found.avgST ?? null,
+    loseKimarite: found.loseKimarite ?? null,
+    winKimariteSelf: found.winKimariteSelf ?? null,
+    selfSummary: found.selfSummary ?? null,
+  } : null;
+}
 
-  const exByRegno = new Map();
-  for (const e of exEntries) {
-    const regno = Number(e?.number ?? e?.racer_number ?? e?.id ?? null);
-    const sc = pickStartCourseFromExEntry(e);
-    if (regno && sc) exByRegno.set(regno, { entry: e, startCourse: sc });
+export async function integrateOnce(dateIn, pidIn, raceIn, {
+  freshHours = Number(process.env.FRESH_HOURS || 12),
+  allowCache = true,
+} = {}) {
+  // 正規化
+  const date = (dateIn && dateIn !== "today")
+    ? String(dateIn).replace(/-/g,"")
+    : String(new Date().toLocaleString("ja-JP", { timeZone:"Asia/Tokyo" }))
+        .replace(/\D/g,"").slice(0,8); // JST今日
+  const pid  = to2(pidIn);
+  const race = normRace(raceIn);
+  if (!race) {
+    const err = new Error(`invalid race: ${raceIn}`);
+    err.status = 422;
+    throw err;
   }
 
-  const mergedEntries = [];
-  for (const pe of progEntries) {
-    const { regno } = pickLaneAndRegno(pe);
-    const hit = regno ? exByRegno.get(regno) : null;
-    const startCourse = hit?.startCourse ?? null;
-    const fullStats = regno ? await loadStats(regno) : null;
-    const statsSlice = startCourse ? buildStatsSlice(fullStats, startCourse) : null;
-    mergedEntries.push(mergeOne(pe, hit?.entry ?? null, statsSlice));
+  const outPath = OUT_INTEGRATED(date, pid, race);
+
+  // キャッシュ利用
+  if (allowCache && isFresh(outPath, freshHours)) {
+    const cached = await readJson(outPath);
+    return { cached: true, path: outPath, payload: cached };
   }
 
-  return {
+  // 入力ソース
+  const racecardPath   = SRC_RACECARD(date,pid,race);
+  const exhibitionPath = SRC_EXHIBITION(date,pid,race);
+  const statsDir       = SRC_STATS_DIR;
+
+  // 読み込み
+  const racecard   = await readJson(racecardPath).catch(e => { e.status = (e.code==="ENOENT"?404:422); throw e; });
+  const exhibition = await readJson(exhibitionPath).catch(e => { e.status = (e.code==="ENOENT"?404:422); throw e; });
+
+  // 統合
+  const exEntries = exhibition.entries || [];
+  const rcEntries = racecard.entries  || racecard.boats || [];
+
+  // 参照しやすい map 作成（番号キー）
+  const rcByNo = new Map();
+  for (const b of rcEntries) {
+    const num = Number(b?.number ?? b?.racer_number);
+    if (num) rcByNo.set(num, {
+      lane: Number(b.lane ?? b.course ?? b.racer_boat_number ?? null),
+      number: num,
+      name: b.name ?? b.racer?.name ?? null,
+      classNumber: b.classNumber ?? b.class_number ?? null,
+      branchNumber: b.branchNumber ?? b.branch_number ?? null,
+      birthplaceNumber: b.birthplaceNumber ?? b.birthplace_number ?? null,
+      age: b.age ?? null,
+      weight: b.weight ?? null,
+      flyingCount: b.flyingCount ?? b.f ?? null,
+      lateCount: b.lateCount ?? b.l ?? null,
+      avgST: b.avgST ?? b.avg_st ?? null,
+      natTop1: b.natTop1 ?? null,
+      natTop2: b.natTop2 ?? null,
+      natTop3: b.natTop3 ?? null,
+      locTop1: b.locTop1 ?? null,
+      locTop2: b.locTop2 ?? null,
+      locTop3: b.locTop3 ?? null,
+      motorNumber: b.motorNumber ?? b.motor?.number ?? null,
+      motorTop2: b.motorTop2 ?? b.motor?.top2 ?? null,
+      motorTop3: b.motorTop3 ?? b.motor?.top3 ?? null,
+      boatNumber: b.boatNumber ?? b.boat?.number ?? null,
+      boatTop2: b.boatTop2 ?? b.boat?.top2 ?? null,
+      boatTop3: b.boatTop3 ?? b.boat?.top3 ?? null,
+    });
+  }
+
+  const payload = {
     schemaVersion: "1.0",
-    date,
-    stadium: to2(program?.pid ?? program?.stadium ?? pid),
-    race,
+    date, pid, race,
     generatedAt: new Date().toISOString(),
     sources: {
-      program: { where: "programs v2 / programs-slim v2" },
-      exhibition: { where: path.relative(ROOT, EXHIB_ROOT) },
-      stats: { where: path.relative(ROOT, STATS_ROOT) },
+      racecard:   path.posix.join("public","programs","v2",date,pid,`${race}.json`),
+      exhibition: path.posix.join("public","exhibition","v1",date,pid,`${race}.json`),
+      statsDir:   path.posix.join("public","stats","v2","racers"),
     },
-    entries: mergedEntries,
-    raw: {
-      program: {
-        pid: program?.pid ?? null,
-        stadiumName: program?.stadiumName ?? null,
-        raceName: program?.raceName ?? null,
-      },
-      exhibitionMeta: {
-        sourceShape: exhibition?.sourceShape ?? null,
-      },
-    },
+    entries: [],
   };
+
+  // 展示の6艇をベースに1艇ずつ統合
+  for (const ex of exEntries) {
+    const number = Number(ex.number ?? ex?.raw?.number);
+    const lane   = Number(ex.lane) || null;
+
+    // 出走表
+    const rc = number ? rcByNo.get(number) : null;
+
+    // 進入コース（展示）
+    const startCourse = pickStartCourse({ lane, exhibition: ex.exhibition });
+
+    // スタッツ（regno.jsonを読んでコース抽出 + 展示順位別）
+    let stats = null;
+    if (number && fs.existsSync(path.join(statsDir, `${number}.json`))) {
+      try {
+        const sraw = JSON.parse(fs.readFileSync(path.join(statsDir, `${number}.json`), "utf8"));
+        const entryCourse = sliceStatsForCourse(sraw, startCourse ?? lane ?? null);
+        stats = {
+          entryCourse,
+          exTimeRank: Array.isArray(sraw.exTimeRank) ? sraw.exTimeRank : null,
+          regno: sraw.regno ?? number,
+          fetchedAt: sraw.fetchedAt ?? null,
+          schemaVersion: sraw.schemaVersion ?? null,
+        };
+      } catch {}
+    }
+
+    payload.entries.push({
+      number,
+      lane,
+      startCourse,
+      racecard: rc || null,
+      exhibition: ex,
+      stats,
+    });
+  }
+
+  // 保存
+  await fsp.mkdir(path.dirname(outPath), { recursive: true });
+  await fsp.writeFile(outPath, JSON.stringify(payload, null, 2), "utf8");
+
+  return { cached:false, path: outPath, payload };
 }
 
-// ---------- server ----------
-const server = http.createServer(async (req, res) => {
-  // CORS preflight
-  if (req.method === "OPTIONS") {
-    res.writeHead(204, {
-      "access-control-allow-origin": "*",
-      "access-control-allow-methods": "GET,OPTIONS",
-      "access-control-allow-headers": "content-type",
-      "access-control-max-age": "600",
+// ------------------------------------------------------
+// HTTP ハンドラ（Express などから使う）
+// GET /api/integrate/v1/:date/:pid/:race
+export async function handleIntegrate(req, res){
+  try{
+    const { date, pid, race } = req.params;
+    const { freshHours, noCache } = req.query;
+    const result = await integrateOnce(date, pid, race, {
+      freshHours: freshHours ? Number(freshHours) : undefined,
+      allowCache: noCache ? false : true,
     });
-    return res.end();
+    res.status(200).json(result.payload);
+  }catch(e){
+    const status = e.status || (e.code==="ENOENT" ? 404 : 500);
+    res.status(status).json({ error: e.message || String(e) });
   }
-
-  const u = new url.URL(req.url, `http://${req.headers.host}`);
-  if (u.pathname !== "/api/merged") {
-    return bad(res, 404, "not found");
-  }
-
-  try {
-    const dateIn = (u.searchParams.get("date") || "today").replace(/-/g, "");
-    const pid    = (u.searchParams.get("pid")  || "02").padStart(2, "0");
-    const rno    = String(u.searchParams.get("race") || "1").replace(/[^\d]/g, "");
-    if (!rno) return bad(res, 400, "invalid race");
-    const race   = `${rno}R`;
-    const useCache = u.searchParams.get("cache") === "1";
-
-    // cache優先
-    const cacheFile = path.join(MERGED_ROOT, dateIn, pid, `${race}.json`);
-    if (useCache && exists(cacheFile)) {
-      const json = await readJSON(cacheFile);
-      return ok(res, { ...json, _cache: true });
-    }
-
-    const payload = await mergeRace(dateIn, pid, race);
-
-    // 即時返却（保存はここではしない / 必要なら ?save=1 で保存）
-    if (u.searchParams.get("save") === "1") {
-      const dir = path.dirname(cacheFile);
-      await fs.mkdir(dir, { recursive: true });
-      await fs.writeFile(cacheFile, JSON.stringify(payload, null, 2), "utf8");
-    }
-
-    return ok(res, payload);
-  } catch (e) {
-    return bad(res, 500, "merge failed", { detail: e?.message || String(e) });
-  }
-});
-
-server.listen(PORT, () => {
-  console.log(`▶ merged API listening on http://localhost:${PORT}/api/merged`);
-});
+}
