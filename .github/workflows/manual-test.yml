@@ -31,7 +31,8 @@ jobs:
 
       - name: Install deps
         run: |
-          npm ci
+          npm ci || npm install
+          npm i express
           npm i -D wait-on
 
       - name: Start API (background)
