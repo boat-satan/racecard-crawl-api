@@ -1,10 +1,9 @@
 // scripts/fetch-stats.js
 // Node v20 / ESM
-// 出力: public/stats/v2/racers/<regno>.json  （v2）
+// 出力: public/stats/v2/racers/<regno>.json
 // 参照:
-//   - rcourse 直近6か月一覧（保険）: https://boatrace-db.net/racer/rcourse/regno/<regno>/
-//   - rcourse 各コース(=自艇nコース進入時のページ): https://boatrace-db.net/racer/rcourse/regno/<regno>/course/<n>/ (n=1..6)
-//   - rdemo   展示順位: https://boatrace-db.net/racer/rdemo/regno/<regno>/
+//   - rcourse 各コース (= 自艇nコース進入時): https://boatrace-db.net/racer/rcourse/regno/<regno>/course/<n>/
+//   - rdemo   展示順位:                         https://boatrace-db.net/racer/rdemo/regno/<regno>/
 
 import { load } from "cheerio";
 import fs from "node:fs/promises";
@@ -23,19 +22,17 @@ const TODAY_ROOTS = [
   path.join(PUBLIC_DIR, "programs", "v2", "today"),
   path.join(PUBLIC_DIR, "programs-slim", "v2", "today"),
 ];
-// v2 出力ディレクトリ（※ v1 には書かない）
 const OUTPUT_DIR_V2 = path.join(PUBLIC_DIR, "stats", "v2", "racers");
 
 // polite wait
-const WAIT_MS_BETWEEN_RACERS = Number(process.env.STATS_DELAY_MS || 3000); // 1選手間
+const WAIT_MS_BETWEEN_RACERS       = Number(process.env.STATS_DELAY_MS || 3000); // 1選手ごと
 const WAIT_MS_BETWEEN_COURSE_PAGES = Number(process.env.COURSE_WAIT_MS || 3000); // 各コースページ間
 
 // env
 const ENV_RACERS       = process.env.RACERS?.trim() || "";
 const ENV_RACERS_LIMIT = Number(process.env.RACERS_LIMIT ?? "");
 const ENV_BATCH        = Number(process.env.STATS_BATCH ?? "");
-// 既存ファイルはこの時間以内ならスキップ
-const FRESH_HOURS = Number(process.env.FRESH_HOURS || 12);
+const FRESH_HOURS      = Number(process.env.FRESH_HOURS || 12); // 既存がこの時間以内ならスキップ
 
 // -------------------------------
 // ユーティリティ
@@ -43,20 +40,19 @@ const FRESH_HOURS = Number(process.env.FRESH_HOURS || 12);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * fetchHtml: UA/Referer/言語ヘッダ付き、簡易リトライ
- * - 404 を含むエラー系は 1 回だけリトライ（合計 2 トライ）
+ * fetchHtml: UA/Referer 付き + 簡易リトライ
+ * - エラー系は 1 回だけリトライ（合計 2 トライ）
  */
 async function fetchHtml(url, {
-  retries = 1,
-  baseDelayMs = 2500,
-  timeoutMs = 20000,
+  retries    = 1,
+  baseDelayMs= 2500,
+  timeoutMs  = 20000,
 } = {}) {
-  const controller = () => new AbortController();
+  const makeAC = () => new AbortController();
 
   for (let attempt = 0; attempt <= retries; attempt++) {
-    const ac = controller();
-    const t = setTimeout(() => ac.abort(), timeoutMs);
-
+    const ac = makeAC();
+    const timer = setTimeout(() => ac.abort(), timeoutMs);
     try {
       const res = await fetch(url, {
         signal: ac.signal,
@@ -68,32 +64,24 @@ async function fetchHtml(url, {
           "cache-control": "no-cache",
         },
       });
-
       if (res.ok) {
-        clearTimeout(t);
+        clearTimeout(timer);
         return await res.text();
       }
-
-      // リトライ対象（404も1回だけ再試行）
-      const retriable = [401, 403, 404, 429, 500, 502, 503, 504].includes(res.status);
+      const retriable = [401,403,404,429,500,502,503,504].includes(res.status);
       if (!retriable || attempt === retries) {
         const body = await res.text().catch(() => "");
-        clearTimeout(t);
-        throw new Error(`HTTP ${res.status} ${res.statusText} @ ${url} ${body?.slice(0, 120)}`);
+        clearTimeout(timer);
+        throw new Error(`HTTP ${res.status} ${res.statusText} @ ${url} ${body?.slice(0,120)}`);
       }
-
-      const factor = [403, 404, 429, 503].includes(res.status) ? 2.0 : 1.4;
-      const delay = Math.round((baseDelayMs * Math.pow(factor, attempt)) * (0.8 + Math.random() * 0.4));
-      clearTimeout(t);
+      const factor = [403,404,429,503].includes(res.status) ? 2.0 : 1.4;
+      const delay  = Math.round((baseDelayMs * Math.pow(factor, attempt)) * (0.8 + Math.random()*0.4));
+      clearTimeout(timer);
       await sleep(delay);
-      continue;
-
     } catch (err) {
-      clearTimeout(t);
-      if (attempt === retries) {
-        throw new Error(`GET failed after ${retries + 1} tries: ${url} :: ${err.message}`);
-      }
-      const delay = Math.round((baseDelayMs * Math.pow(1.6, attempt)) * (0.8 + Math.random() * 0.4));
+      clearTimeout(timer);
+      if (attempt === retries) throw new Error(`GET failed after ${retries+1} tries: ${url} :: ${err.message}`);
+      const delay = Math.round((baseDelayMs * Math.pow(1.6, attempt)) * (0.8 + Math.random()*0.4));
       await sleep(delay);
     }
   }
@@ -101,10 +89,7 @@ async function fetchHtml(url, {
 }
 
 function normText(t) {
-  return (t ?? "")
-    .replace(/\u00A0/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return (t ?? "").replace(/\u00A0/g, " ").replace(/\s+/g, " ").trim();
 }
 function toNumber(v) {
   if (v == null) return null;
@@ -140,26 +125,21 @@ function mustTableByHeader($, keyLikes) {
   return null;
 }
 function normalizeKimariteKey(k) {
-  return k
-    .replace("ま差し", "まくり差し")
-    .replace("捲り差し", "まくり差し")
-    .replace("捲り", "まくり");
+  return k.replace("ま差し","まくり差し").replace("捲り差し","まくり差し").replace("捲り","まくり");
 }
 
 // -------------------------------
-// rcourse/course/{n}: 平均ST & 負け決まり手（既存）
-// + 追加: 「nコース進入時の全艇成績」「全艇決まり手」
+// 各コースページのパーサ
 // -------------------------------
 function parseAvgSTFromCoursePage($) {
-  const $tbl = mustTableByHeader($, ["月日", "場", "レース", "ST", "結果"]);
+  const $tbl = mustTableByHeader($, ["月日","場","レース","ST","結果"]);
   if (!$tbl) return null;
   const { headers, rows } = parseTable($, $tbl);
   const iST = headerIndex(headers, "ST");
   if (iST < 0) return null;
-
   let sum = 0, cnt = 0;
   for (const r of rows) {
-    const st = r[iST]; // ".15" / "F.01" / "L.10"
+    const st = r[iST];
     if (!st) continue;
     if (/^[FL]/i.test(st)) continue;
     const m = st.match(/-?\.?\d+(?:\.\d+)?/);
@@ -168,23 +148,21 @@ function parseAvgSTFromCoursePage($) {
     if (Number.isFinite(n)) { sum += Math.abs(n); cnt++; }
   }
   if (!cnt) return null;
-  return Math.round((sum / cnt) * 100) / 100;
+  return Math.round((sum/cnt)*100)/100;
 }
 
 function parseLoseKimariteFromCoursePage($) {
-  const $tbl = mustTableByHeader($, ["コース", "出走数", "1着数", "逃げ", "差し", "まくり"]);
+  const $tbl = mustTableByHeader($, ["コース","出走数","1着数","逃げ","差し","まくり"]);
   if (!$tbl) return null;
-
   const { headers, rows } = parseTable($, $tbl);
   const iCourse = headerIndex(headers, "コース");
   const keys = headers.slice(3).map(normalizeKimariteKey);
-
   const lose = Object.fromEntries(keys.map(k => [k, 0]));
   for (const r of rows) {
     const label = r[iCourse] || "";
-    if (label.includes("（自艇）")) continue; // 他艇集計のみ
+    if (label.includes("（自艇）")) continue; // 他艇のみ加算
     keys.forEach((k, i) => {
-      const v = r[3 + i];
+      const v = r[3+i];
       const num = v ? Number((v.match(/(\d+)/) || [])[1]) : NaN;
       if (Number.isFinite(num)) lose[k] += num;
     });
@@ -192,22 +170,21 @@ function parseLoseKimariteFromCoursePage($) {
   return lose;
 }
 
-// 追加: 「nコース進入時の全艇成績」テーブル
+// nコース進入時の全艇成績（自艇/他艇の成績行）
 function parseEntryMatrixFromCoursePage($) {
-  const $tbl = mustTableByHeader($, ["コース", "出走数", "1着数", "2着数", "3着数", "1着率", "2連対率", "3連対率"]);
+  const $tbl = mustTableByHeader($, ["コース","出走数","1着数","2着数","3着数","1着率","2連対率","3連対率"]);
   if (!$tbl) return null;
   const { headers, rows } = parseTable($, $tbl);
   const idx = {
     course: headerIndex(headers, "コース"),
     starts: headerIndex(headers, "出走数"),
-    w1: headerIndex(headers, "1着数"),
-    w2: headerIndex(headers, "2着数"),
-    w3: headerIndex(headers, "3着数"),
-    r1: headerIndex(headers, "1着率"),
-    r2: headerIndex(headers, "2連対率"),
-    r3: headerIndex(headers, "3連対率"),
+    w1    : headerIndex(headers, "1着数"),
+    w2    : headerIndex(headers, "2着数"),
+    w3    : headerIndex(headers, "3着数"),
+    r1    : headerIndex(headers, "1着率"),
+    r2    : headerIndex(headers, "2連対率"),
+    r3    : headerIndex(headers, "3連対率"),
   };
-
   const result = { rows: [], self: null };
   for (const r of rows) {
     const label = r[idx.course] || "";
@@ -218,55 +195,59 @@ function parseEntryMatrixFromCoursePage($) {
     const row = {
       course,
       isSelf,
-      starts: toNumber(r[idx.starts]),
-      firstCount: toNumber(r[idx.w1]),
+      starts     : toNumber(r[idx.starts]),
+      firstCount : toNumber(r[idx.w1]),
       secondCount: toNumber(r[idx.w2]),
-      thirdCount: toNumber(r[idx.w3]),
-      winRate: toNumber(r[idx.r1]),
-      top2Rate: toNumber(r[idx.r2]),
-      top3Rate: toNumber(r[idx.r3]),
+      thirdCount : toNumber(r[idx.w3]),
+      winRate    : toNumber(r[idx.r1]),
+      top2Rate   : toNumber(r[idx.r2]),
+      top3Rate   : toNumber(r[idx.r3]),
       raw: r,
     };
     result.rows.push(row);
     if (isSelf) result.self = row;
   }
-  result.rows.sort((a, b) => a.course - b.course);
+  result.rows.sort((a,b)=>a.course-b.course);
   return result;
 }
 
-// 追加: 「nコース進入時の全艇決まり手」テーブル（カウント主体）
-function parseEntryKimariteAllBoats($) {
-  const $tbl = mustTableByHeader($, ["決まり手", "逃げ", "差し", "まくり", "まくり差し", "抜き", "恵まれ"]);
+// nコース進入時の「全艇決まり手」テーブル：行ごとに保持（自艇行も含む）
+function parseEntryKimariteRows($) {
+  const $tbl = mustTableByHeader($, ["コース","出走数","1着数","逃げ","差し","まくり","まくり差し","抜き","恵まれ"]);
   if (!$tbl) return null;
   const { headers, rows } = parseTable($, $tbl);
-
-  const keys = headers.slice(0);
-  const kStart = keys[0].includes("決まり手") ? 1 : 0;
-  const detailKeys = keys.slice(kStart).map(normalizeKimariteKey);
-
-  const detail = Object.fromEntries(detailKeys.map(k => [k, 0]));
+  const idxCourse = headerIndex(headers, "コース");
+  const keys = ["逃げ","差し","まくり","まくり差し","抜き","恵まれ"].map(normalizeKimariteKey);
+  const out = [];
   for (const r of rows) {
-    for (let i = kStart; i < r.length && i - kStart < detailKeys.length; i++) {
-      const key = detailKeys[i - kStart];
-      const num = r[i] ? Number((r[i].match(/(\d+)/) || [])[1]) : NaN;
-      if (Number.isFinite(num)) detail[key] += num;
+    const label = r[idxCourse] || "";
+    const m = label.match(/([1-6])\s*コース/);
+    if (!m) continue;
+    const course = Number(m[1]);
+    const isSelf = label.includes("（自艇）");
+    const detail = {};
+    // 列位置は表の並びで探す
+    const colIdx = Object.fromEntries(keys.map(k => [k, headerIndex(headers, k)]));
+    for (const k of keys) {
+      const i = colIdx[k];
+      const v = i >= 0 ? r[i] : null;
+      const num = v ? Number((v.match(/(\d+)/) || [])[1]) : null;
+      detail[k] = Number.isFinite(num) ? num : 0;
     }
+    out.push({ course, isSelf, detail, raw: r });
   }
-  return detail;
+  return out.length ? out : null;
 }
 
-// -------------------------------
-// rdemo: 展示タイム順位別成績
-// -------------------------------
+// 展示タイム順位別
 function parseExTimeRankFromRdemo($) {
-  const $tbl = mustTableByHeader($, ["順位", "出走数", "1着率", "2連対率", "3連対率"]);
+  const $tbl = mustTableByHeader($, ["順位","出走数","1着率","2連対率","3連対率"]);
   if (!$tbl) return null;
   const { headers, rows } = parseTable($, $tbl);
   const iRank = headerIndex(headers, "順位");
   const iWin  = headerIndex(headers, "1着率");
   const iT2   = headerIndex(headers, "2連対率");
   const iT3   = headerIndex(headers, "3連対率");
-
   const items = [];
   for (const r of rows) {
     const rt = r[iRank] ?? r[0] ?? "";
@@ -274,9 +255,9 @@ function parseExTimeRankFromRdemo($) {
     if (!m) continue;
     items.push({
       rank: Number(m[1]),
-      winRate: iWin >= 0 ? toNumber(r[iWin]) : null,
-      top2Rate: iT2 >= 0 ? toNumber(r[iT2]) : null,
-      top3Rate: iT3 >= 0 ? toNumber(r[iT3]) : null,
+      winRate : iWin >= 0 ? toNumber(r[iWin]) : null,
+      top2Rate: iT2  >= 0 ? toNumber(r[iT2])  : null,
+      top3Rate: iT3  >= 0 ? toNumber(r[iT3])  : null,
       raw: r,
     });
   }
@@ -284,18 +265,12 @@ function parseExTimeRankFromRdemo($) {
   return items.length ? items : null;
 }
 
-// -------------------------------
-// today配下から出走選手収集
-// -------------------------------
+// today配下から本日の出走選手を収集
 async function collectRacersFromToday() {
   const set = new Set();
   for (const root of TODAY_ROOTS) {
     let entries = [];
-    try {
-      entries = await fs.readdir(root, { withFileTypes: true });
-    } catch {
-      continue;
-    }
+    try { entries = await fs.readdir(root, { withFileTypes: true }); } catch { continue; }
     for (const d of entries) {
       if (!d.isDirectory()) continue;
       const dayDir = path.join(root, d.name);
@@ -317,55 +292,24 @@ async function collectRacersFromToday() {
   return [...set];
 }
 
-async function ensureDir(p) {
-  await fs.mkdir(p, { recursive: true });
-}
+async function ensureDir(p) { await fs.mkdir(p, { recursive: true }); }
 
 function isFresh(file, hours = 12) {
   try {
     const st = fssync.statSync(file);
-    const ageMs = Date.now() - st.mtimeMs;
-    return ageMs <= hours * 3600 * 1000;
-  } catch {
-    return false;
-  }
-}
-
-// 差分用: 全艇決まり手(detail) から 他艇(=負け)決まり手 を引いて 自艇勝ち決まり手 を算出
-function computeSelfWinKimarite(allBoatsDetail, loseKimarite) {
-  if (!allBoatsDetail) return null;
-  const keys = Object.keys(allBoatsDetail);
-  const out = {};
-  for (const k of keys) {
-    const a = Number(allBoatsDetail[k] ?? 0);
-    const l = Number(loseKimarite?.[k] ?? 0);
-    const v = a - l;
-    out[k] = v >= 0 ? v : 0; // マイナスは0で丸め
-  }
-  return out;
+    return (Date.now() - st.mtimeMs) <= hours * 3600 * 1000;
+  } catch { return false; }
 }
 
 // -------------------------------
 // 1選手分
 // -------------------------------
 async function fetchOne(regno) {
-  const uRcourse = `https://boatrace-db.net/racer/rcourse/regno/${regno}/`;
-  const uRdemo   = `https://boatrace-db.net/racer/rdemo/regno/${regno}/`;
+  const uRdemo = `https://boatrace-db.net/racer/rdemo/regno/${regno}/`;
 
-  // 直近6か月一覧（保険：存在しなくてもOK）
-  let courseStatsList = null;
-  try {
-    const html = await fetchHtml(uRcourse);
-    const $ = load(html);
-    // ここでは未使用（サイト差異が多いため）
-    courseStatsList = null;
-  } catch (e) {
-    console.warn(`warn: rcourse list fetch/parse failed for ${regno}: ${e.message}`);
-  }
-
-  // 各コース詳細（＝自艇nコースページ）
   const entryCourse = [];
   const coursePages = {};
+
   for (let c = 1; c <= 6; c++) {
     const url = `https://boatrace-db.net/racer/rcourse/regno/${regno}/course/${c}/`;
     coursePages[c] = url;
@@ -373,30 +317,32 @@ async function fetchOne(regno) {
       const html = await fetchHtml(url);
       const $ = load(html);
 
-      const avgST = parseAvgSTFromCoursePage($);
-      const loseKimarite = parseLoseKimariteFromCoursePage($); // 他艇が勝った決まり手（=自艇の負け要因）
-      const matrix = parseEntryMatrixFromCoursePage($);        // 自艇/他艇 含む全艇成績
-      const kimariteAllBoats = parseEntryKimariteAllBoats($);  // 全艇決まり手（カウント）
+      const avgST         = parseAvgSTFromCoursePage($);
+      const loseKimarite  = parseLoseKimariteFromCoursePage($);
+      const matrix        = parseEntryMatrixFromCoursePage($);
+      const kimariteRows  = parseEntryKimariteRows($);
 
-      // ★ 追加: 自艇勝ち決まり手（種類別カウント）
-      const winKimariteSelf = computeSelfWinKimarite(kimariteAllBoats, loseKimarite);
+      // 自艇の勝ち決まり手（行から直接）
+      const selfRow = kimariteRows?.find(r => r.isSelf);
+      const winKimariteSelf = selfRow ? selfRow.detail : null;
 
-      // ★ 追加: 自艇サマリ（便利フィールド）
       const selfSummary = matrix?.self ? {
-        course: matrix.self.course,
-        starts: matrix.self.starts,
-        firstCount: matrix.self.firstCount,
+        course     : matrix.self.course,
+        starts     : matrix.self.starts,
+        firstCount : matrix.self.firstCount,
         secondCount: matrix.self.secondCount,
-        thirdCount: matrix.self.thirdCount,
+        thirdCount : matrix.self.thirdCount,
       } : null;
 
       entryCourse.push({
         course: c,
         matrix: matrix ?? null,
-        kimariteAllBoats: kimariteAllBoats ?? null,
+        kimariteAllBoats: kimariteRows ? Object.fromEntries(
+          // 全艇合計（必要なら利用、今はそのまま raw 代わりに保持）
+          [["rows", kimariteRows]]
+        ) : null,
         avgST: avgST ?? null,
         loseKimarite: loseKimarite ?? null,
-        // 差分追加
         winKimariteSelf: winKimariteSelf ?? null,
         selfSummary,
       });
@@ -429,13 +375,10 @@ async function fetchOne(regno) {
   return {
     schemaVersion: "2.0",
     regno: Number(regno),
-    sources: { rcourse: uRcourse, rdemo: uRdemo, coursePages },
+    sources: { rdemo: uRdemo, coursePages },
     fetchedAt: new Date().toISOString(),
-    // 予備（今は null）
-    courseStats: courseStatsList,
-    // 主データ：自艇nコースページ由来
-    entryCourse,     // [{course, matrix:{rows[], self}, kimariteAllBoats, avgST, loseKimarite, winKimariteSelf, selfSummary}]
-    exTimeRank,      // [{rank, winRate, top2Rate, top3Rate}]
+    entryCourse,   // [{course, matrix, kimariteAllBoats:{rows:[...]}, avgST, loseKimarite, winKimariteSelf, selfSummary}]
+    exTimeRank,    // [{rank, winRate, top2Rate, top3Rate}]
     meta: { errors: [] },
   };
 }
@@ -464,9 +407,9 @@ async function main() {
 
   console.log(
     `process ${racers.length} racers (incremental, fresh<=${FRESH_HOURS}h)` +
-      (ENV_RACERS ? " [env RACERS specified]" : "") +
-      (ENV_RACERS_LIMIT ? ` [limit=${ENV_RACERS_LIMIT}]` : "") +
-      (ENV_BATCH ? ` [batch=${ENV_BATCH}]` : "")
+    (ENV_RACERS ? " [env RACERS specified]" : "") +
+    (ENV_RACERS_LIMIT ? ` [limit=${ENV_RACERS_LIMIT}]` : "") +
+    (ENV_BATCH ? ` [batch=${ENV_BATCH}]` : "")
   );
 
   await ensureDir(OUTPUT_DIR_V2);
@@ -475,7 +418,6 @@ async function main() {
   for (const regno of racers) {
     const outPath = path.join(OUTPUT_DIR_V2, `${regno}.json`);
 
-    // 増分: 既存ファイルが新しければスキップ
     if (isFresh(outPath, FRESH_HOURS)) {
       console.log(`⏭️  skip fresh ${path.relative(PUBLIC_DIR, outPath)}`);
       continue;
