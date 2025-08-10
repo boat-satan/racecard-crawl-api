@@ -74,19 +74,17 @@ jobs:
           TARGET_RACE: ${{ inputs.race || 'ALL' }}
         run: node scripts/crawl.js
 
-      # 出走表から選手を収集して stats を増分更新
-      # 保存先: public/stats/v2/racers/<regno>.json（=日付なし）
+      # 出走表から選手を収集して stats を増分更新（保存先: public/stats/v2/racers/<regno>.json）
       - name: Fetch racer stats (incremental write)
         env:
-          TARGET_DATE:      ${{ inputs.date || 'today' }}     # 参照用
-          RACERS:           ${{ inputs.racers }}              # 指定があれば最優先
+          TARGET_DATE:      ${{ inputs.date || 'today' }}   # 参照用
+          TARGET_PID:       ${{ inputs.pid  || 'ALL' }}     # ★ fetch-stats にも同じフィルタを渡す
+          TARGET_RACE:      ${{ inputs.race || 'ALL' }}     # ★
+          RACERS:           ${{ inputs.racers }}
           STATS_BATCH:      ${{ inputs.batch }}
           STATS_DELAY_MS:   ${{ inputs.delayMs || '3000' }}
           FRESH_HOURS:      ${{ inputs.freshHours || '12' }}
           STATS_OVERWRITE:  "0"
-          # ★ ここでフィルタを fetch-stats.js にも渡す
-          FILTER_PID:       ${{ inputs.pid  || 'ALL' }}
-          FILTER_RACE:      ${{ inputs.race || 'ALL' }}
         run: node scripts/fetch-stats.js
 
       - name: Commit & Push changes (with rebase & retry)
