@@ -1,0 +1,45 @@
+name: Auto-Tune Rules (Half-Auto)
+on:
+  schedule:
+    - cron: "5 21 * * *"   # JST 06:05
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  tune:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+
+      - name: Run updater
+        run: |
+          node model/updater.mjs
+
+      - name: Create PR if proposal exists
+        shell: bash
+        run: |
+          set -e
+          if [ ! -f model/rules.proposed.json ]; then
+            echo "No proposal."
+            exit 0
+          fi
+          mv model/rules.proposed.json model/rules.json
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add model/rules.json model/rules.lock.json model/rules.changelog.md
+          if git diff --cached --quiet; then
+            echo "No changes."
+            exit 0
+          fi
+          BR="rules-auto-$(date +%Y%m%d%H%M%S)"
+          git checkout -b "$BR"
+          git commit -m "auto-tune: rules (proposed)"
+          git push -u origin "$BR"
+          gh pr create --title "Auto-tune rules (proposed)" --body "半自動更新の提案です。差分をご確認ください。" || true
