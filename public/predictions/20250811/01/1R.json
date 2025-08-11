@@ -1,0 +1,129 @@
+{
+  "schemaVersion": "0.1",
+  "generatedAt": "2025-08-11T16:12:23.695Z",
+  "meta": {
+    "date": "20250811",
+    "pid": "01",
+    "race": "1R",
+    "source": "public/integrated/v1/20250811/01/1R.json"
+  },
+  "weather": {
+    "weather": "曇",
+    "temperature": 29,
+    "windSpeed": 2,
+    "windDirection": "西南西",
+    "waterTemperature": 29,
+    "waveHeight": 0.01,
+    "stabilizer": false
+  },
+  "ranking": [
+    {
+      "lane": 1,
+      "number": 3652,
+      "name": "森下 勇",
+      "score": 40.014,
+      "scoreAdj": 40.014,
+      "adjMul": 1,
+      "breakdown": {
+        "absWin": 40,
+        "stScore": 40,
+        "mech": 34.4,
+        "exScore": 48.6
+      }
+    },
+    {
+      "lane": 4,
+      "number": 5216,
+      "name": "長谷川 晴哉",
+      "score": 33.538,
+      "scoreAdj": 34.209,
+      "adjMul": 1.02,
+      "breakdown": {
+        "absWin": 22.2,
+        "stScore": 46.7,
+        "mech": 37,
+        "exScore": 64.4
+      }
+    },
+    {
+      "lane": 2,
+      "number": 3538,
+      "name": "菊池 峰晴",
+      "score": 21.534,
+      "scoreAdj": 21.534,
+      "adjMul": 1,
+      "breakdown": {
+        "absWin": 11.1,
+        "stScore": 20,
+        "mech": 37.1,
+        "exScore": 58.6
+      }
+    },
+    {
+      "lane": 5,
+      "number": 3653,
+      "name": "品川 賢次",
+      "score": 14.393,
+      "scoreAdj": 14.681,
+      "adjMul": 1.02,
+      "breakdown": {
+        "absWin": 0,
+        "stScore": 20,
+        "mech": 33.9,
+        "exScore": 53.1
+      }
+    },
+    {
+      "lane": 3,
+      "number": 3947,
+      "name": "寺本 昇平",
+      "score": 13.4,
+      "scoreAdj": 13.4,
+      "adjMul": 1,
+      "breakdown": {
+        "absWin": 0,
+        "stScore": 20,
+        "mech": 38.2,
+        "exScore": 36.7
+      }
+    },
+    {
+      "lane": 6,
+      "number": 5402,
+      "name": "塚越 陸斗",
+      "score": 12.228,
+      "scoreAdj": 12.473,
+      "adjMul": 1.02,
+      "breakdown": {
+        "absWin": 0,
+        "stScore": 20,
+        "mech": 42.3,
+        "exScore": 18.9
+      }
+    }
+  ],
+  "picks": {
+    "trifectaPrimary": [
+      [
+        1,
+        4,
+        2
+      ],
+      [
+        1,
+        2,
+        4
+      ],
+      [
+        4,
+        1,
+        2
+      ]
+    ],
+    "trifectaAlt": []
+  },
+  "rationale": [
+    "最小版：自己勝率/平均ST/機力/展示を重み合成し、場・風で微調整。",
+    "買い目は上位3艇の並び（雛形）。ルールと点数はあとで heuristics.json に移し替え。"
+  ]
+}
