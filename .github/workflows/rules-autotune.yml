@@ -1,45 +1,56 @@
-name: Auto-Tune Rules (Half-Auto)
+name: rules-autotune
+
 on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "何日分さかのぼって学習するか"
+        required: false
+        default: "3"
+      dry_run:
+        description: "true の場合は提案だけ（rules.jsonは更新しない）"
+        required: false
+        default: "true"
   schedule:
-    - cron: "5 21 * * *"   # JST 06:05
-  workflow_dispatch: {}
+    # 毎日 15:30 UTC（JST 00:30）に回す例。必要に応じて調整してね
+    - cron: "30 15 * * *"
 
 permissions:
   contents: write
   pull-requests: write
 
 jobs:
-  tune:
+  autotune:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with: { node-version: '20' }
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
 
-      - name: Run updater
+      - name: Install deps (none required)
+        run: echo "no deps"
+
+      - name: Run autotune script
+        env:
+          DAYS: ${{ github.event.inputs.days || '3' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'true' }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
-          node model/updater.mjs
+          node scripts/autotune-rules.mjs
 
-      - name: Create PR if proposal exists
-        shell: bash
-        run: |
-          set -e
-          if [ ! -f model/rules.proposed.json ]; then
-            echo "No proposal."
-            exit 0
-          fi
-          mv model/rules.proposed.json model/rules.json
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add model/rules.json model/rules.lock.json model/rules.changelog.md
-          if git diff --cached --quiet; then
-            echo "No changes."
-            exit 0
-          fi
-          BR="rules-auto-$(date +%Y%m%d%H%M%S)"
-          git checkout -b "$BR"
-          git commit -m "auto-tune: rules (proposed)"
-          git push -u origin "$BR"
-          gh pr create --title "Auto-tune rules (proposed)" --body "半自動更新の提案です。差分をご確認ください。" || true
+      - name: Create Pull Request (when there are changes)
+        if: ${{ success() }}
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "autotune: update rules.json from logs"
+          title: "Autotune: rules.json update"
+          body: |
+            自動提案された補正ルールです。内容を確認して問題なければマージしてください。
+            - 学習対象日数: ${{ env.DAYS }} 日
+            - DRY_RUN: ${{ env.DRY_RUN }}
+          branch: "autotune/rules-${{ github.run_id }}"
+          base: "main"
