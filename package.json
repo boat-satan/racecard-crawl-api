@@ -3,13 +3,20 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "crawl": "node scripts/crawl.js",
     "stats": "node scripts/fetch-stats.js",
-    "exhibition": "node scripts/fetch-exhibition.js"
+    "exhibition": "node scripts/fetch-exhibition.js",
+    "exhibition:direct": "node scripts/fetch-exhibition-direct.js",
+    "integrate:once": "node scripts/integrate-once.mjs",
+    "predict": "node scripts/predict.mjs"
   },
   "dependencies": {
     "cheerio": "^1.0.0",
     "node-fetch": "^3.3.2"
-  }
+  },
+  "license": "MIT"
 }
