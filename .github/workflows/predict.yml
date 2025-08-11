@@ -16,15 +16,12 @@ on:
         required: false
         default: "1R"
   schedule:
-    # UTC: 13:00-23:59 を 20分おき（例）→必要に応じて調整
-    - cron: "*/20 13-23 * * *"
-    # UTC: 00:00-08:59 を 20分おき
-    - cron: "*/20 0-8 * * *"
+    - cron: "*/20 13-23 * * *"  # UTC: 22:00-08:59 JST 相当
+    - cron: "*/20 0-8 * * *"    # UTC: 09:00-17:59 JST 相当（必要なら調整）
 
 permissions:
   contents: write
 
-# inputs が無い schedule 実行でも安全な簡易キーに
 concurrency:
   group: predict-${{ github.ref }}
   cancel-in-progress: true
@@ -84,3 +81,34 @@ jobs:
           else
             echo "No changes."
           fi
+
+      # ---- ここから Slack 通知 ----
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Notify Slack
+        if: ${{ success() }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          REPO: ${{ github.repository }}
+          DATE_IN: ${{ steps.p.outputs.date }}
+          PID:  ${{ steps.p.outputs.pid }}
+          RACE: ${{ steps.p.outputs.race }}
+        run: |
+          # date=today を JST で解決
+          if [ "$DATE_IN" = "today" ]; then DATE=$(TZ=Asia/Tokyo date +%Y%m%d); else DATE="$DATE_IN"; fi
+
+          FILE="public/predictions/$DATE/$PID/$RACE.md"
+          if [ -f "$FILE" ]; then
+            SUMMARY=$(sed -n '1,20p' "$FILE" | sed 's/"/\\"/g')
+            URL="https://github.com/$REPO/blob/main/$FILE"
+            PAYLOAD=$(jq -n --arg t "🏁 予測 $DATE pid=$PID $RACE" \
+                           --arg s "$SUMMARY" --arg u "$URL" \
+                           '{text: "\($t)\n\($s)\n\n<\($u)|GitHubで詳細を見る>"}')
+          else
+            PAYLOAD=$(jq -n --arg t "🏁 予測完了: $DATE pid=$PID $RACE（MD未生成）" '{text:$t}')
+          fi
+
+          curl -X POST -H 'Content-type: application/json' \
+               --data "$PAYLOAD" "$SLACK_WEBHOOK_URL"
+      # ---- Slack 通知ここまで ----
