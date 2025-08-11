@@ -10,6 +10,7 @@
 // 取得対象: beforeinfo（直前情報）
 // 生成形式:
 // { date, pid, race, source, mode: "beforeinfo", generatedAt,
+//   weather: { weather, temperature, windSpeed, windDirection, waterTemperature, waveHeight, stabilizer },
 //   entries: [{ lane, number, name, weight, tenjiTime, tilt, st, stFlag }] }
 
 import fs from "node:fs";
@@ -86,15 +87,13 @@ if (RACES.length === 0) usageAndExit();
 
 log(`date=${DATE} pids=${PIDS.join(",")} races=${RACES.join(",")}`);
 
-// ---------- helpers: 締切読取（柔軟にキーを探索） ----------
+// ---------- helpers: 締切読取 ----------
 function toJstDate(dateYYYYMMDD, hhmm) {
-  // hhmm: "HH:MM"
   return new Date(`${dateYYYYMMDD.slice(0,4)}-${dateYYYYMMDD.slice(4,6)}-${dateYYYYMMDD.slice(6,8)}T${hhmm}:00+09:00`);
 }
 
 function tryParseTimeString(s) {
   if (!s || typeof s !== "string") return null;
-  // 例: "14:39", "14:39頃", "14:39締切"
   const m = s.match(/(\d{1,2}):(\d{2})/);
   if (!m) return null;
   const hh = m[1].padStart(2, "0");
@@ -103,7 +102,6 @@ function tryParseTimeString(s) {
 }
 
 async function loadRaceDeadlineHHMM(date, pid, raceNo) {
-  // 探索パス（programs と programs-slim の両方）
   const relPaths = [
     path.join("public", "programs", "v2", date, pid, `${raceNo}R.json`),
     path.join("public", "programs-slim", "v2", date, pid, `${raceNo}R.json`),
@@ -113,16 +111,13 @@ async function loadRaceDeadlineHHMM(date, pid, raceNo) {
     if (!fs.existsSync(abs)) continue;
     try {
       const j = JSON.parse(await fsp.readFile(abs, "utf8"));
-      // よくあるキー候補を総当り
       const candidates = [
         j.deadlineJST, j.closeTimeJST, j.deadline, j.closingTime, j.startTimeJST, j.postTimeJST,
         j.scheduledTimeJST, j.raceCloseJST, j.startAt, j.closeAt,
-        // ネスト候補
         j.info?.deadlineJST, j.info?.closeTimeJST, j.meta?.deadlineJST, j.meta?.closeTimeJST,
       ].filter(Boolean);
 
       for (const c of candidates) {
-        // ISOの場合
         if (typeof c === "string" && c.includes("T") && c.match(/:\d{2}/)) {
           const dt = new Date(c);
           if (!isNaN(dt)) {
@@ -131,12 +126,9 @@ async function loadRaceDeadlineHHMM(date, pid, raceNo) {
             return `${hh}:${mm}`;
           }
         }
-        // HH:MM 抜き出し
         const hhmm = tryParseTimeString(String(c));
         if (hhmm) return hhmm;
       }
-
-      // 文字列全走査（最後の手段）
       const raw = JSON.stringify(j);
       const m = raw.match(/(\d{1,2}):(\d{2})/);
       if (m) return `${m[1].padStart(2,"0")}:${m[2]}`;
@@ -151,16 +143,15 @@ async function pickRacesAuto(date, pid) {
   const out = [];
   for (let r = 1; r <= 12; r++) {
     const hhmm = await loadRaceDeadlineHHMM(date, pid, r);
-    if (!hhmm) continue; // 締切不明なら見送り
+    if (!hhmm) continue;
     const deadline = toJstDate(date, hhmm);
     const triggerMin = Math.floor((deadline.getTime() - AUTO_TRIGGER_MIN * 60000) / 60000);
-    // 15分前以降は常に取得対象（締切後も拾う。上限を付けたい場合はここで制限可）
     if (nowMin >= triggerMin) out.push(r);
   }
   return out;
 }
 
-// ---------- core ----------
+// ---------- fetch & parse ----------
 async function fetchBeforeinfo({ date, pid, raceNo }) {
   const url = `https://www.boatrace.jp/owpc/pc/race/beforeinfo?hd=${date}&jcd=${pid}&rno=${raceNo}`;
   log("GET", url);
@@ -173,6 +164,55 @@ async function fetchBeforeinfo({ date, pid, raceNo }) {
   if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
   const html = await res.text();
   return { url, html };
+}
+
+// 追加: 気象ブロックの軽量パーサ（最小変更）
+function textOf($el){ return ($el.text() || "").replace(/\s+/g, " ").trim(); }
+function pickNumber(s){ const m=String(s||"").match(/-?\d+(\.\d+)?/); return m? Number(m[0]) : null; }
+
+function parseWeather($){
+  const root = $('.weather1, .weather1_body, .is-weather, [class*="weather"]').first();
+  const rootText = textOf(root);
+  const bodyText = textOf($('body'));
+
+  // 天気
+  let weather =
+    textOf(root.find('*:contains("天気")').next()) ||
+    (root.find('img[alt]').filter((_,img)=>/晴|曇|雨|雪|雷/.test($(img).attr('alt')||"")).attr('alt')||"") ||
+    "";
+
+  // 気温 / 水温 / 波高
+  const tempText  = textOf(root.find('*:contains("気温")').next())  || (rootText.match(/気温[^0-9\-]*([-0-9.]+)\s*℃/)?.[1] ?? bodyText.match(/気温[^0-9\-]*([-0-9.]+)\s*℃/)?.[1] ?? "");
+  const wtempText = textOf(root.find('*:contains("水温")').next())  || (rootText.match(/水温[^0-9\-]*([-0-9.]+)\s*℃/)?.[1] ?? bodyText.match(/水温[^0-9\-]*([-0-9.]+)\s*℃/)?.[1] ?? "");
+  const waveText  = textOf(root.find('*:contains("波高")').next())  || (rootText.match(/波高[^0-9\-]*([-0-9.]+)\s*m/)?.[1]   ?? bodyText.match(/波高[^0-9\-]*([-0-9.]+)\s*m/)?.[1]   ?? "");
+
+  // 風向 / 風速
+  let windDir =
+    textOf(root.find('*:contains("風向")').next()) ||
+    (root.find('img[alt]').filter((_,img)=>/北|南|東|西|北東|北西|南東|南西/.test($(img).attr('alt')||"")).attr('alt')||"") ||
+    "";
+
+  const windSpdText =
+    textOf(root.find('*:contains("風速")').next()) ||
+    (rootText.match(/風速[^0-9\-]*([-0-9.]+)\s*m\/s?/i)?.[1] ?? bodyText.match(/風速[^0-9\-]*([-0-9.]+)\s*m\/s?/i)?.[1] ?? "");
+
+  // 安定板（全文から判定）
+  const flatBody = ( $('body').text() || "" ).replace(/\s+/g, "");
+  let stabilizer = null;
+  if (/安定板/.test(flatBody)) {
+    if (/(使用|装着|取り付け)/.test(flatBody)) stabilizer = true;
+    if (/不使用|使用しません/.test(flatBody))    stabilizer = false;
+  }
+
+  return {
+    weather: weather || null,
+    temperature: pickNumber(tempText),
+    windSpeed: pickNumber(windSpdText),
+    windDirection: windDir || null,
+    waterTemperature: pickNumber(wtempText),
+    waveHeight: pickNumber(waveText),
+    stabilizer
+  };
 }
 
 function parseBeforeinfo(html, { date, pid, raceNo, url }) {
@@ -237,6 +277,9 @@ function parseBeforeinfo(html, { date, pid, raceNo, url }) {
     entries.push({ lane, number, name, weight, tenjiTime, tilt, st, stFlag });
   });
 
+  // 追加: 気象情報
+  const wx = parseWeather($);
+
   return {
     date,
     pid,
@@ -244,13 +287,13 @@ function parseBeforeinfo(html, { date, pid, raceNo, url }) {
     source: url,
     mode: "beforeinfo",
     generatedAt: new Date().toISOString(),
+    weather: wx,   // ← 追加
     entries,
   };
 }
 
 async function main() {
   for (const pid of PIDS) {
-    // AUTO 指定なら、締切T-15分を過ぎたレースを自動選別
     let raceList;
     if (RACES.length === 1 && RACES[0] === "auto") {
       raceList = await pickRacesAuto(DATE, pid);
@@ -273,7 +316,6 @@ async function main() {
       try {
         const { url, html } = await fetchBeforeinfo({ date: DATE, pid, raceNo });
         const data = parseBeforeinfo(html, { date: DATE, pid, raceNo, url });
-        // 404やテーブル欠損などで entries が空なら保存しない
         if (!data.entries || data.entries.length === 0) {
           log(`no entries -> skip save: ${DATE}/${pid}/${raceNo}R`);
           continue;
