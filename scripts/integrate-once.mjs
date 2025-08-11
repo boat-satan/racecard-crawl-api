@@ -168,6 +168,8 @@ async function integrateOnce(){
       exhibition: path.relative(ROOT, exhibitionPath),
       statsDir: "public/stats/v2/racers",
     },
+    // ★ 追加: 展示で取得した水面気象＋安定板情報をそのまま反映
+    weather: exhibition.weather ?? null,
     entries: integratedEntries,
   };
 
