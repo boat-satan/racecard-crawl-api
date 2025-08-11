@@ -62,11 +62,11 @@ jobs:
 
       - name: Configure git
         run: |
-          git config user.name "github-actions[bot]"
+          git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config pull.rebase true
 
-      # 指定日の出走表を出力（ALL/PID/RACEで絞り込み可能）
+      # 出走表を出力（ALL/PID/RACEで絞り込み可能）
       - name: Run crawler (programs)
         env:
           TARGET_DATE: ${{ inputs.date || 'today' }}
@@ -74,12 +74,12 @@ jobs:
           TARGET_RACE: ${{ inputs.race || 'ALL' }}
         run: node scripts/crawl.js
 
-      # 出走表から選手を収集して stats を増分更新（保存先: public/stats/v2/racers/<regno>.json）
+      # 出走表から選手を収集して stats を増分更新
       - name: Fetch racer stats (incremental write)
         env:
           TARGET_DATE:      ${{ inputs.date || 'today' }}   # 参照用
-          TARGET_PID:       ${{ inputs.pid  || 'ALL' }}     # ★ fetch-stats にも同じフィルタを渡す
-          TARGET_RACE:      ${{ inputs.race || 'ALL' }}     # ★
+          TARGET_PID:       ${{ inputs.pid  || 'ALL' }}     # 同じフィルタを渡す
+          TARGET_RACE:      ${{ inputs.race || 'ALL' }}
           RACERS:           ${{ inputs.racers }}
           STATS_BATCH:      ${{ inputs.batch }}
           STATS_DELAY_MS:   ${{ inputs.delayMs || '3000' }}
@@ -87,27 +87,78 @@ jobs:
           STATS_OVERWRITE:  "0"
         run: node scripts/fetch-stats.js
 
-      - name: Commit & Push changes (with rebase & retry)
+      # ← 追加：スタッツを10件ずつ小分けコミット＆push
+      - name: Commit & Push stats in batches of 10
+        shell: bash
+        run: |
+          set -e
+
+          # 変更/新規のスタッツJSONのみ抽出（未追跡含む）
+          mapfile -t files < <(git ls-files -mo --exclude-standard -- public/stats/v2/racers/*.json | sort)
+
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No stats changes."
+            exit 0
+          fi
+
+          total=${#files[@]}
+          echo "Stats to commit: $total files"
+
+          batch=0
+          for ((i=0; i<total; i+=10)); do
+            batch=$((batch+1))
+            slice=( "${files[@]:i:10}" )
+
+            echo "Batch ${batch}: add ${#slice[@]} files (index $(($i+1))..$((i+${#slice[@]})))"
+            git add -- "${slice[@]}"
+
+            if git diff --cached --quiet; then
+              echo "No staged changes in this batch, skip."
+              continue
+            fi
+
+            git commit -m "Update racer stats (batch ${batch}) [skip ci]"
+
+            n=0
+            until [ $n -ge 5 ]; do
+              if git push; then
+                echo "Pushed batch ${batch}"
+                break
+              fi
+              echo "Push rejected. Rebase & retry ($((n+1))/5) for batch ${batch}"
+              git pull --rebase --autostash -X theirs
+              n=$((n+1))
+              sleep 2
+            done
+
+            if [ $n -ge 5 ]; then
+              echo "Failed to push stats batch ${batch}"
+              exit 1
+            fi
+          done
+
+      # 残り（出走表やその他）の変更をまとめてコミット＆push
+      - name: Commit & Push remaining changes
+        shell: bash
         run: |
           set -e
           git add -A
           if git diff --cached --quiet; then
-            echo "No changes to commit."
+            echo "No remaining changes."
             exit 0
           fi
 
           DATE_VAL="${{ inputs.date || 'today' }}"
-          git commit -m "Update programs & racer stats (${DATE_VAL}) [skip ci]"
+          git commit -m "Update programs & misc (${DATE_VAL}) [skip ci]"
 
           n=0
-          until [ $n -ge 5 ]
-          do
+          until [ $n -ge 5 ]; do
             if git push; then
               echo "Pushed successfully."
               exit 0
             fi
             echo "Push rejected. Rebasing onto remote and retrying... ($((n+1))/5)"
-            git pull --rebase --autostash
+            git pull --rebase --autostash -X theirs
             n=$((n+1))
             sleep 2
           done
