@@ -32,38 +32,41 @@ jobs:
       - name: Install deps
         run: npm ci || npm i --no-audit --no-fund
 
+      # ▼ 修正: ここで“出力”として in_window / def_date を渡す
       - name: Compute JST window
+        id: win
         shell: bash
         run: |
           HM=$((10#$(TZ=Asia/Tokyo date +'%H%M')))
           DEF_DATE=$(TZ=Asia/Tokyo date +'%Y%m%d')
           IN_WINDOW=false
           if [ $HM -ge 730 ] && [ $HM -le 2200 ]; then IN_WINDOW=true; fi
-          echo "JST_NOW=$(TZ=Asia/Tokyo date +'%Y-%m-%d %H:%M:%S')" | tee -a $GITHUB_ENV
-          echo "IN_WINDOW=$IN_WINDOW" | tee -a $GITHUB_ENV
-          echo "DEF_DATE=$DEF_DATE"   | tee -a $GITHUB_ENV
-          echo "PIDS=${{ inputs.pids || '01,02,03,04,05,06,07,08,09,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24' }}" | tee -a $GITHUB_ENV
+          echo "JST_NOW=$(TZ=Asia/Tokyo date +'%Y-%m-%d %H:%M:%S')"
+          echo "IN_WINDOW=$IN_WINDOW"
+          echo "DEF_DATE=$DEF_DATE"
+          echo "in_window=$IN_WINDOW" >> "$GITHUB_OUTPUT"
+          echo "def_date=$DEF_DATE"   >> "$GITHUB_OUTPUT"
 
-      - name: Early exit when out of window
-        if: ${{ !inputs.force && env.IN_WINDOW != 'true' }}
-        run: |
-          echo "Out of window (JST 07:30–22:00 以外)。終了します。"
-          exit 0
-
+      # ▼ 修正: 以降の実行可否は steps.win.outputs.in_window / inputs.force で判定
       - name: Resolve inputs (DATE / PIDS / RACES mode)
+        if: ${{ inputs.force == '1' || steps.win.outputs.in_window == 'true' }}
         shell: bash
         run: |
           DATE="${{ inputs.date }}"
-          if [ -z "$DATE" ]; then DATE="$DEF_DATE"; fi
+          if [ -z "$DATE" ]; then DATE="${{ steps.win.outputs.def_date }}"; fi
+          PIDS="${{ inputs.pids || '01,02,03,04,05,06,07,08,09,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24' }}"
           echo "DATE=$DATE" | tee -a $GITHUB_ENV
+          echo "PIDS=$PIDS" | tee -a $GITHUB_ENV
           echo "Resolved: DATE=$DATE PIDS=$PIDS RACES=AUTO_T15"
 
       - name: Run direct exhibition crawler (AUTO_T15)
+        if: ${{ inputs.force == '1' || steps.win.outputs.in_window == 'true' }}
         shell: bash
         run: |
           node scripts/fetch-exhibition-direct.js "$DATE" "$PIDS" auto --skip-existing
 
       - name: Commit & push results
+        if: ${{ inputs.force == '1' || steps.win.outputs.in_window == 'true' }}
         shell: bash
         run: |
           git config user.name  "github-actions[bot]"
@@ -76,3 +79,8 @@ jobs:
           else
             echo "No changes."
           fi
+
+      # 窓外だったときのログだけ残す（任意）
+      - name: Skip (out of window)
+        if: ${{ inputs.force != '1' && steps.win.outputs.in_window != 'true' }}
+        run: echo "Out of window (JST 07:30–22:00 以外) — skipped."
