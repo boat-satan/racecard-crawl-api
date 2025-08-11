@@ -9,7 +9,7 @@ on:
         required: false
         default: "today"
       pid:
-        description: "TARGET_PID: ALL | 02 | カンマ区切り（既定: ALL）"
+        description: "TARGET_PID: ALL | 02 | 場名 | カンマ区切り（既定: ALL）"
         required: false
         default: "ALL"
       race:
@@ -37,6 +37,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -58,27 +59,42 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config pull.rebase true
 
-      # 1) 出走表をクロール
+      # === ここで 'today' を必ず YYYYMMDD に解決（UTC→JSTでもOKならTZ=Asia/Tokyoに）
+      - name: Resolve DATE (normalize)
+        run: |
+          set -euo pipefail
+          IN="${{ inputs.date || 'today' }}"
+          if [ -z "$IN" ] || [ "$IN" = "today" ]; then
+            DATE=$(TZ=Asia/Tokyo date +'%Y%m%d')
+          else
+            DATE="${IN//-/}"  # 2025-08-10 -> 20250810
+          fi
+          echo "DATE=$DATE" >> "$GITHUB_ENV"
+          echo "TARGET_PID=${{ inputs.pid  || 'ALL' }}"   >> "$GITHUB_ENV"
+          echo "TARGET_RACE=${{ inputs.race || 'ALL' }}"  >> "$GITHUB_ENV"
+          echo "STATS_DELAY_MS=${{ inputs.delayMs || '3000' }}" >> "$GITHUB_ENV"
+          echo "FRESH_HOURS=${{ inputs.freshHours || '12' }}"   >> "$GITHUB_ENV"
+          echo "Resolved DATE=$DATE"
+
+      # 1) 出走表クロール（フィルタはそのまま）
       - name: Run crawler (programs)
         env:
-          TARGET_DATE: ${{ inputs.date || 'today' }}
-          TARGET_PID:  ${{ inputs.pid  || 'ALL' }}
-          TARGET_RACE: ${{ inputs.race || 'ALL' }}
+          TARGET_DATE: ${{ env.DATE }}          # ← 正規化したDATEを渡す
+          TARGET_PID:  ${{ env.TARGET_PID }}
+          TARGET_RACE: ${{ env.TARGET_RACE }}
         run: node scripts/crawl.js
 
-      # 2) 出走表だけ先に commit & push（途中で stats 失敗しても出走表は残す）
+      # 2) 出走表を先に commit & push（競合時はrebaseして再試行）
       - name: Commit & Push programs first
         run: |
           set -e
-          git add public/programs public/programs-slim || true
+          git add -A
           if git diff --cached --quiet; then
             echo "No program changes to commit."
           else
-            DATE_VAL="${{ inputs.date || 'today' }}"
-            git commit -m "Update programs (${DATE_VAL}) [skip ci]"
+            git commit -m "Update programs (${DATE}) [skip ci]"
             n=0
-            until [ $n -ge 5 ]
-            do
+            until [ $n -ge 5 ]; do
               if git push; then
                 echo "Pushed programs successfully."
                 break
@@ -90,140 +106,85 @@ jobs:
             done
           fi
 
-      # 3) 出走表から登録番号を収集（ALL指定を考慮）
+      # 3) 出走表から登録番号を抽出（DATEは必ずYYYYMMDDになっている）
       - name: Collect racer numbers from programs
-        id: collect
-        env:
-          IN_DATE: ${{ inputs.date || 'today' }}
-          IN_PID:  ${{ inputs.pid  || 'ALL' }}
-          IN_RACE: ${{ inputs.race || 'ALL' }}
         run: |
           set -euo pipefail
-
-          # 日付正規化（JST）
-          if [ -z "$IN_DATE" ] || [ "$IN_DATE" = "today" ]; then
-            DATE=$(TZ=Asia/Tokyo date +'%Y%m%d')
-          else
-            DATE="${IN_DATE//-/}"
-          fi
-          echo "DATE=$DATE" | tee -a $GITHUB_ENV
-
-          # PID/RACE 正規化
-          PID_FILTER="$IN_PID"
-          RACE_FILTER="$IN_RACE"
-
           node -e '
-            const fs=require("fs");
-            const path=require("path");
-            const DATE=process.env.DATE;
-            const PIDF=process.env.PID_FILTER || "ALL";
-            const RF=process.env.RACE_FILTER || "ALL";
-
-            function pad2(n){ return String(n).padStart(2,"0"); }
-            function listDirs(p){ return fs.existsSync(p)? fs.readdirSync(p).filter(f=>fs.statSync(path.join(p,f)).isDirectory()):[]; }
-            function listFiles(p){ return fs.existsSync(p)? fs.readdirSync(p).filter(f=>fs.statSync(path.join(p,f)).isFile()):[]; }
-
-            const roots = [
-              path.join("public","programs","v2",DATE),
-              path.join("public","programs-slim","v2",DATE),
-            ].filter(p=>fs.existsSync(p));
-
-            if(roots.length===0){
-              console.error("No programs directory for date:", DATE);
-              process.exit(0);
-            }
-
-            // どの PID を対象にするか
-            let pids=[];
-            if (PIDF==="ALL") {
-              const s=new Set();
-              for(const r of roots){ for(const d of listDirs(r)){ if(/^\d{2}$/.test(d)) s.add(d); } }
-              pids=[...s].sort();
-            } else {
-              const s=new Set();
-              PIDF.split(",").map(sv=>sv.trim()).filter(Boolean).forEach(v=>{
-                const m=v.match(/^\d+$/)? pad2(v) : v; // 最低限: 数字のみ→2桁
-                s.add(m);
-              });
-              pids=[...s];
-            }
-
-            // どの RACE を対象にするか
-            let races=[];
-            if (RF==="ALL"){
-              races = Array.from({length:12},(_,i)=>`${i+1}R`);
-            } else {
-              const s=new Set();
-              RF.split(",").map(sv=>sv.trim()).filter(Boolean).forEach(v=>{
-                const n=String(v).toUpperCase().replace(/[^0-9]/g,"");
-                if(n && Number(n)>=1 && Number(n)<=12) s.add(`${Number(n)}R`);
-              });
-              races=[...s];
-            }
-
-            const regSet=new Set();
-            for(const pid of pids){
-              for(const race of races){
-                const candidates = roots.map(root=>path.join(root,pid,`${race}.json`));
-                const p = candidates.find(fp=>fs.existsSync(fp));
-                if(!p) continue;
+            const fs = require("fs");
+            const path = require("path");
+            const root = process.cwd();
+            const DATE = process.env.DATE;
+            const dir = path.join(root, "public", "programs", "v2", DATE);
+            function walk(p){
+              if(!fs.existsSync(p)) return [];
+              const st = fs.statSync(p);
+              if(st.isFile() && p.endsWith(".json")){
                 try{
-                  const j=JSON.parse(fs.readFileSync(p,"utf8"));
-                  const arr = j.entries || j.boats || [];
-                  for(const e of arr){
-                    const n = Number(e.number ?? e.racer_number ?? e.id);
-                    if(n) regSet.add(n);
-                  }
-                }catch(e){ /* ignore */ }
+                  const j = JSON.parse(fs.readFileSync(p, "utf8"));
+                  const entries = j.entries || j.boats || [];
+                  return entries.map(e => Number(e.number ?? e.racer_number ?? e.id)).filter(Boolean);
+                }catch{ return []; }
               }
+              if(st.isDirectory()){
+                return fs.readdirSync(p).flatMap(n => walk(path.join(p,n)));
+              }
+              return [];
             }
-
-            const regs=[...regSet].sort((a,b)=>a-b);
-            fs.writeFileSync("racers.txt", regs.join("\n"));
-            console.log("RACERS:", regs.length);
+            const nums = Array.from(new Set(walk(dir))).sort((a,b)=>a-b);
+            fs.writeFileSync("racers.list", nums.join("\n") + "\n", "utf8");
+            console.log("RACERS:", nums.length);
           '
 
-          echo "Collected racers:"
-          head -n 50 racers.txt || true
-          echo "RACERS_COUNT=$(wc -l < racers.txt || echo 0)" | tee -a $GITHUB_ENV
-
-      # 4) スタッツを10件ごとに取得 → その都度 commit & push
+      # 4) スタッツを10件ごとに取得→commit & push
       - name: Fetch stats in chunks (commit & push every 10)
-        if: env.RACERS_COUNT != '0'
         env:
-          STATS_DELAY_MS: ${{ inputs.delayMs || '3000' }}
-          FRESH_HOURS:    ${{ inputs.freshHours || '12' }}
+          STATS_DELAY_MS: ${{ env.STATS_DELAY_MS }}
+          FRESH_HOURS:    ${{ env.FRESH_HOURS }}
         run: |
           set -euo pipefail
+          if [ ! -s racers.list ]; then
+            echo "No racers found. Skipping stats."
+            exit 0
+          fi
 
-          CHUNK=10
-          i=0
-          total=$(wc -l < racers.txt)
-          while :; do
-            start=$((i*CHUNK+1))
-            [ $start -le $total ] || break
-            end=$((start+CHUNK-1))
-            if [ $end -gt $total ]; then end=$total; fi
+          mapfile -t ALL < racers.list
+          total=${#ALL[@]}
+          echo "Total racers: $total"
 
-            echo "Processing racers $start..$end / $total"
+          chunk=0
+          start=0
+          while [ $start -lt $total ]; do
+            end=$(( start + 10 ))
+            [ $end -gt $total ] && end=$total
 
-            RACERS=$(sed -n "${start},${end}p" racers.txt | paste -sd, -)
-            export RACERS
+            # chunk 配列をカンマ連結
+            PART=("${ALL[@]:$start:$((end-start))}")
+            RACERS_CSV=$(IFS=, ; echo "${PART[*]}")
 
-            # 取得（既存 fetch-stats.js をそのまま利用）
-            STATS_OVERWRITE="0" node scripts/fetch-stats.js
+            echo "Chunk $((chunk+1)): $RACERS_CSV"
 
-            # その場で commit & push
-            git add public/stats/v2/racers || true
+            # 取得（RACERSにだけ絞って渡す。他フィルタはinputsを継承）
+            TARGET_DATE="${DATE}" \
+            TARGET_PID="${{ env.TARGET_PID }}" \
+            TARGET_RACE="${{ env.TARGET_RACE }}" \
+            RACERS="${RACERS_CSV}" \
+            STATS_BATCH="" \
+            STATS_DELAY_MS="${STATS_DELAY_MS}" \
+            FRESH_HOURS="${FRESH_HOURS}" \
+            STATS_OVERWRITE="0" \
+              node scripts/fetch-stats.js
+
+            # このチャンクだけ先に commit & push
+            git add -A
             if git diff --cached --quiet; then
               echo "No stats changes in this chunk."
             else
-              git commit -m "Update racer stats chunk ${i} [skip ci]" || true
+              git commit -m "Update racer stats ${DATE} (chunk $((chunk+1))) [skip ci]"
               n=0
-              until [ $n -ge 5 ]
-              do
+              until [ $n -ge 5 ]; do
                 if git push; then
-                  echo "Pushed stats chunk ${i}."
+                  echo "Pushed stats (chunk $((chunk+1)))."
                   break
                 fi
                 echo "Push rejected. Rebasing and retrying... ($((n+1))/5)"
@@ -233,10 +194,11 @@ jobs:
               done
             fi
 
-            i=$((i+1))
+            start=$end
+            chunk=$((chunk+1))
           done
 
-      # 5) 最後に「差分が残っていれば」念のためまとめて push（基本は何も残らない想定）
+      # 5) 念のための最終 commit & push（差分があれば）
       - name: Final commit & push (if any)
         run: |
           set -e
@@ -245,11 +207,9 @@ jobs:
             echo "No remaining changes."
             exit 0
           fi
-          DATE_VAL="${{ inputs.date || 'today' }}"
-          git commit -m "Final updates (${DATE_VAL}) [skip ci]"
+          git commit -m "Finalize crawl & stats (${DATE}) [skip ci]"
           n=0
-          until [ $n -ge 5 ]
-          do
+          until [ $n -ge 5 ]; do
             if git push; then
               echo "Pushed final changes."
               exit 0
