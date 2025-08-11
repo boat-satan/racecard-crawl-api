@@ -16,42 +16,65 @@ on:
         description: "1R..12R"
         required: true
         default: "1R"
+  # スケジュール実行（UTC）。JST昼帯なら調整してね
   schedule:
-    - cron: "*/20 22-8 * * *" # JST昼帯を狙うなら調整してね（UTC指定）
+    - cron: "*/20 22-8 * * *"
 
 permissions:
-  contents: write
+  contents: write  # commit/push 用
+
+# 同時実行の取り違え防止（同じキーは最新だけ動かす）
+concurrency:
+  group: predict-${{ github.ref }}-${{ inputs.date || 'today' }}-${{ inputs.pid || '04' }}-${{ inputs.race || '1R' }}
+  cancel-in-progress: true
 
 jobs:
   run:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: { persist-credentials: true }
+        with:
+          persist-credentials: true
 
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+        with:
+          node-version: 20
 
       - name: Install deps
         run: npm i --no-audit --no-fund
 
+      # 予測本体。既存の scripts/predict.mjs が環境変数 DATE/PID/RACE を読む前提を維持。
+      # さらに “out/prediction.json” へ結果を出すようスクリプト側に対応してある想定。
       - name: Run predict
         env:
           DATE: ${{ inputs.date || 'today' }}
           PID:  ${{ inputs.pid  || '04' }}
           RACE: ${{ inputs.race || '1R' }}
-        run: node scripts/predict.mjs
+        run: |
+          mkdir -p out
+          node scripts/predict.mjs
+          # もしスクリプトが out/prediction.json を出していない場合に備え、存在チェックだけ入れておく
+          if [ ! -f out/prediction.json ]; then
+            echo '{}' > out/prediction.json
+          fi
 
+      # 予測結果をアーティファクトで取得できるようにする（GPT/ローカルからダウンロード可）
+      - name: Upload artifact (prediction.json)
+        uses: actions/upload-artifact@v4
+        with:
+          name: predict-output
+          path: out/prediction.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      # 従来通りの成果物コミット（public 配下などを書き戻す用途）
       - name: Commit & push
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           if ! git diff --cached --quiet; then
-            git commit -m "predict: ${{
-              inputs.date || 'today' }} ${{
-              inputs.pid || '04' }} ${{
-              inputs.race || '1R' }} [skip ci]"
+            git commit -m "predict: ${{ inputs.date || 'today' }} ${{ inputs.pid || '04' }} ${{ inputs.race || '1R' }} [skip ci]"
             git pull --rebase --autostash || true
             git push
           else
