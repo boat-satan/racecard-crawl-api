@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "weights": {
+    "base": 0.0,
+
+    "course_bias": {
+      "1": 0.10,
+      "2": 0.00,
+      "3": 0.02,
+      "4": 0.05,
+      "5": -0.02,
+      "6": -0.08
+    },
+
+    "start_adv_per_0p01": 0.015,          // 予測STが0.01速いごとの加点
+    "ex_time_rank_bonus": { "1": 0.06, "2": 0.03, "3": 0.01 },
+
+    "motor_top2": 0.05,                   // 2連率パーセンタイル上位域の係数
+    "motor_top3": 0.03,
+    "boat_top2": 0.03,
+    "boat_top3": 0.02,
+
+    "f_count_penalty": { "1": -0.04, "2": -0.08, "3plus": -0.12 },
+
+    "weather": {
+      "stabilizer_on": 0.02,
+      "wave_per_0p01m": -0.02,            // 波高0.01mごと
+      "wind_per_mps": {
+        "head": 0.01,                     // 追い風/向かい風は実況側表現に合わせて調整
+        "tail": -0.01,
+        "cross": -0.005
+      }
+    },
+
+    "venue_adjust": {
+      "04": { "in_trust": -0.03, "dash_plus": 0.02 },  // 平和島例
+      "02": { "in_trust": -0.02, "sashi_plus": 0.02 }  // 戸田例
+    }
+  },
+
+  "bounds": { "min": -0.6, "max": 0.6 },   // 各特徴の寄与上限（安全枠）
+  "learning": { "lr": 0.02, "decay": 0.995, "clip": 0.05, "min_support": 30 }
+}
