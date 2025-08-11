@@ -2,272 +2,272 @@
   "params": {
     "DATE": "20250811",
     "PID": "01",
-    "RACE": "1R"
+    "RACE": "2R"
   },
-  "source": "public/integrated/v1/20250811/01/1R.json",
+  "source": "public/integrated/v1/20250811/01/2R.json",
   "weather": {
-    "weather": "曇",
-    "temperature": 29,
-    "windSpeed": 2,
+    "weather": "晴",
+    "temperature": 30,
+    "windSpeed": 3,
     "windDirection": "西南西",
     "waterTemperature": 29,
-    "waveHeight": 0.01,
+    "waveHeight": 0.02,
     "stabilizer": false
   },
   "boats": [
     {
       "lane": 1,
-      "number": 3652,
-      "name": "森下 勇",
+      "number": 5006,
+      "name": "久保原 秀人",
       "startCourse": 1,
       "dash": false,
-      "tenjiTime": 6.76,
-      "tenjiRank": 5,
-      "avgST": 0.21,
-      "tenjiST": 0.09,
-      "predictedST": 0.15,
-      "realClass": {
-        "label": "B1中位",
-        "score": 4
-      },
-      "courseRates": {
-        "winRate": 40,
-        "top2Rate": 53.3
-      },
-      "motor2": 32.89,
-      "age": 51,
-      "natWin": 3.44,
-      "locWin": 4.17,
-      "upsetScore": 25,
-      "perf": {
-        "turnSkill": 0.5481666666666667,
-        "straightSkill": 0.46985714285714286
-      },
-      "baseScore": 12.5
-    },
-    {
-      "lane": 2,
-      "number": 3538,
-      "name": "菊池 峰晴",
-      "startCourse": 2,
-      "dash": false,
-      "tenjiTime": 6.67,
+      "tenjiTime": 6.7,
       "tenjiRank": 3,
-      "avgST": 0.18,
-      "tenjiST": 0.09,
-      "predictedST": 0.14,
-      "realClass": {
-        "label": "B1中位",
-        "score": 3
-      },
-      "courseRates": {
-        "winRate": 11.1,
-        "top2Rate": 27.8
-      },
-      "motor2": 33.33,
-      "age": 57,
-      "natWin": 4.91,
-      "locWin": 5.49,
-      "upsetScore": 0,
-      "perf": {
-        "turnSkill": 0.5555,
-        "straightSkill": 0.47614285714285715
-      },
-      "baseScore": 12.9
-    },
-    {
-      "lane": 3,
-      "number": 3947,
-      "name": "寺本 昇平",
-      "startCourse": 3,
-      "dash": false,
-      "tenjiTime": 6.62,
-      "tenjiRank": 1,
-      "avgST": 0.17,
-      "tenjiST": 0.22,
-      "predictedST": 0.19,
-      "realClass": {
-        "label": "B1上位",
-        "score": 5
-      },
-      "courseRates": {
-        "winRate": 0,
-        "top2Rate": 29.4
-      },
-      "motor2": 42.2,
-      "age": 49,
-      "natWin": 4.53,
-      "locWin": 4.98,
-      "upsetScore": 20,
-      "perf": {
-        "turnSkill": 0.8,
-        "straightSkill": 0.7028571428571428
-      },
-      "baseScore": 20.2
-    },
-    {
-      "lane": 4,
-      "number": 5216,
-      "name": "長谷川 晴哉",
-      "startCourse": 4,
-      "dash": true,
-      "tenjiTime": 6.64,
-      "tenjiRank": 2,
       "avgST": 0.16,
-      "tenjiST": 0.08,
-      "predictedST": 0.1,
+      "tenjiST": 0.14,
+      "predictedST": 0.15,
       "realClass": {
         "label": "A2",
         "score": 7
       },
       "courseRates": {
-        "winRate": 22.2,
-        "top2Rate": 44.4
+        "winRate": 50,
+        "top2Rate": 64.3
       },
-      "motor2": 30.08,
-      "age": 25,
-      "natWin": 6.08,
-      "locWin": 5.81,
-      "upsetScore": 50,
+      "motor2": 28.86,
+      "age": 28,
+      "natWin": 4.49,
+      "locWin": 4.59,
+      "upsetScore": 0,
       "perf": {
-        "turnSkill": 0.6013333333333333,
-        "straightSkill": 0.5297142857142857
+        "turnSkill": 0.481,
+        "straightSkill": 0.41228571428571426
       },
-      "baseScore": 21.8
+      "baseScore": 20.5
     },
     {
-      "lane": 5,
-      "number": 3653,
-      "name": "品川 賢次",
-      "startCourse": 5,
-      "dash": true,
-      "tenjiTime": 6.72,
-      "tenjiRank": 4,
-      "avgST": 0.19,
-      "tenjiST": 0.09,
-      "predictedST": 0.11,
+      "lane": 2,
+      "number": 4539,
+      "name": "金子 賢志",
+      "startCourse": 2,
+      "dash": false,
+      "tenjiTime": 6.65,
+      "tenjiRank": 1,
+      "avgST": 0.13,
+      "tenjiST": 0.05,
+      "predictedST": 0.1,
       "realClass": {
-        "label": "B1上位",
-        "score": 5
+        "label": "A1",
+        "score": 9
       },
       "courseRates": {
-        "winRate": 0,
-        "top2Rate": 15.8
+        "winRate": 20,
+        "top2Rate": 53.3
       },
-      "motor2": 36.91,
-      "age": 51,
-      "natWin": 4.05,
-      "locWin": 4.55,
-      "upsetScore": 10,
+      "motor2": 45.45,
+      "age": 34,
+      "natWin": 6.17,
+      "locWin": 6.24,
+      "upsetScore": 20,
       "perf": {
-        "turnSkill": 0.6151666666666666,
-        "straightSkill": 0.5272857142857142
+        "turnSkill": 0.8,
+        "straightSkill": 0.7492857142857143
       },
-      "baseScore": 16.1
+      "baseScore": 28.5
     },
     {
-      "lane": 6,
-      "number": 5402,
-      "name": "塚越 陸斗",
-      "startCourse": 6,
-      "dash": true,
-      "tenjiTime": 6.78,
+      "lane": 3,
+      "number": 3827,
+      "name": "今泉 徹",
+      "startCourse": 3,
+      "dash": false,
+      "tenjiTime": 6.8,
       "tenjiRank": 6,
-      "avgST": 0,
-      "tenjiST": 0.27,
-      "predictedST": 0.27,
+      "avgST": 0.17,
+      "tenjiST": 0.02,
+      "predictedST": 0.1,
       "realClass": {
-        "label": "B1上位",
-        "score": 5
+        "label": "B1中位",
+        "score": 3
       },
       "courseRates": {
         "winRate": 0,
         "top2Rate": 0
       },
-      "motor2": 45.19,
-      "age": 22,
-      "natWin": 1.26,
-      "locWin": 1.43,
+      "motor2": 29.63,
+      "age": 52,
+      "natWin": 4.11,
+      "locWin": 4.45,
+      "upsetScore": 0,
+      "perf": {
+        "turnSkill": 0.4938333333333333,
+        "straightSkill": 0.42328571428571427
+      },
+      "baseScore": 9
+    },
+    {
+      "lane": 4,
+      "number": 4645,
+      "name": "上村 純一",
+      "startCourse": 4,
+      "dash": true,
+      "tenjiTime": 6.67,
+      "tenjiRank": 2,
+      "avgST": 0.15,
+      "tenjiST": 0.16,
+      "predictedST": 0.12,
+      "realClass": {
+        "label": "A2",
+        "score": 8
+      },
+      "courseRates": {
+        "winRate": 6.3,
+        "top2Rate": 31.3
+      },
+      "motor2": 40,
+      "age": 45,
+      "natWin": 6.38,
+      "locWin": 6.42,
       "upsetScore": 50,
       "perf": {
-        "turnSkill": 0.7531666666666667,
-        "straightSkill": 0.7455714285714286
+        "turnSkill": 0.7666666666666666,
+        "straightSkill": 0.6714285714285714
       },
-      "baseScore": 14.5
+      "baseScore": 24.8
+    },
+    {
+      "lane": 5,
+      "number": 5070,
+      "name": "中島 航",
+      "startCourse": 5,
+      "dash": true,
+      "tenjiTime": 6.75,
+      "tenjiRank": 5,
+      "avgST": 0.18,
+      "tenjiST": 0.11,
+      "predictedST": 0.12,
+      "realClass": {
+        "label": "B1中位",
+        "score": 3
+      },
+      "courseRates": {
+        "winRate": 0,
+        "top2Rate": 5
+      },
+      "motor2": 27.78,
+      "age": 31,
+      "natWin": 4.41,
+      "locWin": 5.06,
+      "upsetScore": 10,
+      "perf": {
+        "turnSkill": 0.463,
+        "straightSkill": 0.39685714285714285
+      },
+      "baseScore": 10
+    },
+    {
+      "lane": 6,
+      "number": 5390,
+      "name": "高橋 涼夏",
+      "startCourse": 6,
+      "dash": true,
+      "tenjiTime": 6.7,
+      "tenjiRank": 4,
+      "avgST": 0.19,
+      "tenjiST": 0.08,
+      "predictedST": 0.11,
+      "realClass": {
+        "label": "B1下位",
+        "score": 1
+      },
+      "courseRates": {
+        "winRate": 0,
+        "top2Rate": 0
+      },
+      "motor2": 34.19,
+      "age": 17,
+      "natWin": 1.42,
+      "locWin": 1.29,
+      "upsetScore": 10,
+      "perf": {
+        "turnSkill": 0.5698333333333333,
+        "straightSkill": 0.4884285714285714
+      },
+      "baseScore": 7.8
     }
   ],
   "slitOrder": [
     {
-      "lane": 4,
-      "adjustedST": 0.085
-    },
-    {
-      "lane": 5,
+      "lane": 6,
       "adjustedST": 0.095
     },
     {
       "lane": 2,
-      "adjustedST": 0.14
+      "adjustedST": 0.1
+    },
+    {
+      "lane": 3,
+      "adjustedST": 0.1
+    },
+    {
+      "lane": 4,
+      "adjustedST": 0.105
+    },
+    {
+      "lane": 5,
+      "adjustedST": 0.105
     },
     {
       "lane": 1,
       "adjustedST": 0.15
-    },
-    {
-      "lane": 3,
-      "adjustedST": 0.19
-    },
-    {
-      "lane": 6,
-      "adjustedST": 0.255
     }
   ],
-  "attackType": "fullMakuri",
+  "attackType": "none",
   "startOrder": [
     {
-      "lane": 4,
+      "lane": 6,
       "pos": 1
     },
     {
-      "lane": 5,
+      "lane": 2,
       "pos": 2
     },
     {
-      "lane": 2,
+      "lane": 3,
       "pos": 3
     },
     {
-      "lane": 1,
+      "lane": 4,
       "pos": 4
     },
     {
-      "lane": 3,
+      "lane": 5,
       "pos": 5
     },
     {
-      "lane": 6,
+      "lane": 1,
       "pos": 6
     }
   ],
   "goalOrder": [
     {
-      "lane": 3,
+      "lane": 2,
       "pos": 1
     },
     {
-      "lane": 6,
+      "lane": 4,
       "pos": 2
     },
     {
-      "lane": 5,
+      "lane": 6,
       "pos": 3
     },
     {
-      "lane": 4,
+      "lane": 3,
       "pos": 4
     },
     {
-      "lane": 2,
+      "lane": 5,
       "pos": 5
     },
     {
@@ -278,41 +278,37 @@
   "scenarios": [
     {
       "first": [
-        4
-      ],
-      "second": [
-        3,
-        5,
-        2,
         1
       ],
-      "third": [
-        1,
+      "second": [
         2,
-        3,
+        3
+      ],
+      "third": [
+        4,
         5,
         6
       ],
-      "prob": 0.35
+      "prob": 0.22
     },
     {
       "first": [
-        3
+        2
       ],
       "second": [
-        6
+        4
       ],
       "third": [
-        5
+        6
       ],
       "prob": 0.18
     },
     {
       "first": [
-        4
+        6
       ],
       "second": [
-        5
+        2
       ],
       "third": [
         1,
@@ -328,94 +324,59 @@
   "bets": {
     "main": [
       [
-        4,
-        3,
-        1
-      ],
-      [
-        4,
-        3,
-        2
-      ],
-      [
-        4,
-        3,
-        5
-      ],
-      [
-        4,
-        3,
-        6
-      ],
-      [
-        4,
-        5,
-        1
-      ],
-      [
-        4,
-        5,
-        2
-      ],
-      [
-        4,
-        5,
-        3
-      ],
-      [
-        4,
-        5,
-        6
-      ],
-      [
-        4,
+        1,
         2,
-        1
+        4
       ],
       [
-        4,
-        2,
-        3
-      ],
-      [
-        4,
+        1,
         2,
         5
       ],
       [
-        4,
+        1,
         2,
         6
       ],
       [
-        4,
         1,
-        2
+        3,
+        4
       ],
       [
-        4,
         1,
-        3
-      ],
-      [
-        4,
-        1,
+        3,
         5
       ],
       [
-        4,
         1,
+        3,
         6
       ],
       [
-        3,
+        2,
+        4,
+        6
+      ],
+      [
         6,
-        5
+        2,
+        1
       ],
       [
-        4,
-        5,
-        1
+        6,
+        2,
+        3
+      ],
+      [
+        6,
+        2,
+        4
+      ],
+      [
+        6,
+        2,
+        5
       ]
     ],
     "ana": []
