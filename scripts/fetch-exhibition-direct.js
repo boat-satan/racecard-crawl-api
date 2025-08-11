@@ -87,12 +87,10 @@ if (RACES.length === 0) usageAndExit();
 
 log(`date=${DATE} pids=${PIDS.join(",")} races=${RACES.join(",")}`);
 
-// ---------- helpers: 締切読取（柔軟にキーを探索） ----------
+// ---------- helpers: 締切読取 ----------
 function toJstDate(dateYYYYMMDD, hhmm) {
-  // hhmm: "HH:MM"
   return new Date(`${dateYYYYMMDD.slice(0,4)}-${dateYYYYMMDD.slice(4,6)}-${dateYYYYMMDD.slice(6,8)}T${hhmm}:00+09:00`);
 }
-
 function tryParseTimeString(s) {
   if (!s || typeof s !== "string") return null;
   const m = s.match(/(\d{1,2}):(\d{2})/);
@@ -101,7 +99,6 @@ function tryParseTimeString(s) {
   const mm = m[2];
   return `${hh}:${mm}`;
 }
-
 async function loadRaceDeadlineHHMM(date, pid, raceNo) {
   const relPaths = [
     path.join("public", "programs", "v2", date, pid, `${raceNo}R.json`),
@@ -138,10 +135,8 @@ async function loadRaceDeadlineHHMM(date, pid, raceNo) {
   }
   return null;
 }
-
 async function pickRacesAuto(date, pid) {
-  const now = Date.now();
-  const nowMin = Math.floor(now / 60000);
+  const nowMin = Math.floor(Date.now() / 60000);
   const out = [];
   for (let r = 1; r <= 12; r++) {
     const hhmm = await loadRaceDeadlineHHMM(date, pid, r);
@@ -153,50 +148,83 @@ async function pickRacesAuto(date, pid) {
   return out;
 }
 
-// ---------- helpers: weather 取得（最小追加） ----------
+// ---------- helpers: weather 取得（強化版） ----------
 function textOf(el){ return (el.text ? el.text() : String(el)).replace(/\s+/g,' ').trim(); }
 function pickNumber(s){
-  const m = String(s||"").replace(/,/g,'').match(/-?\d+(?:\.\d+)?/);
+  if (s == null) return null;
+  const t = String(s).replace(/,/g,'').trim();
+  const m = t.match(/-?\d+(?:\.\d+)?/);
   return m ? Number(m[0]) : null;
+}
+function byLabel($root, labels){
+  for(const lb of labels){
+    // dt/dd 形式
+    const dd = $root.find(`dt:contains("${lb}")`).first().next("dd");
+    if (dd.length) return textOf(dd);
+    // ラベル直後の兄弟
+    const v1 = $root.find(`*:contains("${lb}")`).filter((_,e)=>/^(DT|TH|SPAN|DIV|P)$/i.test(e.tagName||""))
+      .first().next().text();
+    if (v1 && v1.trim()) return v1.trim();
+  }
+  return "";
+}
+function parseWaveNumber(raw){
+  if (!raw) return null;
+  const txt = String(raw);
+  const cm = txt.match(/([-0-9.]+)\s*cm/);
+  if (cm) return Number(cm[1]) / 100;
+  const m = txt.match(/([-0-9.]+)\s*m/);
+  if (m) return Number(m[1]);
+  return pickNumber(txt);
+}
+function parseWindDirFromText(t){
+  if (!t) return null;
+  const s = String(t);
+  const m = s.match(/北東|北西|南東|南西|北|南|東|西/);
+  return m ? m[0] : null;
 }
 
 function parseWeather($){
-  const root = $('.weather1, .weather1_body, .is-weather, [class*="weather"]').first();
+  // 候補コンテナを広めに
+  const root = $('.weather1, .weather1_body, .is-weather, #weather, .weather, .table1, .weather1_bodyUnit').first();
   const bodyText = textOf($('body'));
+  const rootText = textOf(root);
 
-  // 天気（画像alt優先→テキスト→ボディ探索）
+  // 天気: img alt / テキスト / body中
   let weather =
-    root.find('.weather1_bodyUnitLabel:contains("天気")').next().find('img[alt]').attr('alt') ||
-    root.find('.weather1_bodyUnitLabel:contains("天気")').next().text().trim() ||
-    root.find('img[alt]').filter((_,img)=>/晴|曇|雨|雪|雷/.test($(img).attr('alt')||"")).attr('alt') ||
-    null;
+    root.find('img[alt]').filter((_,img)=>/(晴|曇|雨|雪|雷)/.test($(img).attr('alt')||"")).attr('alt') ||
+    byLabel(root, ["天気","天候"]) ||
+    (bodyText.match(/(晴|曇|雨|雪|雷)/)?.[1] ?? null);
 
-  // 気温 / 水温 / 波高
-  const tempText  = root.find('.weather1_bodyUnitLabel:contains("気温")').next().text()
-                 || bodyText.match(/気温[^0-9\-]*([-0-9.]+)\s*℃/)?.[1] || "";
-  const wtempText = root.find('.weather1_bodyUnitLabel:contains("水温")').next().text()
-                 || bodyText.match(/水温[^0-9\-]*([-0-9.]+)\s*℃/)?.[1] || "";
-  const waveText  = root.find('.weather1_bodyUnitLabel:contains("波高")').next().text()
-                 || bodyText.match(/波高[^0-9\-]*([-0-9.]+)\s*m/)?.[1] || "";
+  // 気温 / 水温
+  const tempText  = byLabel(root, ["気温"])  || (bodyText.match(/気温[^0-9\-]*([-0-9.]+)\s*℃/)?.[0] ?? "");
+  const wtempText = byLabel(root, ["水温"])  || (bodyText.match(/水温[^0-9\-]*([-0-9.]+)\s*℃/)?.[0] ?? "");
 
-  // 風向（画像alt優先→テキスト→ボディ内のalt）
+  // 風速: 「風速」「向かい風3m」など
+  let windSpdText = byLabel(root, ["風速"]);
+  if (!windSpdText) {
+    const m = (rootText.match(/風[^0-9\-]*([-0-9.]+)\s*m\/?s?/) || bodyText.match(/風[^0-9\-]*([-0-9.]+)\s*m\/?s?/i));
+    windSpdText = m ? m[0] : "";
+  }
+
+  // 風向: img alt/title or テキスト中（北東など）
   let windDirection =
-    root.find('.weather1_bodyUnitLabel:contains("風向")').next().find('img[alt]').attr('alt') ||
-    root.find('.weather1_bodyUnitLabel:contains("風向")').next().text().trim() ||
-    root.find('img[alt]').filter((_,img)=>/(北|南|東|西|北東|北西|南東|南西)/.test($(img).attr('alt')||"")).attr('alt') ||
+    root.find('img[alt]').filter((_,img)=>/(北|南|東|西)/.test($(img).attr('alt')||"")).attr('alt') ||
+    root.find('img[title]').filter((_,img)=>/(北|南|東|西)/.test($(img).attr('title')||"")).attr('title') ||
+    byLabel(root, ["風向"]) ||
+    parseWindDirFromText(rootText) ||
+    parseWindDirFromText(bodyText) ||
     null;
 
-  // 風速
-  const windSpdText =
-    root.find('.weather1_bodyUnitLabel:contains("風速")').next().text() ||
-    bodyText.match(/風速[^0-9\-]*([-0-9.]+)\s*m\/s?/i)?.[1] || "";
+  // 波高: cm/m 両対応
+  const waveText = byLabel(root, ["波高"]) || (bodyText.match(/波高[^0-9\-]*([-0-9.]+)\s*(?:cm|m)/)?.[0] ?? "");
 
-  // 安定板（ページ全体のテキストから素朴に）
+  // 安定板: ページ全体から素朴に
   const flatBody = bodyText.replace(/\s+/g, "");
   let stabilizer = null;
   if (/安定板/.test(flatBody)) {
     if (/(使用|装着|取り付け)/.test(flatBody)) stabilizer = true;
-    if (/不使用|使用しません/.test(flatBody))     stabilizer = false;
+    if (/不使用|使用しません/.test(flatBody))   stabilizer = false;
   }
 
   return {
@@ -205,7 +233,7 @@ function parseWeather($){
     windSpeed: pickNumber(windSpdText),
     windDirection: windDirection || null,
     waterTemperature: pickNumber(wtempText),
-    waveHeight: pickNumber(waveText),
+    waveHeight: parseWaveNumber(waveText),
     stabilizer
   };
 }
@@ -287,7 +315,7 @@ function parseBeforeinfo(html, { date, pid, raceNo, url }) {
     entries.push({ lane, number, name, weight, tenjiTime, tilt, st, stFlag });
   });
 
-  // ★ 追加: 水面気象を取得
+  // 追加: 水面気象
   const weather = parseWeather($);
 
   return {
@@ -297,14 +325,13 @@ function parseBeforeinfo(html, { date, pid, raceNo, url }) {
     source: url,
     mode: "beforeinfo",
     generatedAt: new Date().toISOString(),
-    weather,          // ★ 追加: 天気/風/水温/波高/安定板
+    weather,
     entries,
   };
 }
 
 async function main() {
   for (const pid of PIDS) {
-    // AUTO 指定なら、締切T-15分を過ぎたレースを自動選別
     let raceList;
     if (RACES.length === 1 && RACES[0] === "auto") {
       raceList = await pickRacesAuto(DATE, pid);
@@ -327,7 +354,6 @@ async function main() {
       try {
         const { url, html } = await fetchBeforeinfo({ date: DATE, pid, raceNo });
         const data = parseBeforeinfo(html, { date: DATE, pid, raceNo, url });
-        // 404やテーブル欠損などで entries が空なら保存しない
         if (!data.entries || data.entries.length === 0) {
           log(`no entries -> skip save: ${DATE}/${pid}/${raceNo}R`);
           continue;
