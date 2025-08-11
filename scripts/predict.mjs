@@ -1,234 +1,403 @@
 // scripts/predict.mjs
-// Node v20 / ESM 最小骨組み：統合JSONを読み → 簡易スコア → 予測JSON/MDを保存
+// Node v20 / ESM
+// 入力: public/integrated/v1/<date>/<pid>/<race>.json（統合データ）
+// 出力: out/prediction.json（中間値フル） / public/predictions/<date>/<pid>/<race>/1R.md（要約）
+// 環境変数: DATE(YYYYMMDD|today) / PID(01..24) / RACE(1R..12R) / SLACK_WEBHOOK_URL(optional)
 
 import fs from "node:fs/promises";
 import fssync from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 
 const ROOT = process.cwd();
 const to2 = (s) => String(s).padStart(2, "0");
-const nowISO = () => new Date().toISOString();
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const rnd = (x, d=2) => Math.round(x * (10**d)) / (10**d);
 
+// --------- 引数/環境変数 ----------
 function pickArg(name, fallback){
-  const val = process.env[name] ?? getCliArg(`--${name.toLowerCase()}`);
-  return (val ?? fallback);
+  const v = process.env[name];
+  return v == null || v === "" ? fallback : v;
 }
-function getCliArg(flag){
-  const i = process.argv.indexOf(flag);
-  return i > -1 ? process.argv[i+1] : undefined;
-}
+let DATE = (pickArg("DATE","today")||"").replace(/-/g,"");
+let PID  = to2(pickArg("PID","04"));
+let RACE = (pickArg("RACE","1R")||"").toUpperCase().replace(/[^\d]/g,"") + "R";
 
-const DATE = (pickArg("DATE","today") || "").replace(/-/g,"");
-const PID  = to2(pickArg("PID","04"));         // 既定: 平和島
-const RACE = (pickArg("RACE","1R") || "").toUpperCase().replace(/[^\d]/g,"") + "R";
-
-const INTEGRATED = path.join(ROOT,"public","integrated","v1", DATE, PID, `${RACE}.json`);
-const OUTDIR     = path.join(ROOT,"public","predictions", DATE, PID);
-const OUTJSON    = path.join(OUTDIR, `${RACE}.json`);
-const OUTMD      = path.join(OUTDIR, `${RACE}.md`);
-const HEURIS     = path.join(ROOT,"rules","heuristics.json");
-
+// --------- 便利系 ----------
 async function ensureDir(p){ await fs.mkdir(p,{recursive:true}); }
-async function readJson(p){ return JSON.parse(await fs.readFile(p,"utf8")); }
-function exists(p){ return fssync.existsSync(p); }
+const readJson = async (p) => JSON.parse(await fs.readFile(p,"utf8"));
+const exists = (p) => fssync.existsSync(p);
+function tryParseST(stStr){
+  if (!stStr) return null;
+  const s = String(stStr).trim();
+  if (s.startsWith("F")) {
+    const n = Number("0." + s.replace(/[F\.]/g,""));
+    return { st: n, f: true };
+  }
+  if (s.startsWith(".")) return { st: Number("0"+s), f: false };
+  const n = Number(s);
+  return isFinite(n) ? { st: n, f: false } : null;
+}
+function asNumber(x){ const n = Number(x); return isFinite(n) ? n : null; }
 
-function pct(n){ return Number.isFinite(n) ? Math.round(n*10)/10 : null; }
-function safeNum(n, d=0){ const v = Number(n); return Number.isFinite(v) ? v : d; }
-
-function baseWinFromStats(entry){
-  const m = entry?.stats?.entryCourse?.matrixSelf;
-  if (m?.winRate != null) return safeNum(m.winRate, 0);
-  const ss = entry?.stats?.entryCourse?.selfSummary;
-  if (ss && ss.starts > 0) return (ss.firstCount/ss.starts)*100;
-  return 0;
+// --------- 1) 統合データの読み込み ----------
+async function loadIntegrated(){
+  const p1 = path.join(ROOT,"public","integrated","v1", DATE, PID, `${RACE}.json`);
+  const p2 = path.join(ROOT,"public","integrated","v1","today", PID, `${RACE}.json`);
+  if (exists(p1)) return { json: await readJson(p1), path: p1 };
+  if (DATE === "today" && exists(p2)) return { json: await readJson(p2), path: p2 };
+  throw new Error(`integrated not found: ${DATE}/${PID}/${RACE}`);
 }
 
-// ざっくり重み（あとで heuristics.json から読み替え）
-const DEFAULT_WEIGHTS = {
-  abs_win_w:        0.55,   // 絶対(自己)勝率
-  avgst_boost_w:    0.20,   // 平均STの良さ補正
-  motor_boat_w:     0.15,   // 機力 (motor/boat 連対率)
-  tenji_w:          0.10,   // 展示 (ST/タイム)
-  wind_in_weak:     0.90,   // 追/向でのイン弱化/強化の係数(場補正で乗算)
-  dash_favor:       1.05,   // ダッシュ有利係数
-  heiwajima_bias:   1.02    // 平和島わずかにイン弱＋中枠加点 (例)
-};
+// --------- 2) 計算関数（あなたがくれた断片を統合） ----------
 
-function directionToCardinal(dirStr){
-  // 「西」「南西」などから大まか方位に正規化
-  if (!dirStr) return null;
-  const s = String(dirStr);
-  if (s.includes("北") && s.includes("東")) return "NE";
-  if (s.includes("北") && s.includes("西")) return "NW";
-  if (s.includes("南") && s.includes("東")) return "SE";
-  if (s.includes("南") && s.includes("西")) return "SW";
-  if (s.includes("北")) return "N";
-  if (s.includes("南")) return "S";
-  if (s.includes("東")) return "E";
-  if (s.includes("西")) return "W";
-  return null;
-}
-
-function scoreEntry(e, heur){
-  const w = heur?.weights ?? DEFAULT_WEIGHTS;
-
-  // 1) 絶対(自己)勝率
-  const absWin = baseWinFromStats(e); // 0..100
-
-  // 2) 平均ST（小さいほど良い → 0.05〜0.20 を 100..0 に線形マップ）
-  const avgST = safeNum(e?.stats?.entryCourse?.avgST, null);
-  let stScore = 0;
-  if (avgST != null){
-    const min=0.05, max=0.20;
-    const cl = Math.max(min, Math.min(max, avgST));
-    stScore = (1 - (cl - min)/(max - min)) * 100; // 0..100
-  }
-
-  // 3) 機力（motor/boat 2連率を素直に平均）
-  const rc = e?.racecard || {};
-  const motor2 = safeNum(rc.motorTop2, 0);
-  const boat2  = safeNum(rc.boatTop2, 0);
-  const mech   = (motor2 + boat2)/2; // 0..100
-
-  // 4) 展示（ST速い・展示タイム短いほど加点：ごく弱く）
-  const exST = String(e?.exhibition?.st ?? "").replace("F","").trim();
-  const exSTn = Number(exST.startsWith(".") ? `0${exST}` : exST);
-  let exScore = 0;
-  if (Number.isFinite(exSTn)){
-    const min=0.00, max=0.20;
-    const cl = Math.max(min, Math.min(max, exSTn));
-    exScore += (1 - (cl - min)/(max - min)) * 50; // 0..50
-  }
-  const tenjiTime = Number(e?.exhibition?.tenjiTime ?? null);
-  if (Number.isFinite(tenjiTime)){
-    // 6.50〜6.95を良→悪で 50→0
-    const min=6.50, max=6.95;
-    const cl = Math.max(min, Math.min(max, tenjiTime));
-    exScore += (1 - (cl - min)/(max - min)) * 50; // 0..100 合算
-  }
-
-  // 重み合成
+/** 実質級別算出 */
+function calcRealClass(p) {
   let score = 0;
-  score += absWin * w.abs_win_w;
-  score += stScore * w.avgst_boost_w;
-  score += mech   * w.motor_boat_w;
-  score += exScore* w.tenji_w;
+  const natWin = asNumber(p.natWin) ?? 0;
+  const locWin = asNumber(p.locWin) ?? 0;
+  const motor2 = asNumber(p.motor2) ?? 0;
+  const age    = asNumber(p.age) ?? 0;
+  const avgST  = asNumber(p.avgST) ?? null;
+  const c1Win  = asNumber(p.course1Win) ?? null;
 
-  return { score, breakdown: { absWin, stScore:pct(stScore), mech:pct(mech), exScore:pct(exScore) } };
+  if (natWin >= 7.0) score += 6;
+  else if (natWin >= 6.0) score += 5;
+  else if (natWin >= 5.0) score += 4;
+  else if (natWin >= 4.0) score += 3;
+  else if (natWin >= 3.0) score += 2;
+  else score += 1;
+
+  if (locWin >= natWin * 0.95) score += 1;
+  if (locWin >= natWin) score += 1;
+
+  if (motor2 >= 45) score += 2;
+  else if (motor2 >= 35) score += 1;
+  else if (motor2 < 30) score -= 1;
+
+  if (age <= 30) score += 1;
+  if (age >= 55) score -= 1;
+
+  if (avgST && avgST <= 0.16) score += 1;
+  else if (avgST && avgST >= 0.21) score -= 1;
+
+  if (c1Win != null && c1Win >= 40) score += 1;
+  if (c1Win != null && c1Win < 20) score -= 1;
+
+  if (score >= 9) return { label: "A1", score };
+  if (score >= 7) return { label: "A2", score };
+  if (score >= 5) return { label: "B1上位", score };
+  if (score >= 3) return { label: "B1中位", score };
+  if (score >= 1) return { label: "B1下位", score };
+  return { label: "B2", score };
 }
 
-function applyTrackWeatherAdjust(entries, meta, heur){
-  const w = heur?.weights ?? DEFAULT_WEIGHTS;
-  const placePid = String(meta?.pid || "");
-  const weather  = meta?.weather || {};
-  const windSp   = Number(weather?.windSpeed ?? 0);
-  const windDir  = directionToCardinal(weather?.windDirection);
-
-  // 例：平和島(04) 追/向5mでイン弱/ダッシュやや有利
-  const isHeiwajima = (placePid === "04");
-  const dashFavor = (windSp >= 4 ? w.dash_favor : 1.0);
-  const inWeak    = (windSp >= 4 ? w.wind_in_weak : 1.0);
-
-  return entries.map(row => {
-    let mul = 1.0;
-    if (isHeiwajima) mul *= w.heiwajima_bias;
-
-    // ざっくり：内枠(1-2)は強風でわずかに弱化、ダッシュ側(4-6)は強化
-    if (windSp >= 4) {
-      if (row.lane === 1 || row.lane === 2) mul *= inWeak;     // < 1
-      if (row.lane >= 4)               mul *= dashFavor;  // > 1
-    }
-
-    // 風向きで追 or 向（仮：W/西→追い、E/東→向い と想定、場ごとにあとで厳密化）
-    if (windDir === "W" || windDir === "SW" || windDir === "NW") {
-      // 追い風：ダッシュほんのり
-      if (row.lane >= 4) mul *= 1.02;
-    } else if (windDir === "E" || windDir === "SE" || windDir === "NE") {
-      // 向い風：インほんのり
-      if (row.lane <= 2) mul *= 1.02;
-    }
-
-    return { ...row, scoreAdj: row.score * mul, adjMul: Number(mul.toFixed(3)) };
-  });
+/** コース別成績（1着率・2連対率） */
+function calcCourseRates(firstCount, secondCount, starts) {
+  if (!starts) return { winRate: 0, top2Rate: 0 };
+  const winRate = (firstCount / starts) * 100;
+  const top2Rate = ((firstCount + secondCount) / starts) * 100;
+  return { winRate: rnd(winRate,1), top2Rate: rnd(top2Rate,1) };
 }
 
-async function main(){
-  if (!exists(INTEGRATED)) {
-    console.error(`Integrated JSON not found: ${path.relative(ROOT, INTEGRATED)}`);
-    process.exit(0); // 失敗ではなくスキップ扱い
+/** 展示順位別過去成績の参照（存在しなければ0%） */
+function getExhibitionRankStats(rank, statsMap) {
+  return statsMap?.[rank] ?? { win: 0, top2: 0 };
+}
+
+/** 予想ST補正 */
+function calcPredictedST(avgST, tenjiST, opts = {}) {
+  const { attackBonus=false, fCount=0, motorNobi=false } = opts;
+  let baseST;
+  if (avgST && avgST > 0) baseST = (avgST + tenjiST) / 2;
+  else baseST = tenjiST + 0.02;
+  if (attackBonus) baseST -= 0.03;
+  if (motorNobi)   baseST -= 0.01;
+  if (fCount > 0)  baseST += 0.02;
+  baseST = clamp(baseST, 0.10, 0.30);
+  return rnd(baseST, 2);
+}
+
+/** 波乱指数 */
+function calcUpsetScore(p, opts = {}) {
+  const { isInCourse=false, windSpeed=0, windDir="", dashCourse=false } = opts;
+  let score = 0;
+  if (isInCourse) {
+    if (p.course1Win != null && p.course1Win < 50) score += 15;
+    if (p.avgST != null && p.avgST > 0.19) score += 10;
+    if ((p.loseMakuri ?? 0) > 3) score += 10;
   }
-  const integ = await readJson(INTEGRATED);
-  const heur  = exists(HEURIS) ? await readJson(HEURIS) : { weights: DEFAULT_WEIGHTS, notes: [] };
+  if (dashCourse && (p.avgST ?? 9) <= 0.16) score += 20;
+  if (p.motorNobi) score += 10;
+  if ((p.kimariteMakuri ?? 0) >= 3) score += 15;
+  if ((p.exTimeRank ?? 9) <= 2) score += 10;
+  if ((p.lane ?? 7) >= 5 && (p.motor2 ?? 0) >= 40) score += 10;
+  if (windSpeed >= 2 && /(西|向)/.test(String(windDir)) && dashCourse) score += 10;
+  return Math.min(100, score);
+}
 
-  const rows = (integ.entries || []).map(e => {
-    const { score, breakdown } = scoreEntry(e, heur);
+/** スリット順予測 */
+function predictSlitOrder(boats) {
+  return boats
+    .map(b => {
+      const dashBonus = b.dash ? -0.015 : 0;
+      return { lane: b.lane, adjustedST: (b.predictedST ?? 0.2) + dashBonus };
+    })
+    .sort((a, b) => a.adjustedST - b.adjustedST);
+}
+
+/** 攻め手判定 */
+function decideAttackType(lead, slitOrder) {
+  if (!lead) return "none";
+  const lane = lead.lane;
+  const byLane = Object.fromEntries(slitOrder.map((b)=>[b.lane,b]));
+  if (lane === 4 && lead.adjustedST <= 0.14) return "fullMakuri";
+  if (lane === 3 && byLane[2] && byLane[2].adjustedST > lead.adjustedST + 0.01) return "makuriZashi";
+  if (lane === 2 && slitOrder[0]?.lane === 4) return "sashi";
+  return "none";
+}
+
+/** 道中展開シミュレーション（簡易） */
+function simulateRace(startOrder, perf, laps = 3) {
+  let positions = [...startOrder];
+  for (let lap=1; lap<=laps; lap++){
+    positions = positions.map(p => {
+      const st = perf[p.lane] ?? {turnSkill:.5, straightSkill:.5};
+      const turnGain = (st.turnSkill - 0.5) * 0.2;
+      const straightGain = (st.straightSkill - 0.5) * 0.2;
+      const noise = (crypto.randomInt(0,5))/100; // 0.00〜0.04
+      return { ...p, score: turnGain + straightGain + noise };
+    });
+    positions.sort((a,b)=> b.score - a.score);
+    positions = positions.map((p,i)=> ({ lane:p.lane, pos:i+1 }));
+  }
+  return positions;
+}
+
+/** フォーメーション生成 */
+function generateBets(scenarios, mainCount=18, anaCount=2){
+  const sorted = [...scenarios].sort((a,b)=> b.prob - a.prob);
+
+  let mainBets = [];
+  for (const sc of sorted){
+    sc.first.forEach(f=>{
+      sc.second.forEach(s=>{
+        if (s===f) return;
+        sc.third.forEach(t=>{
+          if (t===f || t===s) return;
+          mainBets.push([f,s,t]);
+        });
+      });
+    });
+    if (mainBets.length >= mainCount) break;
+  }
+  mainBets = mainBets.slice(0, mainCount);
+
+  let anaBets = [];
+  for (const sc of [...sorted].reverse()){
+    if (sc.prob < 0.1){
+      sc.first.forEach(f=>{
+        sc.second.forEach(s=>{
+          sc.third.forEach(t=> anaBets.push([f,s,t]));
+        });
+      });
+    }
+    if (anaBets.length >= anaCount) break;
+  }
+  anaBets = anaBets.slice(0, anaCount);
+
+  return { main: mainBets, ana: anaBets };
+}
+
+// --------- 3) メイン処理 ----------
+async function main(){
+  const { json, path: srcPath } = await loadIntegrated();
+  const weather = json.weather ?? {};
+  const entries = (json.entries ?? []).map(e => ({...e}));
+
+  // 展示タイム順位（小さいほど上位）
+  const tenjiTimes = entries.map(e => ({
+    lane: e.lane, t: asNumber(e.exhibition?.tenjiTime) ?? 99
+  })).sort((a,b)=> a.t - b.t);
+  const tenjiRankByLane = Object.fromEntries(tenjiTimes.map((x,i)=>[x.lane, i+1]));
+
+  // 各艇の特徴抽出＆各段階計算
+  const boats = entries.map((e) => {
+    const rc = e.racecard ?? {};
+    const stAvg = asNumber(rc.avgST);
+    const stTenjiParsed = tryParseST(e.exhibition?.st ?? null);
+    const stTenji = stTenjiParsed?.st ?? null;
+    const fOnStart = stTenjiParsed?.f ? 1 : 0;
+    const self = e.stats?.entryCourse?.selfSummary;
+    const starts = asNumber(self?.starts) ?? 0;
+    const firstC = asNumber(self?.firstCount) ?? 0;
+    const secondC= asNumber(self?.secondCount) ?? 0;
+    const courseRates = calcCourseRates(firstC, secondC, starts);
+
+    const natWin = asNumber(rc.natTop1); // 近似: 全国勝率の代理
+    const locWin = asNumber(rc.locTop1) ?? natWin ?? 0;
+    const motor2 = asNumber(rc.motorTop2);
+    const age    = asNumber(rc.age);
+    const c1Win  = e.startCourse === 1 ? courseRates.winRate : null;
+
+    const realClass = calcRealClass({ natWin, locWin, motor2, age, avgST: stAvg, course1Win: c1Win });
+
+    // 伸び寄り推定（展示タイム順位が良い or motor2良）
+    const motorNobi = (tenjiRankByLane[e.lane] ?? 7) <= 2 || (motor2 ?? 0) >= 45;
+
+    // 予想ST
+    const predictedST = calcPredictedST(
+      stAvg ?? 0.18,
+      stTenji ?? 0.18,
+      {
+        attackBonus: e.startCourse >= 4, // 角想定
+        fCount: (rc.flyingCount ?? 0) + fOnStart,
+        motorNobi
+      }
+    );
+
+    // 波乱指数
+    const upset = calcUpsetScore({
+      course1Win: c1Win, avgST: stAvg, loseMakuri: 0, // 欠損は0扱い
+      motorNobi, kimariteMakuri: 0, exTimeRank: tenjiRankByLane[e.lane],
+      lane: e.lane, motor2
+    }, {
+      isInCourse: e.startCourse === 1,
+      windSpeed: asNumber(weather.windSpeed) ?? 0,
+      windDir: String(weather.windDirection ?? ""),
+      dashCourse: e.startCourse >= 4
+    });
+
+    // 道中性能（簡易）
+    const perf = {
+      turnSkill: clamp(((motor2??0)/60) + ((tenjiRankByLane[e.lane]??4) <=2 ? 0.1:0) , 0.3, 0.8),
+      straightSkill: clamp(((motor2??0)/70) + (motorNobi?0.1:0), 0.3, 0.8)
+    };
+
+    // 総合スコア（並び用の簡易指標）
+    const baseScore = (realClass.score*2) + (motor2??0)/10 + ( (6-(tenjiRankByLane[e.lane]??6))*1.2 );
+
     return {
-      number: e.number,
-      name: e.racecard?.name ?? e.exhibition?.name ?? "",
       lane: e.lane,
+      number: e.number,
+      name: rc.name ?? e.exhibition?.name ?? "",
       startCourse: e.startCourse,
-      score: Number(score.toFixed(3)),
-      breakdown,
-      rc: e.racecard ?? null,
-      ex: e.exhibition ?? null,
-      stats: e.stats ?? null
+      dash: e.startCourse >= 4,
+      tenjiTime: asNumber(e.exhibition?.tenjiTime),
+      tenjiRank: tenjiRankByLane[e.lane],
+      avgST: stAvg, tenjiST: stTenji, predictedST,
+      realClass, courseRates,
+      motor2, age, natWin, locWin,
+      upsetScore: upset,
+      perf,
+      baseScore: rnd(baseScore,1)
     };
   });
 
-  // 天候・場補正
-  const adjusted = applyTrackWeatherAdjust(rows, { pid: integ.pid, weather: integ.weather }, heur);
+  // スリット順→攻め手→スタート直後の順
+  const slitOrder = predictSlitOrder(boats);
+  const attackType = decideAttackType(slitOrder[0], slitOrder);
+  const startOrder = slitOrder.map((b,i)=> ({ lane: b.lane, pos: i+1 }));
 
-  // ソート
-  adjusted.sort((a,b) => b.scoreAdj - a.scoreAdj);
+  // 道中シミュレーション
+  const perfMap = Object.fromEntries(boats.map(b=> [b.lane, b.perf]));
+  const goalOrder = simulateRace(startOrder, perfMap, 3);
 
-  // 簡易の買い目（最小骨組み）：上位3艇の組み合わせを数点。詳細ルールは後で拡張。
-  const top = adjusted.slice(0,3).map(r => r.lane);
-  const trifecta = [
-    [top[0], top[1], top[2]],
-    [top[0], top[2], top[1]],
-    [top[1], top[0], top[2]],
-  ].filter(a => a.every(Boolean));
-
-  const out = {
-    schemaVersion: "0.1",
-    generatedAt: nowISO(),
-    meta: { date: integ.date, pid: integ.pid, race: integ.race, source: path.relative(ROOT, INTEGRATED) },
-    weather: integ.weather ?? null,
-    ranking: adjusted.map(r => ({
-      lane: r.lane, number: r.number, name: r.name,
-      score: r.score, scoreAdj: Number(r.scoreAdj.toFixed(3)), adjMul: r.adjMul,
-      breakdown: r.breakdown
-    })),
-    picks: {
-      trifectaPrimary: trifecta,
-      trifectaAlt: []
-    },
-    rationale: [
-      "最小版：自己勝率/平均ST/機力/展示を重み合成し、場・風で微調整。",
-      "買い目は上位3艇の並び（雛形）。ルールと点数はあとで heuristics.json に移し替え。"
-    ]
-  };
-
-  await ensureDir(OUTDIR);
-  await fs.writeFile(OUTJSON, JSON.stringify(out, null, 2), "utf8");
-
-  const lines = [];
-  lines.push(`# 予測 ${integ.date} pid=${integ.pid} race=${integ.race}`);
-  if (integ.weather){
-    const w = integ.weather;
-    lines.push(`**気象**: ${w.weather ?? "-"} / 気温${w.temperature ?? "-"}℃ 風${w.windSpeed ?? "-"}m ${w.windDirection ?? ""} 波高${w.waveHeight ?? "-"}m`);
+  // シナリオ（超簡易の重み付け）
+  const lead = slitOrder[0]?.lane;
+  const scenarios = [];
+  if (attackType === "fullMakuri"){
+    scenarios.push({ first:[lead], second:[3,5,2,1].filter(x=>x!==lead), third:[1,2,3,5,6].filter(x=>x!==lead), prob:0.35 });
+  }else if (attackType === "makuriZashi"){
+    scenarios.push({ first:[3], second:[4,5,1,2], third:[1,2,4,5,6], prob:0.28 });
+  }else if (attackType === "sashi"){
+    scenarios.push({ first:[2], second:[3,4,1], third:[3,4,5,1,6], prob:0.23 });
+  }else{
+    scenarios.push({ first:[1], second:[2,3], third:[4,5,6], prob:0.22 });
   }
-  lines.push(`\n## ランキング`);
-  adjusted.forEach((r,i) => {
-    lines.push(`${i+1}. 枠${r.lane} 登番${r.number} ${r.name}  score=${r.scoreAdj.toFixed(1)}  (基本:${r.score.toFixed(1)}×${r.adjMul})`);
-  });
-  lines.push(`\n## 買い目(雛形)`);
-  out.picks.trifectaPrimary.forEach(arr => lines.push(`3連単 ${arr.join("-")}`));
+  // バックアップ数本
+  scenarios.push({ first:[goalOrder[0]?.lane ?? 1], second:[goalOrder[1]?.lane ?? 2], third:[goalOrder[2]?.lane ?? 3], prob:0.18 });
+  scenarios.push({ first:[slitOrder[0]?.lane ?? 1], second:[slitOrder[1]?.lane ?? 2], third:[1,2,3,4,5,6], prob:0.12 });
 
-  await fs.writeFile(OUTMD, lines.join("\n"), "utf8");
+  const bets = generateBets(scenarios, 18, 2);
 
-  console.log("wrote:", path.relative(ROOT, OUTJSON));
-  console.log("wrote:", path.relative(ROOT, OUTMD));
+  // 人向けランキング（baseScore降順）
+  const ranking = [...boats].sort((a,b)=> b.baseScore - a.baseScore)
+    .map((b,i)=> ({
+      rank: i+1,
+      lane: b.lane,
+      number: b.number,
+      name: b.name,
+      score: b.baseScore,
+      detail: {
+        class: b.realClass.label,
+        motor2: b.motor2, tenjiRank: b.tenjiRank,
+        predictedST: b.predictedST
+      }
+    }));
+
+  // -------- 出力（JSON + Markdown） --------
+  const outDir = path.join(ROOT,"out");
+  await ensureDir(outDir);
+  const jsonOut = {
+    params: { DATE, PID, RACE },
+    source: path.relative(ROOT, srcPath),
+    weather,
+    boats,
+    slitOrder,
+    attackType,
+    startOrder,
+    goalOrder,
+    scenarios,
+    bets
+  };
+  await fs.writeFile(path.join(outDir,"prediction.json"), JSON.stringify(jsonOut,null,2), "utf8");
+
+  const pubDir = path.join(ROOT,"public","predictions", DATE, PID, RACE);
+  await ensureDir(pubDir);
+  const md = [
+    `# 予測 ${DATE} pid=${PID} race=${RACE}`,
+    ``,
+    `**気象**: ${weather.weather ?? "-"} / 気温${weather.temperature ?? "-"}℃ 風${weather.windSpeed ?? "-"}m ${weather.windDirection ?? "-"} 波高${weather.waveHeight ?? "-"}m`,
+    ``,
+    `## ランキング`,
+    ...ranking.map(r => `- 枠${r.lane} 登番${r.number} ${r.name}  score=${r.score}（${r.detail.class} / 予想ST:${r.detail.predictedST} / 展示順位:${r.detail.tenjiRank} / ﾓｰﾀｰ2連:${r.detail.motor2 ?? "-"}）`),
+    ``,
+    `## スタート展開`,
+    `- スリット順: ${slitOrder.map(x=>x.lane).join(" > ")} / 攻め手: **${attackType}**`,
+    `- 道中（簡易）ゴール順: ${goalOrder.map(x=>x.lane).join(" > ")}`,
+    ``,
+    `## シナリオ要約`,
+    ...scenarios.map(s => `- P=${rnd(s.prob*100,1)}%: 1着[${s.first.join(",")}] 2着[${s.second.join(",")}] 3着[${s.third.join(",")}]`),
+    ``,
+    `## 買い目（本命〜中穴18点＋穴2点＝計20点）`,
+    `**本命〜中穴**`,
+    ...bets.main.map(a=> `- 3連単 ${a[0]}-${a[1]}-${a[2]}`),
+    ``,
+    `**穴目**`,
+    ...bets.ana.map(a=> `- 3連単 ${a[0]}-${a[1]}-${a[2]}`),
+    ``
+  ].join("\n");
+  await fs.writeFile(path.join(pubDir,"1R.md"), md, "utf8");
+
+  // Slack 通知（任意）
+  const hook = process.env.SLACK_WEBHOOK_URL;
+  if (hook){
+    try{
+      const payload = {
+        text: `予測完了 ${DATE} pid=${PID} race=${RACE}\nトップ: 枠${ranking[0]?.lane} ${ranking[0]?.name} / 攻め手:${attackType}\nスリット:${slitOrder.map(x=>x.lane).join(">")} / ゴール:${goalOrder.map(x=>x.lane).join(">")}`
+      };
+      const res = await fetch(hook, {
+        method:"POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) console.error("Slack webhook failed:", res.status, await res.text());
+    }catch(err){ console.error("Slack webhook error:", err?.message); }
+  }
+
+  console.log("wrote:", path.relative(ROOT, path.join(outDir,"prediction.json")));
+  console.log("wrote:", path.relative(ROOT, path.join(pubDir,"1R.md")));
 }
 
 main().catch(e => { console.error(e); process.exit(1); });
