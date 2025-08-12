@@ -100,3 +100,5 @@ function clamp2(v, min, max) {
   const x = Math.min(max, Math.max(min, v));
   return Math.round(x * 1000) / 1000; // 0.001精度で丸め
 }
+
+export default slitAndAttack;
