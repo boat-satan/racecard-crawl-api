@@ -96,3 +96,5 @@ export function calcUpsetIndex(entries, weather = {}) {
   const max = [...list].sort((a,b)=>b.score-a.score)[0] ?? null;
   return { upsetList: list, mostUpset: max };
 }
+
+export default upsetIndex;
