@@ -1,0 +1,240 @@
+{
+  "meta": {
+    "date": "20250812",
+    "pid": "05",
+    "race": "1R",
+    "sourceFile": "public/integrated/v1/20250812/05/1R.json",
+    "generatedAt": "2025-08-12T09:25:01.665Z"
+  },
+  "weather": {
+    "weather": "雨",
+    "temperature": 30,
+    "windSpeed": 1,
+    "windDirection": "南",
+    "waterTemperature": 27,
+    "waveHeight": 0.02,
+    "stabilizer": false
+  },
+  "ranking": null,
+  "slitOrder": [
+    {
+      "lane": 5,
+      "startCourse": 5,
+      "adjustedST": 0.135
+    },
+    {
+      "lane": 6,
+      "startCourse": 6,
+      "adjustedST": 0.135
+    },
+    {
+      "lane": 1,
+      "startCourse": 1,
+      "adjustedST": 0.14
+    },
+    {
+      "lane": 4,
+      "startCourse": 4,
+      "adjustedST": 0.155
+    },
+    {
+      "lane": 2,
+      "startCourse": 2,
+      "adjustedST": 0.19
+    },
+    {
+      "lane": 3,
+      "startCourse": 3,
+      "adjustedST": 0.2
+    }
+  ],
+  "attackType": "none",
+  "scenarios": [
+    {
+      "id": "D01-in-bigDelay",
+      "notes": "イン壁喪失→センター主導。",
+      "oneMark": {
+        "startOrder": [],
+        "linkedPairs": [
+          [
+            3,
+            4
+          ],
+          [
+            2,
+            3
+          ]
+        ],
+        "thirdPool": [
+          5,
+          2,
+          1,
+          6,
+          4,
+          3
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.6776
+    },
+    {
+      "id": "D02-two-bigDelay",
+      "notes": "2の援護消失で3-4が主導。",
+      "oneMark": {
+        "startOrder": [],
+        "linkedPairs": [
+          [
+            4,
+            3
+          ]
+        ],
+        "thirdPool": [
+          5,
+          1,
+          6,
+          2,
+          3,
+          4
+        ],
+        "thirdBias": "exRank3rdMix"
+      },
+      "weight": 0.5808
+    },
+    {
+      "id": "D03-three-bigDelay",
+      "notes": "4のカド流入や2差しが台頭。",
+      "oneMark": {
+        "startOrder": [],
+        "linkedPairs": [
+          [
+            4,
+            2
+          ]
+        ],
+        "thirdPool": [
+          5,
+          1,
+          6,
+          3,
+          2,
+          4
+        ],
+        "thirdBias": "national3rdMix"
+      },
+      "weight": 0.5808
+    },
+    {
+      "id": "D04-four-bigDelay",
+      "notes": "外の伸びが相殺→内優位回帰。",
+      "oneMark": {
+        "startOrder": [],
+        "linkedPairs": [
+          [
+            2,
+            3
+          ]
+        ],
+        "thirdPool": [
+          5,
+          6,
+          4,
+          2,
+          3,
+          1
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.5808
+    },
+    {
+      "id": "D05-five-bigDelay",
+      "notes": "外の連動が崩れ、内・カドへ回帰。",
+      "oneMark": {
+        "startOrder": [],
+        "linkedPairs": [
+          [
+            4,
+            3
+          ]
+        ],
+        "thirdPool": [
+          6,
+          1,
+          5,
+          2,
+          3,
+          4
+        ],
+        "thirdBias": "exRank3rdMix"
+      },
+      "weight": 0.484
+    },
+    {
+      "id": "D06-six-bigDelay",
+      "notes": "6の追走が消え、4-5並走が軸。",
+      "oneMark": {
+        "startOrder": [],
+        "linkedPairs": [
+          [
+            4,
+            5
+          ]
+        ],
+        "thirdPool": [
+          2,
+          1,
+          6,
+          3,
+          5,
+          4
+        ],
+        "thirdBias": "national3rdMix"
+      },
+      "weight": 0.484
+    }
+  ],
+  "probs": {
+    "1-4-2": 0.04666666666666667,
+    "4-1-2": 0.5333333333333333,
+    "4-1-6": 0.12666666666666668,
+    "4-1-5": 0.27,
+    "1-4-6": 0.006666666666666666,
+    "1-4-5": 0.016666666666666666
+  },
+  "bets": {
+    "compact": "",
+    "main": [
+      [
+        4,
+        1,
+        2
+      ],
+      [
+        4,
+        1,
+        5
+      ],
+      [
+        4,
+        1,
+        6
+      ],
+      [
+        1,
+        4,
+        2
+      ],
+      [
+        1,
+        4,
+        5
+      ],
+      [
+        1,
+        4,
+        6
+      ]
+    ],
+    "ana": []
+  }
+}
