@@ -136,3 +136,6 @@ function toNum(v, def = 0) {
 }
 function clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }
 function round3(x) { return Math.round(x * 1000) / 1000; }
+
+// （中略）関数本体が例えば function envAdjust(data) {...} なら
+export default envAdjust;
