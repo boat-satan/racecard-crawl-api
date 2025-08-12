@@ -1,0 +1,257 @@
+[
+  {
+    "id": "A01",
+    "label": "1逃げベーシック",
+    "requires": { "head": [1], "attackType": ["none", "sashi"] },
+    "first": [1],
+    "second": [2,3],
+    "third": [2,3,4],
+    "baseWeight": 0.09
+  },
+  {
+    "id": "A02",
+    "label": "1逃げ-2差し有力",
+    "requires": { "head": [1], "attackType": ["sashi"] },
+    "first": [1],
+    "second": [2,4],
+    "third": [3,4,5],
+    "baseWeight": 0.07
+  },
+  {
+    "id": "A03",
+    "label": "1逃げ-3ま差し絡み",
+    "requires": { "head": [1], "attackType": ["makuriZashi"] },
+    "first": [1],
+    "second": [3,2],
+    "third": [2,4,5],
+    "baseWeight": 0.07
+  },
+  {
+    "id": "A04",
+    "label": "1逃げ-外伸び同隊連動",
+    "requires": { "head": [1], "attackType": ["none"] },
+    "first": [1],
+    "second": [2,3],
+    "third": [4,5],
+    "baseWeight": 0.06
+  },
+  {
+    "id": "A05",
+    "label": "1逃げ-道中で5差し浮上",
+    "requires": { "head": [1], "attackType": ["none","sashi"] },
+    "first": [1],
+    "second": [2,3],
+    "third": [5,4,6],
+    "baseWeight": 0.05
+  },
+  {
+    "id": "A06",
+    "label": "1逃げ-2=3の叩き合い",
+    "requires": { "head": [1], "attackType": ["none","sashi","makuriZashi"] },
+    "first": [1],
+    "second": [2,3],
+    "third": [2,3,4,5],
+    "baseWeight": 0.06
+  },
+  {
+    "id": "A07",
+    "label": "1逃げ-4差し迫る",
+    "requires": { "head": [1], "attackType": ["fullMakuri","makuri","makuriZashi"] },
+    "first": [1],
+    "second": [4,2],
+    "third": [2,3,5],
+    "baseWeight": 0.05
+  },
+  {
+    "id": "A08",
+    "label": "1逃げ-向かい風で外残り",
+    "requires": { "head": [1], "windFavDash": true },
+    "first": [1],
+    "second": [3,4],
+    "third": [4,5,2],
+    "baseWeight": 0.05
+  },
+  {
+    "id": "A09",
+    "label": "1逃げ-内3艇で決着",
+    "requires": { "head": [1], "attackType": ["none"] },
+    "first": [1],
+    "second": [2,3],
+    "third": [2,3],
+    "baseWeight": 0.06
+  },
+  {
+    "id": "A10",
+    "label": "1逃げ-軽凹みで2先行",
+    "requires": { "head": [1], "depressed": { "lane": 3, "level": "small" } },
+    "first": [1],
+    "second": [2],
+    "third": [3,4,5],
+    "baseWeight": 0.05
+  },
+
+  {
+    "id": "B01",
+    "label": "2差し頭",
+    "requires": { "head": [2], "attackType": ["sashi","none"] },
+    "first": [2],
+    "second": [1,3,4],
+    "third": [1,3,4,5],
+    "baseWeight": 0.08
+  },
+  {
+    "id": "B02",
+    "label": "2-3 連動（2差し/3追走）",
+    "requires": { "head": [2,3], "attackType": ["sashi","makuriZashi"] },
+    "first": [2],
+    "second": [3],
+    "third": [1,4,5],
+    "baseWeight": 0.06
+  },
+  {
+    "id": "B03",
+    "label": "3まくり差し頭",
+    "requires": { "head": [3], "attackType": ["makuriZashi"] },
+    "first": [3],
+    "second": [1,2,4],
+    "third": [1,2,4,5],
+    "baseWeight": 0.08
+  },
+  {
+    "id": "B04",
+    "label": "3-2 連動（内壁薄）",
+    "requires": { "head": [3], "attackType": ["makuriZashi","makuri"], "inWallWeak": true },
+    "first": [3],
+    "second": [2],
+    "third": [1,4,5],
+    "baseWeight": 0.06
+  },
+  {
+    "id": "B05",
+    "label": "2頭-外足強で5/6三着絡み",
+    "requires": { "head": [2], "dashStrong": true },
+    "first": [2],
+    "second": [1,3],
+    "third": [5,6,4],
+    "baseWeight": 0.05
+  },
+  {
+    "id": "B06",
+    "label": "3頭-1抵抗で2連動",
+    "requires": { "head": [3], "attackType": ["makuri","makuriZashi"] },
+    "first": [3],
+    "second": [2],
+    "third": [1,4,5],
+    "baseWeight": 0.05
+  },
+  {
+    "id": "B07",
+    "label": "2頭-1残り/4差し浮上",
+    "requires": { "head": [2], "attackType": ["sashi"] },
+    "first": [2],
+    "second": [1,4],
+    "third": [3,4,5],
+    "baseWeight": 0.05
+  },
+  {
+    "id": "B08",
+    "label": "3頭-向かい風でダッシュ連動",
+    "requires": { "head": [3], "windFavDash": true },
+    "first": [3],
+    "second": [5,4],
+    "third": [1,2,5,6],
+    "baseWeight": 0.05
+  },
+  {
+    "id": "B09",
+    "label": "2=3の先行争い（2or3頭）",
+    "requires": { "head": [2,3] },
+    "first": [2,3],
+    "second": [3,2],
+    "third": [1,4,5],
+    "baseWeight": 0.05
+  },
+  {
+    "id": "B10",
+    "label": "3頭-1大きく後退",
+    "requires": { "head": [3], "inWallWeak": true },
+    "first": [3],
+    "second": [2,4],
+    "third": [5,6,2,4],
+    "baseWeight": 0.04
+  },
+
+  {
+    "id": "C01",
+    "label": "4カド全速まくり",
+    "requires": { "head": [4], "attackType": ["fullMakuri","makuri"] },
+    "first": [4],
+    "second": [3,5,2,1],
+    "third": [3,5,2,1,6],
+    "baseWeight": 0.10
+  },
+  {
+    "id": "C02",
+    "label": "4カド-5連動（まくり差し）",
+    "requires": { "head": [4], "attackType": ["makuriZashi"] },
+    "first": [4],
+    "second": [5,3],
+    "third": [1,2,5,6],
+    "baseWeight": 0.07
+  },
+  {
+    "id": "C03",
+    "label": "5差し頭（4攻めの内差し）",
+    "requires": { "head": [5], "attackType": ["fullMakuri","makuri","makuriZashi"] },
+    "first": [5],
+    "second": [4,3,1],
+    "third": [2,4,6],
+    "baseWeight": 0.07
+  },
+  {
+    "id": "C04",
+    "label": "6まくり差し頭（スピード戦）",
+    "requires": { "head": [6], "attackType": ["makuriZashi"], "dashStrong": true },
+    "first": [6],
+    "second": [4,5,3],
+    "third": [1,2,4,5],
+    "baseWeight": 0.05
+  },
+
+  {
+    "id": "D01",
+    "label": "1大凹み→2差し頭",
+    "requires": { "head": [2], "depressed": { "lane": 1, "level": "big" } },
+    "first": [2],
+    "second": [3,4],
+    "third": [5,1,3,4],
+    "baseWeight": 0.07
+  },
+  {
+    "id": "D02",
+    "label": "2大凹み→3まくり頭",
+    "requires": { "head": [3], "depressed": { "lane": 2, "level": "big" } },
+    "first": [3],
+    "second": [4,5],
+    "third": [1,2,4,5],
+    "baseWeight": 0.06
+  },
+  {
+    "id": "D03",
+    "label": "3大凹み→4カド頭",
+    "requires": { "head": [4], "depressed": { "lane": 3, "level": "big" } },
+    "first": [4],
+    "second": [5,2],
+    "third": [1,3,5,6],
+    "baseWeight": 0.07
+  },
+  {
+    "id": "D04",
+    "label": "4大凹み→5差し頭",
+    "requires": { "head": [5], "depressed": { "lane": 4, "level": "big" } },
+    "first": [5],
+    "second": [4,3],
+    "third": [1,2,6],
+    "baseWeight": 0.06
+  }
+]
