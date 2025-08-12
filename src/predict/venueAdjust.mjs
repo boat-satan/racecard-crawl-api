@@ -288,3 +288,5 @@ export function venueAdjustScenarioProb(baseProb, ctx = {}, { attackType, lanes 
 // ------ helpers ------
 const num = (v, d=0) => (Number.isFinite(+v) ? +v : d);
 const round3 = (x) => Math.round(x*1000)/1000;
+
+export default venueAdjust;
