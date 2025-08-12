@@ -117,3 +117,6 @@ export function calcPredictedST({
   predicted = clamp(predicted, 0.06, 0.35);
   return round2(predicted);
 }
+
+// 例: function predictedST(data){...}
+export default predictedST;
