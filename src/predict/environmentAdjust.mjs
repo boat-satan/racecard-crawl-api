@@ -141,3 +141,10 @@ export default function envAdjust(race) {
 
   return cloned;
 }
+
+// ここから追加
+function envAdjust(race) {
+  return race; // 仮の処理（環境補正しないでそのまま返す）
+}
+
+export default envAdjust;
