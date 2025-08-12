@@ -23,6 +23,38 @@ function readJsonLoose(filePath) {
   return JSON.parse(noTrailingCommas);
 }
 
+// ---------- 1Mシナリオ正規化（simulateRace 向け） ----------
+function splitToken(tok) {
+  // "2/3" or "(2|3)" or "1" を [2,3] / [2,3] / [1] に
+  if (Array.isArray(tok)) return tok.map(n => Number(n));
+  const s = String(tok).trim();
+  if (!s) return [];
+  if (s.includes("/")) return s.split("/").map(n => Number(n));
+  const m = s.match(/^\(([^)]+)\)$/); // (2|3)
+  if (m) return m[1].split("|").map(n => Number(n));
+  return [Number(s)];
+}
+function normalizeOneMark(oneMark) {
+  const om = oneMark || {};
+  const orderIn = om.order || [];
+  const startOrder = orderIn.map(splitToken);
+
+  const linkedPairs = Array.isArray(om.linkedPairs)
+    ? om.linkedPairs.map(p => (Array.isArray(p) ? p.map(n => Number(n)) : splitToken(p)))
+    : [];
+
+  const thirdPool = Array.isArray(om.thirdPool)
+    ? om.thirdPool.map(n => Number(n))
+    : [];
+
+  return {
+    startOrder,              // Array<Array<number>>
+    linkedPairs,             // Array<[number, number]>
+    thirdPool,               // Array<number>
+    thirdBias: om.thirdBias || null
+  };
+}
+
 // ===== シナリオリスト読込 =====
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -33,7 +65,6 @@ let scenariosListRaw;
 let scenariosList;
 try {
   scenariosListRaw = readJsonLoose(scenariosPath);
-  // もし { scenarios: [...] } 形式なら中身を取り出す
   if (Array.isArray(scenariosListRaw)) {
     scenariosList = scenariosListRaw;
   } else if (scenariosListRaw && Array.isArray(scenariosListRaw.scenarios)) {
@@ -46,10 +77,9 @@ try {
   scenariosList = [];
 }
 
-// 配列でなければログ出して空配列扱い
 if (!Array.isArray(scenariosList)) {
   console.error("[ERROR] scenariosList is not an array. typeof:", typeof scenariosList);
-  console.error("[HINT] scenarios.json は配列、もしくは {\"scenarios\": [...]} の形にしてください。");
+  console.error('[HINT] scenarios.json は配列、または {"scenarios":[...]} の形にしてください。');
   scenariosList = [];
 }
 
@@ -105,55 +135,36 @@ const matchedScenarios = (scenariosList || []).filter(sc => matchScenario(sc, ad
     weight: (sc.baseWeight ?? 1) * (adjusted.venueWeight ?? 1) * (adjusted.upsetWeight ?? 1)
   }));
 
-// ← ここを堅牢化：配列保証してから slice
 const baseList = Array.isArray(scenariosList) ? scenariosList : [];
 const effectiveScenarios = matchedScenarios.length
   ? matchedScenarios
   : baseList.slice(0, 3).map(sc => ({ ...sc, weight: 1 }));
 
-if (effectiveScenarios.length === 0) {
-  console.error("[WARN] No scenarios available. bets will be fallback-only.");
-}
+console.log(`[predict] scenarios loaded: ${Array.isArray(scenariosList) ? scenariosList.length : 0}`);
+console.log(`[predict] matched: ${matchedScenarios.length}, effective: ${effectiveScenarios.length}`);
 
-// ===== 3) 1M→ゴール展開: oneMark正規化 → simulateRace =====
-
-// "(2|3)" → ["2","3"] など。startOrder を配列の配列へ統一
-function normalizeOneMark(oneMark = {}) {
-  const toGroup = (g) => {
-    if (Array.isArray(g)) return g.map(String);
-    if (g == null) return [];
-    const s = String(g).trim();
-    const inner = s.replace(/[()\s]/g, "");
-    if (!inner) return [];
-    return inner.split("|").map(String);
-  };
-
-  const rawStart = oneMark.startOrder ?? oneMark.order ?? [];
-  const startOrder = Array.isArray(rawStart) ? rawStart.map(toGroup) : [toGroup(rawStart)];
-
-  const linkedPairs = Array.isArray(oneMark.linkedPairs)
-    ? oneMark.linkedPairs.map((p) => (Array.isArray(p) ? p.map(String) : toGroup(p)))
-    : [];
-
-  const thirdPool = Array.isArray(oneMark.thirdPool)
-    ? oneMark.thirdPool.map(String)
-    : toGroup(oneMark.thirdPool);
-
-  return { ...oneMark, startOrder, linkedPairs, thirdPool };
-}
-
+// ===== 3) 1M後〜ゴールの道中展開シミュレーション（ログ強化） =====
 const scenarioResults = effectiveScenarios.map(sc => {
   const oneMark = normalizeOneMark(sc.oneMark);
   let finalProb = {};
   try {
+    // 入力の軽い要約を出す
+    const shape = oneMark.startOrder.map(a => `[${a.join("")}]`).join("-");
+    console.log(`[DEBUG] simulate ${sc.id} w=${sc.weight ?? 1} startOrder=${shape} linked=${(oneMark.linkedPairs||[]).length} thirdPool=${(oneMark.thirdPool||[]).length}`);
     finalProb = simulateRace(adjusted, oneMark) || {};
+    const keys = Object.keys(finalProb);
+    console.log(`[DEBUG] result ${sc.id}: keys=${keys.length}${keys.length ? ` sample=${keys.slice(0, 3).join(",")}` : ""}`);
   } catch (e) {
-    console.error(
-      `Error:  simulateRace failed for scenario: ${sc?.id} ${e?.message || e}`
-    );
+    console.error(`Error: simulateRace failed for scenario: ${sc?.id} ${e?.message || e}`);
     finalProb = {};
   }
-  return { id: sc.id, notes: sc.notes, oneMark, weight: sc.weight, finalProb };
+  return {
+    id: sc.id,
+    notes: sc.notes,
+    oneMark,
+    weight: sc.weight,
+    finalProb
+  };
 });
 
 // ===== 4) シナリオ結果の重み付け合算（正規化）=====
@@ -166,11 +177,13 @@ for (const sr of scenarioResults) {
     aggregated[ticket] = (aggregated[ticket] || 0) + (Number(prob) || 0) * (sr.weight || 0);
   }
 }
-if (totalWeight > 0) {
-  for (const k of Object.keys(aggregated)) aggregated[k] /= totalWeight;
+
+const aggKeys = Object.keys(aggregated);
+if (totalWeight > 0 && aggKeys.length > 0) {
+  for (const k of aggKeys) aggregated[k] /= totalWeight;
+  console.log(`[DEBUG] aggregated keys=${aggKeys.length} (normalized by weight=${totalWeight.toFixed(3)})`);
 } else {
-  console.error("[WARN] totalWeight=0; aggregated probs will be empty.");
-  aggregated = {};
+  console.warn(`[WARN] aggregated empty. totalWeight=${totalWeight}, scenario non-empty counts=${scenarioResults.filter(r=>Object.keys(r.finalProb||{}).length>0).length}/${scenarioResults.length}`);
 }
 
 // ===== 5) 買い目生成（18点固定 / compact表記含む）=====
@@ -183,7 +196,7 @@ try {
 }
 if ((!betResult.main || betResult.main.length === 0) &&
     (!betResult.compact || betResult.compact.length === 0)) {
-  console.error("[WARN] bets came back empty. probs keys:", Object.keys(aggregated));
+  console.warn("[WARN] bets came back empty. probs keys:", Object.keys(aggregated));
 }
 
 // ===== 6) race.md / race.json を所定フォルダに保存 =====
@@ -227,9 +240,6 @@ if (Array.isArray(adjusted.ranking)) {
 }
 fs.writeFileSync(path.join(outDir, "race.md"), lines.join("\n"), "utf-8");
 
-// 追加デバッグ
-console.log(`[predict] scenarios loaded: ${Array.isArray(scenariosList) ? scenariosList.length : 0}`);
-console.log(`[predict] matched: ${matchedScenarios.length}, effective: ${effectiveScenarios.length}`);
 console.log(`[predict] wrote:
 - ${path.join(outDir, "race.json")}
 - ${path.join(outDir, "race.md")}
