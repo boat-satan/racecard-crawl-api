@@ -127,3 +127,5 @@ function norm(v, min, max) {
   if (d <= 0) return 0.5;
   return clamp01((v - min) / d);
 }
+
+export default simulateRace;
