@@ -23,38 +23,6 @@ function readJsonLoose(filePath) {
   return JSON.parse(noTrailingCommas);
 }
 
-// ---------- 1Mシナリオ正規化（simulateRace 向け） ----------
-function splitToken(tok) {
-  // "2/3" or "(2|3)" or "1" を [2,3] / [2,3] / [1] に
-  if (Array.isArray(tok)) return tok.map(n => Number(n));
-  const s = String(tok).trim();
-  if (!s) return [];
-  if (s.includes("/")) return s.split("/").map(n => Number(n));
-  const m = s.match(/^\(([^)]+)\)$/); // (2|3)
-  if (m) return m[1].split("|").map(n => Number(n));
-  return [Number(s)];
-}
-function normalizeOneMark(oneMark) {
-  const om = oneMark || {};
-  const orderIn = om.order || [];
-  const startOrder = orderIn.map(splitToken);
-
-  const linkedPairs = Array.isArray(om.linkedPairs)
-    ? om.linkedPairs.map(p => (Array.isArray(p) ? p.map(n => Number(n)) : splitToken(p)))
-    : [];
-
-  const thirdPool = Array.isArray(om.thirdPool)
-    ? om.thirdPool.map(n => Number(n))
-    : [];
-
-  return {
-    startOrder,              // Array<Array<number>>
-    linkedPairs,             // Array<[number, number]>
-    thirdPool,               // Array<number>
-    thirdBias: om.thirdBias || null
-  };
-}
-
 // ===== シナリオリスト読込 =====
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -103,7 +71,7 @@ if (!fs.existsSync(raceDataPath)) {
   console.error("Usage: npm run predict <path/to/integrated.json>");
   process.exit(1);
 }
-const raceData = JSON.parse(fs.readFileSync(raceDataPath, "utf8"));
+const raceData = JSON.parse(fs.readFileSync(raceDataPath, "utf-8"));
 
 // 日付 / pid / race は統合JSONから取得（安全に）
 const date = (raceData.date || (process.env.DATE || "today")).replace(/-/g, "");
@@ -129,7 +97,10 @@ function matchScenario(sc, data) {
   return true;
 }
 
-const matchedScenarios = (scenariosList || []).filter(sc => matchScenario(sc, adjusted))
+console.log(`[predict] scenarios loaded: ${Array.isArray(scenariosList) ? scenariosList.length : 0}`);
+
+const matchedScenarios = (scenariosList || [])
+  .filter(sc => matchScenario(sc, adjusted))
   .map(sc => ({
     ...sc,
     weight: (sc.baseWeight ?? 1) * (adjusted.venueWeight ?? 1) * (adjusted.upsetWeight ?? 1)
@@ -140,30 +111,47 @@ const effectiveScenarios = matchedScenarios.length
   ? matchedScenarios
   : baseList.slice(0, 3).map(sc => ({ ...sc, weight: 1 }));
 
-console.log(`[predict] scenarios loaded: ${Array.isArray(scenariosList) ? scenariosList.length : 0}`);
 console.log(`[predict] matched: ${matchedScenarios.length}, effective: ${effectiveScenarios.length}`);
 
-// ===== 3) 1M後〜ゴールの道中展開シミュレーション（ログ強化） =====
+// ===== 3) 1M後〜ゴールの道中展開シミュレーション =====
+function normalizeStartOrder(oneMark, slitOrder=[]) {
+  // oneMark.startOrder が空なら、slitOrder を "lane順" で埋める
+  const has = Array.isArray(oneMark?.startOrder) ? oneMark.startOrder : [];
+  const normalized = has.length
+    ? has
+    : slitOrder.map((s, i) => ({ lane: s.lane, pos: i + 1 }));
+  return normalized;
+}
+
 const scenarioResults = effectiveScenarios.map(sc => {
-  const oneMark = normalizeOneMark(sc.oneMark);
-  let finalProb = {};
+  const startOrder = normalizeStartOrder(sc.oneMark, adjusted.slitOrder || []);
+  const linked = Array.isArray(sc.oneMark?.linkedPairs) ? sc.oneMark.linkedPairs.length : 0;
+  const tpool = Array.isArray(sc.oneMark?.thirdPool) ? sc.oneMark.thirdPool.length : 0;
+  console.log(`[DEBUG] simulate ${sc.id} w=${sc.weight} startOrder=${startOrder.length ? startOrder.map(x=>x.lane).join("-") : ""} linked=${linked} thirdPool=${tpool}`);
+
+  let finalPositions = [];
   try {
-    // 入力の軽い要約を出す
-    const shape = oneMark.startOrder.map(a => `[${a.join("")}]`).join("-");
-    console.log(`[DEBUG] simulate ${sc.id} w=${sc.weight ?? 1} startOrder=${shape} linked=${(oneMark.linkedPairs||[]).length} thirdPool=${(oneMark.thirdPool||[]).length}`);
-    finalProb = simulateRace(adjusted, oneMark) || {};
-    const keys = Object.keys(finalProb);
-    console.log(`[DEBUG] result ${sc.id}: keys=${keys.length}${keys.length ? ` sample=${keys.slice(0, 3).join(",")}` : ""}`);
+    // perfMap を entries から組む（simulateRace が perfMapを内部生成する実装なら不要）
+    // 互換のため、startOrder だけ投げる形を維持
+    finalPositions = simulateRace(startOrder, sc.oneMark) || [];
   } catch (e) {
-    console.error(`Error: simulateRace failed for scenario: ${sc?.id} ${e?.message || e}`);
-    finalProb = {};
+    console.error("[ERROR] simulateRace failed for scenario:", sc?.id, e?.message);
+    finalPositions = [];
   }
+
+  // 上位6までから 3連単風のキーを適当に作る（pos=1,2,3）
+  const top3 = [...finalPositions].sort((a,b)=>a.pos-b.pos).slice(0,3);
+  const key = top3.length === 3 ? `${top3[0].lane}-${top3[1].lane}-${top3[2].lane}` : null;
+  const probObj = key ? { [key]: 1 } : {};
+
+  console.log(`[DEBUG] result ${sc.id}: keys=${Object.keys(probObj).length} sample=${key || "-"}`);
+
   return {
     id: sc.id,
     notes: sc.notes,
-    oneMark,
+    oneMark: sc.oneMark,
     weight: sc.weight,
-    finalProb
+    finalProb: probObj
   };
 });
 
@@ -177,14 +165,14 @@ for (const sr of scenarioResults) {
     aggregated[ticket] = (aggregated[ticket] || 0) + (Number(prob) || 0) * (sr.weight || 0);
   }
 }
-
-const aggKeys = Object.keys(aggregated);
-if (totalWeight > 0 && aggKeys.length > 0) {
-  for (const k of aggKeys) aggregated[k] /= totalWeight;
-  console.log(`[DEBUG] aggregated keys=${aggKeys.length} (normalized by weight=${totalWeight.toFixed(3)})`);
+if (totalWeight > 0) {
+  for (const k of Object.keys(aggregated)) aggregated[k] /= totalWeight;
 } else {
-  console.warn(`[WARN] aggregated empty. totalWeight=${totalWeight}, scenario non-empty counts=${scenarioResults.filter(r=>Object.keys(r.finalProb||{}).length>0).length}/${scenarioResults.length}`);
+  console.error("[WARN] totalWeight=0; aggregated probs will be empty.");
+  aggregated = {};
 }
+
+console.log(`[DEBUG] aggregated keys=${Object.keys(aggregated).length} (normalized by weight=${totalWeight.toFixed(3)})`);
 
 // ===== 5) 買い目生成（18点固定 / compact表記含む）=====
 let betResult;
@@ -196,7 +184,15 @@ try {
 }
 if ((!betResult.main || betResult.main.length === 0) &&
     (!betResult.compact || betResult.compact.length === 0)) {
-  console.warn("[WARN] bets came back empty. probs keys:", Object.keys(aggregated));
+  console.error("[WARN] bets came back empty. probs keys:", Object.keys(aggregated));
+}
+
+// --- フォールバック：compact/markdown未生成なら main から簡易compactを作る ---
+if ((!betResult?.compact || betResult.compact.length === 0) && (betResult?.main?.length > 0)) {
+  const fb = buildCompactFromMain(betResult.main); // {strings, tickets}
+  betResult.compact  = fb.strings.join(", ");
+  betResult.markdown = fb.strings.length ? fb.strings.join(", ") : (betResult.markdown || "_no bets_");
+  console.log("[INFO] generated fallback compact from main:", betResult.compact);
 }
 
 // ===== 6) race.md / race.json を所定フォルダに保存 =====
@@ -244,3 +240,34 @@ console.log(`[predict] wrote:
 - ${path.join(outDir, "race.json")}
 - ${path.join(outDir, "race.md")}
 `);
+
+// ================= helper: main配列から超簡易compactを作る =================
+// main: [[h,s,t], ...]（数値3連単）
+function buildCompactFromMain(main = []) {
+  const byHead = new Map(); // h -> {S:Set, T:Set}
+  for (const t of main) {
+    if (!Array.isArray(t) || t.length < 3) continue;
+    const [h,s,tt] = t.map(Number);
+    if (!byHead.has(h)) byHead.set(h, {S:new Set(), T:new Set()});
+    const b = byHead.get(h);
+    if (s !== h)  b.S.add(s);
+    if (tt !== s && tt !== h) b.T.add(tt);
+  }
+
+  const strings = [];
+  const tickets = [];
+  for (const [h,grp] of byHead.entries()) {
+    const S = [...grp.S].sort((a,b)=>a-b);
+    const T = [...grp.T].sort((a,b)=>a-b);
+    if (S.length >= 1 && T.length >= 1) {
+      const sStr = S.join("");
+      const tStr = T.join("");
+      strings.push(`${h}-${sStr}-${tStr}`);
+      for (const s of S) for (const t of T) {
+        if (t===s || s===h || t===h) continue;
+        tickets.push([h,s,t]);
+      }
+    }
+  }
+  return { strings, tickets: tickets.length ? tickets : main };
+}
