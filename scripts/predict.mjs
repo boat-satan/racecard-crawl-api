@@ -12,7 +12,7 @@ import upsetIndex from "../src/predict/upsetIndex.mjs";
 import simulateRace from "../src/predict/simulateRace.mjs";
 import bets from "../src/predict/bets.mjs";
 
-/* ---------- JSONC reader (comments / trailing commas OK) ---------- */
+// ---- JSONC reader (comments / trailing commas OK)
 function readJsonLoose(filePath) {
   const raw = fs.readFileSync(filePath, "utf8");
   const noComments = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "");
@@ -20,11 +20,10 @@ function readJsonLoose(filePath) {
   return JSON.parse(noTrailing);
 }
 
-/* ---------- paths ---------- */
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
-/* ---------- scenarios load (array or {scenarios:[...]}) ---------- */
+// ---- scenarios load (array or {scenarios:[...]})
 const scenariosPath = path.join(__dirname, "../src/predict/scenarios.json");
 let scenariosList = [];
 try {
@@ -39,7 +38,7 @@ if (!Array.isArray(scenariosList)) {
   scenariosList = [];
 }
 
-/* ---------- input resolve ---------- */
+// ---- input resolve
 function to2(s){ return String(s).padStart(2, "0"); }
 function resolveInputPath() {
   const argPath = process.argv[2];
@@ -56,12 +55,11 @@ if (!fs.existsSync(raceDataPath)) {
 }
 const raceData = JSON.parse(fs.readFileSync(raceDataPath, "utf-8"));
 
-/* ---------- meta ---------- */
 const date = (raceData.date || (process.env.DATE || "today")).replace(/-/g, "");
 const pid  = to2(raceData.pid || process.env.PID || "04");
 const race = (raceData.race || process.env.RACE || "1R").toUpperCase().replace(/[^\d]/g, "") + "R";
 
-/* ---------- preprocessing chain ---------- */
+// ---- preprocessing chain
 let adjusted = envAdjust(raceData);
 adjusted = stPred(adjusted);
 adjusted = slitAndAttack(adjusted);
@@ -69,18 +67,19 @@ adjusted = realClass(adjusted);
 adjusted = venueAdjust(adjusted);
 adjusted = upsetIndex(adjusted);
 
-/* ---------- entries fallback for simulateRace (古い実装互換) ---------- */
+// ---- make sure entries exists (for older simulateRace implementations)
 function buildEntriesFallback(a) {
   if (Array.isArray(a?.entries)) return a.entries;
   if (Array.isArray(a?.ranking)) return a.ranking.map(r => ({ lane: Number(r.lane)||0, ...r }));
   if (Array.isArray(a?.slitOrder) && a.slitOrder.length) {
     return a.slitOrder.map(s => ({ lane: Number(s.lane)||0 }));
   }
+  // fallback 1..6
   return Array.from({length:6}, (_,i)=>({ lane: i+1 }));
 }
 const adjustedForSim = { ...adjusted, entries: buildEntriesFallback(adjusted) };
 
-/* ---------- scenario match ---------- */
+// ---- scenario match
 function matchScenario(sc, data) {
   if (sc?.requires?.attackType && !sc.requires.attackType.includes(data.attackType)) return false;
   if (sc?.requires?.head && !sc.requires.head.includes(data.head)) return false;
@@ -96,67 +95,45 @@ const baseList = Array.isArray(scenariosList) ? scenariosList : [];
 const effectiveScenarios = matchedScenarios.length ? matchedScenarios : baseList.slice(0,3).map(sc => ({...sc, weight:1}));
 console.log(`[predict] matched: ${matchedScenarios.length}, effective: ${effectiveScenarios.length}`);
 
-/* ---------- helpers: startOrder / thirdPool 共通制限 ---------- */
-// "(1|3|4)" や "2/3" などのトークンから候補枠番号を配列で取得
-function tokenToLanes(tok) {
-  if (tok == null) return [];
-  const s = String(tok);
-  const m = s.match(/[1-6]/g);
-  return m ? [...new Set(m.map(n => Number(n)))] : [];
+// ---- normalize oneMark WITHOUT any third-pool limits
+function normalizeOneMark(scOneMark, slitOrder = []) {
+  const startOrder = Array.isArray(scOneMark?.startOrder) && scOneMark.startOrder.length
+    ? scOneMark.startOrder
+    : (Array.isArray(slitOrder) ? slitOrder.map((s, i) => ({ lane: s.lane, pos: i + 1 })) : []);
+  const linkedPairs = Array.isArray(scOneMark?.linkedPairs) ? scOneMark.linkedPairs : [];
+  const thirdPool   = Array.isArray(scOneMark?.thirdPool)   ? scOneMark.thirdPool   : [];
+  return { startOrder, linkedPairs, thirdPool, thirdBias: scOneMark?.thirdBias };
 }
 
-function normalizeStartOrder(oneMark, slitOrder=[]) {
-  const so = Array.isArray(oneMark?.startOrder) ? oneMark.startOrder : [];
-  if (so.length) return so;
-  // slitOrder があるなら {lane,pos} に
-  return Array.isArray(slitOrder)
-    ? slitOrder.map((s,i)=>({ lane:s.lane, pos:i+1 }))
-    : [];
-}
-
-// 共通制限：3着候補は通常5艇、1着or2着候補に重複がある場合は4艇まで
-function limitThirdPool(oneMark) {
-  const raw = Array.isArray(oneMark?.thirdPool) ? oneMark.thirdPool : [];
-  const headCands   = tokenToLanes(oneMark?.startOrder?.[0]);
-  const secondCands = tokenToLanes(oneMark?.startOrder?.[1]);
-
-  const headOrSecond = new Set([...headCands, ...secondCands]);
-  const cap = (raw.some(x => headOrSecond.has(Number(x)))) ? 4 : 5;
-
-  const uniq = [];
-  for (const v of raw) {
-    const n = Number(v);
-    if (n>=1 && n<=6 && !uniq.includes(n)) uniq.push(n);
-    if (uniq.length >= cap) break;
-  }
-  return uniq.map(n => String(n)); // 既存JSONに合わせて文字列で返す
-}
-
-/* ---------- simulateRace compatibility wrapper ---------- */
+// ---- simulateRace compatibility wrapper
 function runSimulate(sc) {
-  // thirdPool を共通ルールで制限（oneMark はそのままコピーして thirdPool だけ置換）
-  const limited3rd = limitThirdPool(sc.oneMark || {});
-  const oneMarkLimited = { ...(sc.oneMark || {}), thirdPool: limited3rd };
-
-  const startOrder = normalizeStartOrder(oneMarkLimited, adjusted.slitOrder || []);
-  const linked = Array.isArray(oneMarkLimited?.linkedPairs) ? oneMarkLimited.linkedPairs.length : 0;
-  const tpool  = Array.isArray(oneMarkLimited?.thirdPool) ? oneMarkLimited.thirdPool.length : 0;
-  console.log(`[DEBUG] simulate ${sc.id} w=${sc.weight} startOrder=${startOrder.map(x=> (x.lane??x) ).join("-")} linked=${linked} thirdPool=${tpool}`);
+  const oneMark = normalizeOneMark(sc.oneMark, adjusted.slitOrder || []);
+  const linked = Array.isArray(oneMark.linkedPairs) ? oneMark.linkedPairs.length : 0;
+  const tpool  = Array.isArray(oneMark.thirdPool)   ? oneMark.thirdPool.length   : 0;
+  const soLens = Array.isArray(oneMark.startOrder) ? oneMark.startOrder.length : 0;
+  console.log(
+    `[DEBUG] simulate ${sc.id} w=${sc.weight} startOrder=${soLens ? oneMark.startOrder.map(x=>typeof x==="object"?x.lane:x).join("-"):"-"} ` +
+    `linked=${linked} thirdPool=${tpool}`
+  );
 
   let out;
   try {
     if (simulateRace.length >= 2) {
-      out = simulateRace(adjustedForSim, oneMarkLimited);
+      out = simulateRace(adjustedForSim, oneMark);
     } else {
-      out = simulateRace(startOrder, oneMarkLimited);
+      // legacy signature
+      const startOrderLegacy = Array.isArray(oneMark.startOrder)
+        ? oneMark.startOrder.map((s,i)=> (typeof s==="object" ? s : { lane:Number(s)||0, pos:i+1 }))
+        : [];
+      out = simulateRace(startOrderLegacy, oneMark);
     }
   } catch (e) {
     console.error(`Error:  simulateRace failed for scenario: ${sc.id}`, e?.message);
     return {};
   }
 
-  // 返り値が確率マップならそのまま、ポジション配列なら3連単キーに変換
   if (out && !Array.isArray(out) && typeof out === "object") return out;
+
   if (Array.isArray(out)) {
     const top3 = [...out].sort((a,b)=>a.pos-b.pos).slice(0,3);
     if (top3.length === 3) return { [`${top3[0].lane}-${top3[1].lane}-${top3[2].lane}`]: 1 };
@@ -172,7 +149,7 @@ const scenarioResults = effectiveScenarios.map(sc => {
   return { id: sc.id, notes: sc.notes, oneMark: sc.oneMark, weight: sc.weight, finalProb };
 });
 
-/* ---------- aggregate & normalize ---------- */
+// ---- aggregate & normalize
 let aggregated = {};
 let totalWeight = 0;
 for (const sr of scenarioResults) {
@@ -184,7 +161,7 @@ for (const sr of scenarioResults) {
 if (totalWeight > 0) for (const k of Object.keys(aggregated)) aggregated[k] /= totalWeight;
 console.log(`[DEBUG] aggregated keys=${Object.keys(aggregated).length} (normalized by weight=${totalWeight.toFixed(3)})`);
 
-/* ---------- bets (with compact fallback + padding to 18) ---------- */
+// ---- bets (with compact fallback)
 function buildCompactFromMain(main = []) {
   const byHead = new Map();
   for (const t of main) {
@@ -208,23 +185,6 @@ let betResult;
 try { betResult = bets(aggregated, 18); }
 catch(e) { console.error("[ERROR] bets() failed:", e?.message); betResult = {compact:"", main:[], ana:[], markdown:"_no bets_"}; }
 
-// 不足分を aggregated 上位で補完して 18 点に
-const TARGET = 18;
-const keyToTriplet = k => k.split("-").map(n => Number(n));
-const have = new Set((betResult.main || []).map(t => t.join("-")));
-if ((betResult.main?.length || 0) < TARGET) {
-  const candidates = Object.entries(aggregated)
-    .filter(([k,p]) => Number(p) > 0 && !have.has(k))
-    .sort((a,b) => b[1] - a[1])
-    .slice(0, TARGET - (betResult.main?.length || 0))
-    .map(([k]) => keyToTriplet(k));
-
-  if (!betResult.main) betResult.main = [];
-  betResult.main.push(...candidates);
-  console.log(`[INFO] padded bets: ${betResult.main.length} tickets (target=${TARGET})`);
-}
-
-// compact が空なら main から生成
 if ((!betResult?.compact || betResult.compact.length===0) && betResult?.main?.length>0) {
   const fb = buildCompactFromMain(betResult.main);
   if (fb) {
@@ -235,7 +195,7 @@ if ((!betResult?.compact || betResult.compact.length===0) && betResult?.main?.le
 }
 if (!betResult?.markdown) betResult.markdown = betResult.compact || "_no bets_";
 
-/* ---------- output files ---------- */
+// ---- output files
 const outDir = path.join("public", "predictions", date, pid, race);
 fs.mkdirSync(outDir, { recursive: true });
 
