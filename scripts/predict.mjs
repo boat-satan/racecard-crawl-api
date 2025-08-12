@@ -115,22 +115,45 @@ if (effectiveScenarios.length === 0) {
   console.error("[WARN] No scenarios available. bets will be fallback-only.");
 }
 
-// ===== 3) 1M後〜ゴールの道中展開シミュレーション =====
+// ===== 3) 1M→ゴール展開: oneMark正規化 → simulateRace =====
+
+// "(2|3)" → ["2","3"] など。startOrder を配列の配列へ統一
+function normalizeOneMark(oneMark = {}) {
+  const toGroup = (g) => {
+    if (Array.isArray(g)) return g.map(String);
+    if (g == null) return [];
+    const s = String(g).trim();
+    const inner = s.replace(/[()\s]/g, "");
+    if (!inner) return [];
+    return inner.split("|").map(String);
+  };
+
+  const rawStart = oneMark.startOrder ?? oneMark.order ?? [];
+  const startOrder = Array.isArray(rawStart) ? rawStart.map(toGroup) : [toGroup(rawStart)];
+
+  const linkedPairs = Array.isArray(oneMark.linkedPairs)
+    ? oneMark.linkedPairs.map((p) => (Array.isArray(p) ? p.map(String) : toGroup(p)))
+    : [];
+
+  const thirdPool = Array.isArray(oneMark.thirdPool)
+    ? oneMark.thirdPool.map(String)
+    : toGroup(oneMark.thirdPool);
+
+  return { ...oneMark, startOrder, linkedPairs, thirdPool };
+}
+
 const scenarioResults = effectiveScenarios.map(sc => {
+  const oneMark = normalizeOneMark(sc.oneMark);
   let finalProb = {};
   try {
-    finalProb = simulateRace(adjusted, sc.oneMark) || {};
+    finalProb = simulateRace(adjusted, oneMark) || {};
   } catch (e) {
-    console.error("[ERROR] simulateRace failed for scenario:", sc?.id, e?.message);
+    console.error(
+      `Error:  simulateRace failed for scenario: ${sc?.id} ${e?.message || e}`
+    );
     finalProb = {};
   }
-  return {
-    id: sc.id,
-    notes: sc.notes,
-    oneMark: sc.oneMark,
-    weight: sc.weight,
-    finalProb
-  };
+  return { id: sc.id, notes: sc.notes, oneMark, weight: sc.weight, finalProb };
 });
 
 // ===== 4) シナリオ結果の重み付け合算（正規化）=====
@@ -151,7 +174,6 @@ if (totalWeight > 0) {
 }
 
 // ===== 5) 買い目生成（18点固定 / compact表記含む）=====
-// bets() が空集合で返る可能性に備えてフォールバック
 let betResult;
 try {
   betResult = bets(aggregated, 18);
@@ -205,7 +227,7 @@ if (Array.isArray(adjusted.ranking)) {
 }
 fs.writeFileSync(path.join(outDir, "race.md"), lines.join("\n"), "utf-8");
 
-// 追加デバッグ（1回だけ要点）
+// 追加デバッグ
 console.log(`[predict] scenarios loaded: ${Array.isArray(scenariosList) ? scenariosList.length : 0}`);
 console.log(`[predict] matched: ${matchedScenarios.length}, effective: ${effectiveScenarios.length}`);
 console.log(`[predict] wrote:
