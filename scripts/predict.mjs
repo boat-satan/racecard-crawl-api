@@ -12,7 +12,9 @@ import upsetIndex from "../src/predict/upsetIndex.mjs";
 import simulateRace from "../src/predict/simulateRace.mjs";
 import bets from "../src/predict/bets.mjs";
 
-// ---- JSONC reader (comments / trailing commas OK)
+/* -----------------------------------------------------------
+   JSONC reader (comments / trailing commas OK)
+----------------------------------------------------------- */
 function readJsonLoose(filePath) {
   const raw = fs.readFileSync(filePath, "utf8");
   const noComments = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "");
@@ -23,7 +25,9 @@ function readJsonLoose(filePath) {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
-// ---- scenarios load (array or {scenarios:[...]})
+/* -----------------------------------------------------------
+   scenarios load (array or {scenarios:[...]})
+----------------------------------------------------------- */
 const scenariosPath = path.join(__dirname, "../src/predict/scenarios.json");
 let scenariosList = [];
 try {
@@ -38,7 +42,9 @@ if (!Array.isArray(scenariosList)) {
   scenariosList = [];
 }
 
-// ---- input resolve
+/* -----------------------------------------------------------
+   input resolve
+----------------------------------------------------------- */
 function to2(s){ return String(s).padStart(2, "0"); }
 function resolveInputPath() {
   const argPath = process.argv[2];
@@ -59,7 +65,9 @@ const date = (raceData.date || (process.env.DATE || "today")).replace(/-/g, "");
 const pid  = to2(raceData.pid || process.env.PID || "04");
 const race = (raceData.race || process.env.RACE || "1R").toUpperCase().replace(/[^\d]/g, "") + "R";
 
-// ---- preprocessing chain
+/* -----------------------------------------------------------
+   preprocessing chain
+----------------------------------------------------------- */
 let adjusted = envAdjust(raceData);
 adjusted = stPred(adjusted);
 adjusted = slitAndAttack(adjusted);
@@ -67,19 +75,22 @@ adjusted = realClass(adjusted);
 adjusted = venueAdjust(adjusted);
 adjusted = upsetIndex(adjusted);
 
-// ---- make sure entries exists (for older simulateRace implementations)
+/* -----------------------------------------------------------
+   ensure entries for simulateRace compatibility
+----------------------------------------------------------- */
 function buildEntriesFallback(a) {
   if (Array.isArray(a?.entries)) return a.entries;
   if (Array.isArray(a?.ranking)) return a.ranking.map(r => ({ lane: Number(r.lane)||0, ...r }));
   if (Array.isArray(a?.slitOrder) && a.slitOrder.length) {
     return a.slitOrder.map(s => ({ lane: Number(s.lane)||0 }));
   }
-  // fallback 1..6
   return Array.from({length:6}, (_,i)=>({ lane: i+1 }));
 }
 const adjustedForSim = { ...adjusted, entries: buildEntriesFallback(adjusted) };
 
-// ---- scenario match
+/* -----------------------------------------------------------
+   scenario match
+----------------------------------------------------------- */
 function matchScenario(sc, data) {
   if (sc?.requires?.attackType && !sc.requires.attackType.includes(data.attackType)) return false;
   if (sc?.requires?.head && !sc.requires.head.includes(data.head)) return false;
@@ -95,13 +106,17 @@ const baseList = Array.isArray(scenariosList) ? scenariosList : [];
 const effectiveScenarios = matchedScenarios.length ? matchedScenarios : baseList.slice(0,3).map(sc => ({...sc, weight:1}));
 console.log(`[predict] matched: ${matchedScenarios.length}, effective: ${effectiveScenarios.length}`);
 
-// ---- normalize start order from slitOrder when scenario omits it
+/* -----------------------------------------------------------
+   normalize start order
+----------------------------------------------------------- */
 function normalizeStartOrder(oneMark, slitOrder=[]) {
   const so = Array.isArray(oneMark?.startOrder) ? oneMark.startOrder : [];
   return so.length ? so : (Array.isArray(slitOrder) ? slitOrder.map((s,i)=>({lane:s.lane, pos:i+1})) : []);
 }
 
-// ---- simulateRace compatibility wrapper
+/* -----------------------------------------------------------
+   simulateRace wrapper
+----------------------------------------------------------- */
 function runSimulate(sc) {
   const startOrder = normalizeStartOrder(sc.oneMark, adjusted.slitOrder || []);
   const linked = Array.isArray(sc.oneMark?.linkedPairs) ? sc.oneMark.linkedPairs.length : 0;
@@ -110,11 +125,9 @@ function runSimulate(sc) {
 
   let out;
   try {
-    // 署名が (adjusted, oneMark) の場合
     if (simulateRace.length >= 2) {
       out = simulateRace(adjustedForSim, sc.oneMark);
     } else {
-      // 署名が (startOrder, perfMap/laps...) の場合（第二引数は使われない想定）
       out = simulateRace(startOrder, sc.oneMark);
     }
   } catch (e) {
@@ -122,10 +135,8 @@ function runSimulate(sc) {
     return {};
   }
 
-  // 返り値が「確率マップ」ならそのまま
   if (out && !Array.isArray(out) && typeof out === "object") return out;
 
-  // 返り値が「最終ポジション配列」なら 3連単キーに変換
   if (Array.isArray(out)) {
     const top3 = [...out].sort((a,b)=>a.pos-b.pos).slice(0,3);
     if (top3.length === 3) return { [`${top3[0].lane}-${top3[1].lane}-${top3[2].lane}`]: 1 };
@@ -142,7 +153,9 @@ const scenarioResults = effectiveScenarios.map(sc => {
   return { id: sc.id, notes: sc.notes, oneMark: sc.oneMark, weight: sc.weight, finalProb };
 });
 
-// ---- aggregate & normalize
+/* -----------------------------------------------------------
+   aggregate & normalize
+----------------------------------------------------------- */
 let aggregated = {};
 let totalWeight = 0;
 for (const sr of scenarioResults) {
@@ -154,7 +167,9 @@ for (const sr of scenarioResults) {
 if (totalWeight > 0) for (const k of Object.keys(aggregated)) aggregated[k] /= totalWeight;
 console.log(`[DEBUG] aggregated keys=${Object.keys(aggregated).length} (normalized by weight=${totalWeight.toFixed(3)})`);
 
-// ---- bets (with compact fallback)
+/* -----------------------------------------------------------
+   bets + compact helpers
+----------------------------------------------------------- */
 function buildCompactFromMain(main = []) {
   const byHead = new Map();
   for (const t of main) {
@@ -174,6 +189,36 @@ function buildCompactFromMain(main = []) {
   return chunks.join(", ");
 }
 
+function parseKeyToTriplet(k) {
+  const [a,b,c] = String(k).split("-").map(n=>Number(n));
+  return (Number.isFinite(a)&&Number.isFinite(b)&&Number.isFinite(c)) ? [a,b,c] : null;
+}
+
+function padBetsTo(betResult, aggregated, target = 18) {
+  if (!betResult || !Array.isArray(betResult.main)) return { added: 0 };
+  const set = new Set(betResult.main.map(t => t.join("-")));
+  const sorted = Object.entries(aggregated)
+    .sort(([,pA],[,pB]) => (pB||0) - (pA||0))
+    .map(([k]) => k);
+
+  let added = 0;
+  for (const k of sorted) {
+    if (betResult.main.length >= target) break;
+    const tri = parseKeyToTriplet(k);
+    if (!tri) continue;
+    const sig = tri.join("-");
+    if (set.has(sig)) continue;
+    betResult.main.push(tri);
+    set.add(sig);
+    added++;
+  }
+  if (added > 0) console.log(`[INFO] padded bets: ${betResult.main.length} tickets (target=${target})`);
+  return { added };
+}
+
+/* -----------------------------------------------------------
+   run bets
+----------------------------------------------------------- */
 let betResult;
 try { betResult = bets(aggregated, 18); }
 catch(e) { console.error("[ERROR] bets() failed:", e?.message); betResult = {compact:"", main:[], ana:[], markdown:"_no bets_"}; }
@@ -186,100 +231,22 @@ if ((!betResult?.compact || betResult.compact.length===0) && betResult?.main?.le
     console.log("[INFO] generated fallback compact from main:", fb);
   }
 }
+
+// ---- 18点までパディングしてから compact を最終再生成（★今回の修正ポイント）
+padBetsTo(betResult, aggregated, 18);
+{
+  const compactAfterPad = buildCompactFromMain(betResult.main);
+  if (compactAfterPad) {
+    betResult.compact = compactAfterPad;
+    betResult.markdown = compactAfterPad; // MD 表示と同期
+    console.log("[INFO] rebuilt compact after padding:", compactAfterPad);
+  }
+}
 if (!betResult?.markdown) betResult.markdown = betResult.compact || "_no bets_";
 
-/* ===== ここから “最小変更” の不足埋めロジック ===== */
-(function padBetsTo18() {
-  const TARGET = 18;
-  if (!Array.isArray(betResult.main)) betResult.main = [];
-  const main = betResult.main;
-  if (main.length >= TARGET) return;
-
-  const lanesAll = [1,2,3,4,5,6];
-  const key = t => Array.isArray(t) ? t.join("-") : String(t);
-  const seen = new Set(main.map(key));
-
-  // スリット順（速い順）を優先順位に利用
-  const slitFast = Array.isArray(adjusted.slitOrder)
-    ? [...adjusted.slitOrder].sort((a,b)=>a.adjustedST-b.adjustedST).map(x=>Number(x.lane))
-    : lanesAll;
-
-  // compact を簡易パースしてヘッドとプールを抽出
-  function parseCompactPools(comp){
-    if (!comp) return [];
-    return comp.split(",").map(s=>s.trim()).filter(Boolean).map(chunk=>{
-      const m = chunk.match(/^(\d+)-(\d+)-(\d+)$/);
-      if (!m) return null;
-      const h = Number(m[1]);
-      const S = m[2].split("").map(Number);
-      const T = m[3].split("").map(Number);
-      return {h,S,T};
-    }).filter(Boolean);
-  }
-  let pools = parseCompactPools(betResult.compact || betResult.markdown);
-
-  // プールが無い場合は、スリット最速をheadにして作る
-  if (pools.length === 0) {
-    const h = slitFast[0] ?? 1;
-    pools = [{ h, S: slitFast.slice(1,4), T: [...slitFast] }];
-  }
-
-  // S/T を少し拡張してから優先順にチケット生成
-  const rank = v => slitFast.indexOf(v) < 0 ? 99 : slitFast.indexOf(v);
-  for (const p of pools) {
-    // S を最大4艇まで埋める
-    for (const l of slitFast) {
-      if (p.S.length >= 4) break;
-      if (l !== p.h && !p.S.includes(l)) p.S.push(l);
-    }
-    // T は全艇に拡張
-    const Tset = new Set([...p.T, ...lanesAll]);
-    const S = [...new Set(p.S)].sort((a,b)=>rank(a)-rank(b));
-    const T = [...Tset].sort((a,b)=>rank(a)-rank(b));
-
-    // 生成：h-s-t（同一番号重複は除外）
-    for (const s of S) {
-      if (main.length >= TARGET) break;
-      if (s === p.h) continue;
-      for (const t3 of T) {
-        if (main.length >= TARGET) break;
-        if (t3 === p.h || t3 === s) continue;
-        const ticket = [p.h, s, t3];
-        const k = key(ticket);
-        if (!seen.has(k)) {
-          seen.add(k);
-          main.push(ticket);
-        }
-      }
-    }
-    if (main.length >= TARGET) break;
-  }
-
-  // それでも足りなければ全通りフォールバック（優先：slitFast順）
-  if (main.length < TARGET) {
-    const H = [...slitFast];
-    const S = [...slitFast];
-    const T = [...slitFast];
-    for (const h of H) {
-      for (const s of S) {
-        for (const t3 of T) {
-          if (main.length >= TARGET) break;
-          if (h===s || h===t3 || s===t3) continue;
-          const tk = [h,s,t3];
-          const k = key(tk);
-          if (!seen.has(k)) { seen.add(k); main.push(tk); }
-        }
-        if (main.length >= TARGET) break;
-      }
-      if (main.length >= TARGET) break;
-    }
-  }
-
-  console.log(`[INFO] padded bets: ${main.length} tickets (target=${TARGET})`);
-})();
-/* ===== 不足埋めここまで ===== */
-
-// ---- output files
+/* -----------------------------------------------------------
+   output files
+----------------------------------------------------------- */
 const outDir = path.join("public", "predictions", date, pid, race);
 fs.mkdirSync(outDir, { recursive: true });
 
