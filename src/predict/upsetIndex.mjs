@@ -16,7 +16,7 @@ function getLose(entry, name) {
   return nz(entry?.stats?.entryCourse?.loseKimarite?.[name], 0);
 }
 function getExRank(entry) {
-  // 展示タイム順位 or exTimeRank[0].rank を優先利用（小さいほど良い）
+  // 展示タイム順位 or exTimeRank[0].rank を優先（小さいほど良い）
   return nz(entry?.exhibition?.exTimeRank ?? entry?.exRank ??
            entry?.stats?.exTimeRank?.[0]?.rank, 4);
 }
@@ -26,10 +26,7 @@ function getPredST(entry) {
 
 export function calcUpsetIndex(entries, weather = {}) {
   const {
-    windSpeed = 0,          // m/s
-    windDirection = "",     // 文字列（例: "西", "南西"）
-    waveHeight = 0,         // m
-    stabilizer = false
+    windSpeed = 0, windDirection = "", waveHeight = 0, stabilizer = false
   } = weather;
 
   // 荒天係数（0..1）
@@ -38,7 +35,7 @@ export function calcUpsetIndex(entries, weather = {}) {
     0, 1
   );
 
-  // 1コースと2コースの「壁力」参考
+  // 1コースと2コースの「壁力」
   const lane1 = entries.find(e => Number(e.lane) === 1);
   const lane2 = entries.find(e => Number(e.lane) === 2);
   const inLoseMakuri = getLose(lane1, "まくり");
@@ -52,35 +49,34 @@ export function calcUpsetIndex(entries, weather = {}) {
     const reasons = [];
     let score = 0;
 
-    // --- イン崩れ要因（他コースの波乱材料）
+    // イン崩れ要因（他コースの波乱材料）
     if (lane !== 1) {
       if (inLoseMakuri >= 3) { score += 8; reasons.push("1のまくられ負け傾向"); }
       if (inLoseSashi  >= 3) { score += 6; reasons.push("1の差され負け傾向"); }
-      // 2コースが「逃がし」タイプだと波乱はやや減
       if (lane2Top2 >= 55) { score -= 4; reasons.push("2が壁でイン保護"); }
       else if (lane2Top2 <= 40) { score += 4; reasons.push("2の壁弱い"); }
     }
 
-    // --- 展示・モーター気配
+    // 展示・モーター気配
     const exRank = getExRank(e);              // 1〜6
     const motor2 = nz(e?.racecard?.motorTop2 ?? e?.motorTop2 ?? e?.motor2, 30);
     if (exRank <= 2) { score += 8; reasons.push("展示上位"); }
     if (motor2 >= 40 && lane >= 4) { score += 7; reasons.push("外の好モーター"); }
     if (motor2 < 30) { score -= 3; reasons.push("モーター不安"); }
 
-    // --- 予想ST・ダッシュ補正（速ければ荒れ方向）
+    // 予想ST・ダッシュ補正
     const pst = getPredST(e);
-    const isDash = lane >= 4; // 簡易：4〜6をダッシュとみなす
+    const isDash = lane >= 4; // 簡易：4〜6をダッシュ扱い
     if (pst <= 0.13) { score += isDash ? 10 : 6; reasons.push("予想ST速い"); }
     else if (pst >= 0.20) { score -= 4; reasons.push("予想ST遅め"); }
 
-    // --- チルト傾向
+    // チルト傾向
     const tilt = parseFloat(String(e?.exhibition?.tilt ?? "0").replace("°","")) || 0;
     if (tilt > 0) { score += 4; reasons.push("チルト+で伸び"); }
     if (tilt < 0) { score -= 3; reasons.push("チルト-で安定寄り"); }
 
-    // --- 風向き（向かい風×ダッシュ優位をやや加点）
-    const isHead = /西|向/.test(windDirection); // 例
+    // 風向き（向かい風×ダッシュ優位）
+    const isHead = /西|向/.test(windDirection);
     if (env > 0.2) {
       if (isHead && isDash) { score += 6; reasons.push("向かい風でダッシュ利"); }
       if (!stabilizer && env > 0.5) { score += 5; reasons.push("荒天・非スタビ"); }
@@ -92,9 +88,10 @@ export function calcUpsetIndex(entries, weather = {}) {
     list.push({ lane, score, reasons });
   }
 
-  // 最大の艇をメモ
   const max = [...list].sort((a,b)=>b.score-a.score)[0] ?? null;
   return { upsetList: list, mostUpset: max };
 }
 
+// ---- デフォルトエクスポート名を用意（最小変更） ----
+const upsetIndex = calcUpsetIndex;
 export default upsetIndex;
