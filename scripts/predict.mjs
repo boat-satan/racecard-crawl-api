@@ -188,6 +188,97 @@ if ((!betResult?.compact || betResult.compact.length===0) && betResult?.main?.le
 }
 if (!betResult?.markdown) betResult.markdown = betResult.compact || "_no bets_";
 
+/* ===== ここから “最小変更” の不足埋めロジック ===== */
+(function padBetsTo18() {
+  const TARGET = 18;
+  if (!Array.isArray(betResult.main)) betResult.main = [];
+  const main = betResult.main;
+  if (main.length >= TARGET) return;
+
+  const lanesAll = [1,2,3,4,5,6];
+  const key = t => Array.isArray(t) ? t.join("-") : String(t);
+  const seen = new Set(main.map(key));
+
+  // スリット順（速い順）を優先順位に利用
+  const slitFast = Array.isArray(adjusted.slitOrder)
+    ? [...adjusted.slitOrder].sort((a,b)=>a.adjustedST-b.adjustedST).map(x=>Number(x.lane))
+    : lanesAll;
+
+  // compact を簡易パースしてヘッドとプールを抽出
+  function parseCompactPools(comp){
+    if (!comp) return [];
+    return comp.split(",").map(s=>s.trim()).filter(Boolean).map(chunk=>{
+      const m = chunk.match(/^(\d+)-(\d+)-(\d+)$/);
+      if (!m) return null;
+      const h = Number(m[1]);
+      const S = m[2].split("").map(Number);
+      const T = m[3].split("").map(Number);
+      return {h,S,T};
+    }).filter(Boolean);
+  }
+  let pools = parseCompactPools(betResult.compact || betResult.markdown);
+
+  // プールが無い場合は、スリット最速をheadにして作る
+  if (pools.length === 0) {
+    const h = slitFast[0] ?? 1;
+    pools = [{ h, S: slitFast.slice(1,4), T: [...slitFast] }];
+  }
+
+  // S/T を少し拡張してから優先順にチケット生成
+  const rank = v => slitFast.indexOf(v) < 0 ? 99 : slitFast.indexOf(v);
+  for (const p of pools) {
+    // S を最大4艇まで埋める
+    for (const l of slitFast) {
+      if (p.S.length >= 4) break;
+      if (l !== p.h && !p.S.includes(l)) p.S.push(l);
+    }
+    // T は全艇に拡張
+    const Tset = new Set([...p.T, ...lanesAll]);
+    const S = [...new Set(p.S)].sort((a,b)=>rank(a)-rank(b));
+    const T = [...Tset].sort((a,b)=>rank(a)-rank(b));
+
+    // 生成：h-s-t（同一番号重複は除外）
+    for (const s of S) {
+      if (main.length >= TARGET) break;
+      if (s === p.h) continue;
+      for (const t3 of T) {
+        if (main.length >= TARGET) break;
+        if (t3 === p.h || t3 === s) continue;
+        const ticket = [p.h, s, t3];
+        const k = key(ticket);
+        if (!seen.has(k)) {
+          seen.add(k);
+          main.push(ticket);
+        }
+      }
+    }
+    if (main.length >= TARGET) break;
+  }
+
+  // それでも足りなければ全通りフォールバック（優先：slitFast順）
+  if (main.length < TARGET) {
+    const H = [...slitFast];
+    const S = [...slitFast];
+    const T = [...slitFast];
+    for (const h of H) {
+      for (const s of S) {
+        for (const t3 of T) {
+          if (main.length >= TARGET) break;
+          if (h===s || h===t3 || s===t3) continue;
+          const tk = [h,s,t3];
+          const k = key(tk);
+          if (!seen.has(k)) { seen.add(k); main.push(tk); }
+        }
+        if (main.length >= TARGET) break;
+      }
+      if (main.length >= TARGET) break;
+    }
+  }
+
+  console.log(`[INFO] padded bets: ${main.length} tickets (target=${TARGET})`);
+})();
+/* ===== 不足埋めここまで ===== */
+
 // ---- output files
 const outDir = path.join("public", "predictions", date, pid, race);
 fs.mkdirSync(outDir, { recursive: true });
