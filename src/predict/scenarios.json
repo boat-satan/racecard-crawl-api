@@ -8,14 +8,14 @@
       "title": "イン逃げ基準",
       "baseWeight": 1.0,
       "requires": {
-        "attackType": ["none","mildPressure"],
+        "attackType": ["none", "mildPressure"],
         "head": ["1"],
-        "inReliability": "normalUp" 
+        "inReliability": "normalUp"
       },
       "oneMark": {
-        "order": ["1","2/3","4/5","6"],
-        "linkedPairs": [["2","3"]],
-        "thirdPool": ["4","5","2","3","6"],
+        "startOrder": ["1", "(2|3)", "(4|5)", "6"],
+        "linkedPairs": [["2", "3"]],
+        "thirdPool": ["4", "5", "2", "3", "6"],
         "thirdBias": "course3rdMix"
       },
       "notes": "標準のイン逃げ。2-3の連動を優先。"
@@ -32,9 +32,9 @@
         "inAvgST": "fast"
       },
       "oneMark": {
-        "order": ["1","(2|3)","(3|2)","4/5","6"],
-        "linkedPairs": [["2","3"]],
-        "thirdPool": ["4","5","6","2","3"],
+        "startOrder": ["1", "(2|3)", "(3|2)", "(4|5)", "6"],
+        "linkedPairs": [["2", "3"]],
+        "thirdPool": ["4", "5", "6", "2", "3"],
         "thirdBias": "exRank3rdMix"
       },
       "notes": "1が出て先マイ。2=3の順不同連動を強調。"
@@ -45,15 +45,15 @@
       "title": "向かい風でもイン残し",
       "baseWeight": 0.8,
       "requires": {
-        "attackType": ["none","lightMakuriTry"],
+        "attackType": ["none", "lightMakuriTry"],
         "head": ["1"],
         "wind": "contra",
         "dashAdvantage": false
       },
       "oneMark": {
-        "order": ["1","3/2","4/5","6"],
-        "linkedPairs": [["2","4"],["3","4"]],
-        "thirdPool": ["5","2","3","6","4"],
+        "startOrder": ["1", "(3|2)", "(4|5)", "6"],
+        "linkedPairs": [["2", "4"], ["3", "4"]],
+        "thirdPool": ["5", "2", "3", "6", "4"],
         "thirdBias": "national3rdMix"
       },
       "notes": "風に耐えて1先マイ。2-4 or 3-4の連動も少量。"
@@ -70,9 +70,9 @@
         "dashAdvantage": true
       },
       "oneMark": {
-        "order": ["4","(5|3)","1/2/6"],
-        "linkedPairs": [["4","5"],["4","3"]],
-        "thirdPool": ["1","2","6","5","3"],
+        "startOrder": ["4", "(5|3)", "(1|2|6)"],
+        "linkedPairs": [["4", "5"], ["4", "3"]],
+        "thirdPool": ["1", "2", "6", "5", "3"],
         "thirdBias": "course3rdMix"
       },
       "notes": "4→(5|3) 連動を強調。インは3着残り寄り。"
@@ -87,9 +87,9 @@
         "slitLeader": 3
       },
       "oneMark": {
-        "order": ["3","1/4","2/5/6"],
-        "linkedPairs": [["3","1"],["3","4"]],
-        "thirdPool": ["2","5","6","1","4"],
+        "startOrder": ["3", "(1|4)", "(2|5|6)"],
+        "linkedPairs": [["3", "1"], ["3", "4"]],
+        "thirdPool": ["2", "5", "6", "1", "4"],
         "thirdBias": "exRank3rdMix"
       },
       "notes": "1が壁で少し残るパターン。"
@@ -100,14 +100,14 @@
       "title": "5の差し切り（4の攻めで内が空く）",
       "baseWeight": 0.9,
       "requires": {
-        "attackType": ["fullMakuri","lightMakuriTry"],
+        "attackType": ["fullMakuri", "lightMakuriTry"],
         "slitPusher": 4,
         "outerFollow": 5
       },
       "oneMark": {
-        "order": ["5","(4|3)","1/2/6"],
-        "linkedPairs": [["5","4"],["5","3"]],
-        "thirdPool": ["1","2","6","4","3"],
+        "startOrder": ["5", "(4|3)", "(1|2|6)"],
+        "linkedPairs": [["5", "4"], ["5", "3"]],
+        "thirdPool": ["1", "2", "6", "4", "3"],
         "thirdBias": "course3rdMix"
       },
       "notes": "4の攻めで差し場→5頭。"
@@ -123,9 +123,9 @@
         "twoCoursePassive": true
       },
       "oneMark": {
-        "order": ["4","(3|5)","1/2/6"],
-        "linkedPairs": [["3","5"]],
-        "thirdPool": ["1","2","6","5","3"],
+        "startOrder": ["4", "(3|5)", "(1|2|6)"],
+        "linkedPairs": [["3", "5"]],
+        "thirdPool": ["1", "2", "6", "5", "3"],
         "thirdBias": "national3rdMix"
       },
       "notes": "2は受け気味で連外れ寄り。"
@@ -138,13 +138,13 @@
       "baseWeight": 1.0,
       "requires": {
         "attackType": ["sashi"],
-        "head": ["1","2"],
+        "head": ["1", "2"],
         "inWeakness": "sashare"
       },
       "oneMark": {
-        "order": ["2","1/3","4/5/6"],
-        "linkedPairs": [["2","1"],["2","3"]],
-        "thirdPool": ["4","5","6","1","3"],
+        "startOrder": ["2", "(1|3)", "(4|5|6)"],
+        "linkedPairs": [["2", "1"], ["2", "3"]],
+        "thirdPool": ["4", "5", "6", "1", "3"],
         "thirdBias": "course3rdMix"
       },
       "notes": "1が差され負け気味の成績・天候時。"
@@ -159,9 +159,9 @@
         "threeCourseAggressive": true
       },
       "oneMark": {
-        "order": ["2","3","(1|4|5|6)"],
-        "linkedPairs": [["2","3"]],
-        "thirdPool": ["1","4","5","6"],
+        "startOrder": ["2", "3", "(1|4|5|6)"],
+        "linkedPairs": [["2", "3"]],
+        "thirdPool": ["1", "4", "5", "6"],
         "thirdBias": "exRank3rdMix"
       },
       "notes": "2-3連動を明確に押すケース。"
@@ -172,31 +172,28 @@
       "title": "3の差し→1少し残り",
       "baseWeight": 0.8,
       "requires": {
-        "attackType": ["sashi","makuriZashi"],
+        "attackType": ["sashi", "makuriZashi"],
         "inReliability": "normalDown"
       },
       "oneMark": {
-        "order": ["3","1/4","2/5/6"],
-        "linkedPairs": [["3","1"]],
-        "thirdPool": ["2","5","6","4","1"],
+        "startOrder": ["3", "(1|4)", "(2|5|6)"],
+        "linkedPairs": [["3", "1"]],
+        "thirdPool": ["2", "5", "6", "4", "1"],
         "thirdBias": "course3rdMix"
       },
       "notes": "3の差し決まり目。"
     },
 
-    /* ---- D：各コース大凹み（例） ---- */
     {
       "id": "D01-in-bigDelay",
       "type": "D",
       "title": "1が大凹み（壁薄）",
       "baseWeight": 0.7,
-      "requires": {
-        "bigDelayLane": 1
-      },
+      "requires": { "bigDelayLane": 1 },
       "oneMark": {
-        "order": ["(2|3|4)","(3|4|5)","(5|2|1|6)"],
-        "linkedPairs": [["3","4"],["2","3"]],
-        "thirdPool": ["5","2","1","6","4","3"],
+        "startOrder": ["(2|3|4)", "(3|4|5)", "(5|2|1|6)"],
+        "linkedPairs": [["3", "4"], ["2", "3"]],
+        "thirdPool": ["5", "2", "1", "6", "4", "3"],
         "thirdBias": "course3rdMix"
       },
       "notes": "イン壁喪失→センター主導。"
@@ -206,13 +203,11 @@
       "type": "D",
       "title": "2が大凹み（逃がし喪失）",
       "baseWeight": 0.6,
-      "requires": {
-        "bigDelayLane": 2
-      },
+      "requires": { "bigDelayLane": 2 },
       "oneMark": {
-        "order": ["(1|3|4)","(3|4|5)","(5|1|6|2)"],
-        "linkedPairs": [["4","3"]],
-        "thirdPool": ["5","1","6","2","3","4"],
+        "startOrder": ["(1|3|4)", "(3|4|5)", "(5|1|6|2)"],
+        "linkedPairs": [["4", "3"]],
+        "thirdPool": ["5", "1", "6", "2", "3", "4"],
         "thirdBias": "exRank3rdMix"
       },
       "notes": "2の援護消失で3-4が主導。"
@@ -222,13 +217,11 @@
       "type": "D",
       "title": "3が大凹み",
       "baseWeight": 0.6,
-      "requires": {
-        "bigDelayLane": 3
-      },
+      "requires": { "bigDelayLane": 3 },
       "oneMark": {
-        "order": ["(1|2|4)","(4|2|5)","(5|1|6|3)"],
-        "linkedPairs": [["4","2"]],
-        "thirdPool": ["5","1","6","3","2","4"],
+        "startOrder": ["(1|2|4)", "(4|2|5)", "(5|1|6|3)"],
+        "linkedPairs": [["4", "2"]],
+        "thirdPool": ["5", "1", "6", "3", "2", "4"],
         "thirdBias": "national3rdMix"
       },
       "notes": "4のカド流入や2差しが台頭。"
@@ -238,13 +231,11 @@
       "type": "D",
       "title": "4が大凹み（カド不発）",
       "baseWeight": 0.6,
-      "requires": {
-        "bigDelayLane": 4
-      },
+      "requires": { "bigDelayLane": 4 },
       "oneMark": {
-        "order": ["1","(2|3)","(5|6|4)"],
-        "linkedPairs": [["2","3"]],
-        "thirdPool": ["5","6","4","2","3","1"],
+        "startOrder": ["1", "(2|3)", "(5|6|4)"],
+        "linkedPairs": [["2", "3"]],
+        "thirdPool": ["5", "6", "4", "2", "3", "1"],
         "thirdBias": "course3rdMix"
       },
       "notes": "外の伸びが相殺→内優位回帰。"
@@ -254,13 +245,11 @@
       "type": "D",
       "title": "5が大凹み",
       "baseWeight": 0.5,
-      "requires": {
-        "bigDelayLane": 5
-      },
+      "requires": { "bigDelayLane": 5 },
       "oneMark": {
-        "order": ["(1|4|3)","(4|3|2)","(6|1|5)"],
-        "linkedPairs": [["4","3"]],
-        "thirdPool": ["6","1","5","2","3","4"],
+        "startOrder": ["(1|4|3)", "(4|3|2)", "(6|1|5)"],
+        "linkedPairs": [["4", "3"]],
+        "thirdPool": ["6", "1", "5", "2", "3", "4"],
         "thirdBias": "exRank3rdMix"
       },
       "notes": "外の連動が崩れ、内・カドへ回帰。"
@@ -270,19 +259,16 @@
       "type": "D",
       "title": "6が大凹み",
       "baseWeight": 0.5,
-      "requires": {
-        "bigDelayLane": 6
-      },
+      "requires": { "bigDelayLane": 6 },
       "oneMark": {
-        "order": ["(1|4|5)","(4|5|3)","(2|1|6)"],
-        "linkedPairs": [["4","5"]],
-        "thirdPool": ["2","1","6","3","5","4"],
+        "startOrder": ["(1|4|5)", "(4|5|3)", "(2|1|6)"],
+        "linkedPairs": [["4", "5"]],
+        "thirdPool": ["2", "1", "6", "3", "5", "4"],
         "thirdBias": "national3rdMix"
       },
       "notes": "6の追走が消え、4-5並走が軸。"
     },
 
-    /* 1逃げ派生（連動差し替え違い） */
     {
       "id": "A11-escape-2follow",
       "type": "A",
@@ -290,9 +276,9 @@
       "baseWeight": 0.9,
       "requires": { "head": ["1"], "attackType": ["none"] },
       "oneMark": {
-        "order": ["1","2","(3|4|5|6)"],
-        "linkedPairs": [["1","2"]],
-        "thirdPool": ["3","4","5","6"],
+        "startOrder": ["1", "2", "(3|4|5|6)"],
+        "linkedPairs": [["1", "2"]],
+        "thirdPool": ["3", "4", "5", "6"],
         "thirdBias": "course3rdMix"
       }
     },
@@ -301,11 +287,11 @@
       "type": "A",
       "title": "1逃げ→3が押し上げ2着",
       "baseWeight": 0.8,
-      "requires": { "head": ["1"], "attackType": ["none","mildPressure"] },
+      "requires": { "head": ["1"], "attackType": ["none", "mildPressure"] },
       "oneMark": {
-        "order": ["1","3","(2|4|5|6)"],
-        "linkedPairs": [["1","3"]],
-        "thirdPool": ["2","4","5","6"],
+        "startOrder": ["1", "3", "(2|4|5|6)"],
+        "linkedPairs": [["1", "3"]],
+        "thirdPool": ["2", "4", "5", "6"],
         "thirdBias": "exRank3rdMix"
       }
     },
@@ -316,9 +302,9 @@
       "baseWeight": 0.7,
       "requires": { "head": ["1"], "outerNobi": true },
       "oneMark": {
-        "order": ["1","(4|5)","(2|3|6)"],
-        "linkedPairs": [["1","4"],["1","5"]],
-        "thirdPool": ["2","3","6","4","5"],
+        "startOrder": ["1", "(4|5)", "(2|3|6)"],
+        "linkedPairs": [["1", "4"], ["1", "5"]],
+        "thirdPool": ["2", "3", "6", "4", "5"],
         "thirdBias": "national3rdMix"
       }
     }
