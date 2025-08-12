@@ -1,0 +1,2447 @@
+{
+  "meta": {
+    "date": "20250812",
+    "pid": "05",
+    "race": "6R",
+    "sourceFile": "public/integrated/v1/20250812/05/6R.json",
+    "generatedAt": "2025-08-12T12:55:34.004Z"
+  },
+  "weather": {
+    "weather": "雨",
+    "temperature": 30,
+    "windSpeed": 1,
+    "windDirection": "南西",
+    "waterTemperature": 27,
+    "waveHeight": 0.02,
+    "stabilizer": false
+  },
+  "ranking": null,
+  "slitOrder": [
+    {
+      "lane": 2,
+      "startCourse": 2,
+      "adjustedST": 0.14
+    },
+    {
+      "lane": 3,
+      "startCourse": 3,
+      "adjustedST": 0.15
+    },
+    {
+      "lane": 5,
+      "startCourse": 5,
+      "adjustedST": 0.155
+    },
+    {
+      "lane": 4,
+      "startCourse": 4,
+      "adjustedST": 0.185
+    },
+    {
+      "lane": 6,
+      "startCourse": 6,
+      "adjustedST": 0.185
+    },
+    {
+      "lane": 1,
+      "startCourse": 1,
+      "adjustedST": 0.2
+    }
+  ],
+  "attackType": "sashi",
+  "scenarios": [
+    {
+      "id": "C02-2Sashi34Axis",
+      "notes": "3の伸び差しや4の外まわりが相手。",
+      "oneMark": {
+        "startOrder": [
+          "2",
+          "(3|4)",
+          "(1|5|6)"
+        ],
+        "linkedPairs": [
+          [
+            "2",
+            "3"
+          ],
+          [
+            "2",
+            "4"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "5",
+          "6",
+          "4",
+          "3"
+        ],
+        "thirdBias": "exRank3rdMix"
+      },
+      "weight": 0.9233999999999999
+    },
+    {
+      "id": "C04-3Sashi25Axis",
+      "notes": "差し場に入った外勢も絡む。",
+      "oneMark": {
+        "startOrder": [
+          "3",
+          "(2|5)",
+          "(1|4|6)"
+        ],
+        "linkedPairs": [
+          [
+            "3",
+            "2"
+          ],
+          [
+            "3",
+            "5"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "4",
+          "6",
+          "5",
+          "2"
+        ],
+        "thirdBias": "exRank3rdMix"
+      },
+      "weight": 0.90396
+    },
+    {
+      "id": "C05-4Sashi13Axis",
+      "notes": "4角差しで内外を割る展開。",
+      "oneMark": {
+        "startOrder": [
+          "4",
+          "(1|3)",
+          "(2|5|6)"
+        ],
+        "linkedPairs": [
+          [
+            "4",
+            "1"
+          ],
+          [
+            "4",
+            "3"
+          ]
+        ],
+        "thirdPool": [
+          "2",
+          "5",
+          "6",
+          "3",
+          "1"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.89424
+    },
+    {
+      "id": "C06-4Sashi25Axis",
+      "notes": "角差しから外の残しが相手。",
+      "oneMark": {
+        "startOrder": [
+          "4",
+          "(2|5)",
+          "(1|3|6)"
+        ],
+        "linkedPairs": [
+          [
+            "4",
+            "2"
+          ],
+          [
+            "4",
+            "5"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "3",
+          "6",
+          "5",
+          "2"
+        ],
+        "thirdBias": "national3rdMix"
+      },
+      "weight": 0.88452
+    },
+    {
+      "id": "C07-5Sashi14Axis",
+      "notes": "大外差しでもイン残し軸。",
+      "oneMark": {
+        "startOrder": [
+          "5",
+          "(1|4)",
+          "(2|3|6)"
+        ],
+        "linkedPairs": [
+          [
+            "5",
+            "1"
+          ],
+          [
+            "5",
+            "4"
+          ]
+        ],
+        "thirdPool": [
+          "2",
+          "3",
+          "6",
+          "4",
+          "1"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.8748
+    },
+    {
+      "id": "C08-5Sashi23Axis",
+      "notes": "外差しで内側の艇を相手に。",
+      "oneMark": {
+        "startOrder": [
+          "5",
+          "(2|3)",
+          "(1|4|6)"
+        ],
+        "linkedPairs": [
+          [
+            "5",
+            "2"
+          ],
+          [
+            "5",
+            "3"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "4",
+          "6",
+          "3",
+          "2"
+        ],
+        "thirdBias": "exRank3rdMix"
+      },
+      "weight": 0.8748
+    },
+    {
+      "id": "C09-6Sashi14Axis",
+      "notes": "最外差しでもイン・角残し軸。",
+      "oneMark": {
+        "startOrder": [
+          "6",
+          "(1|4)",
+          "(2|3|5)"
+        ],
+        "linkedPairs": [
+          [
+            "6",
+            "1"
+          ],
+          [
+            "6",
+            "4"
+          ]
+        ],
+        "thirdPool": [
+          "2",
+          "3",
+          "5",
+          "4",
+          "1"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.86508
+    },
+    {
+      "id": "C10-6Sashi23Axis",
+      "notes": "差し幅で内センター残し。",
+      "oneMark": {
+        "startOrder": [
+          "6",
+          "(2|3)",
+          "(1|4|5)"
+        ],
+        "linkedPairs": [
+          [
+            "6",
+            "2"
+          ],
+          [
+            "6",
+            "3"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "4",
+          "5",
+          "3",
+          "2"
+        ],
+        "thirdBias": "national3rdMix"
+      },
+      "weight": 0.86508
+    },
+    {
+      "id": "C22-2Sashi36Axis-headWeakIn",
+      "notes": "インが甘いと見て外も絡む。",
+      "oneMark": {
+        "startOrder": [
+          "2",
+          "(3|6)",
+          "(1|4|5)"
+        ],
+        "linkedPairs": [
+          [
+            "2",
+            "3"
+          ],
+          [
+            "2",
+            "6"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "4",
+          "5",
+          "6",
+          "3"
+        ],
+        "thirdBias": "national3rdMix"
+      },
+      "weight": 0.90396
+    },
+    {
+      "id": "C23-2Sashi34Axis-windyCalm",
+      "notes": "静水面で差し切り想定。",
+      "oneMark": {
+        "startOrder": [
+          "2",
+          "(3|4)",
+          "(1|5|6)"
+        ],
+        "linkedPairs": [
+          [
+            "2",
+            "3"
+          ],
+          [
+            "2",
+            "4"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "5",
+          "6",
+          "4",
+          "3"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.8748
+    },
+    {
+      "id": "C25-3Sashi45Axis-outerLean",
+      "notes": "外の伸びが生きる差し展開。",
+      "oneMark": {
+        "startOrder": [
+          "3",
+          "(4|5)",
+          "(1|2|6)"
+        ],
+        "linkedPairs": [
+          [
+            "3",
+            "4"
+          ],
+          [
+            "3",
+            "5"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "2",
+          "6",
+          "5",
+          "4"
+        ],
+        "thirdBias": "national3rdMix"
+      },
+      "weight": 0.88452
+    },
+    {
+      "id": "C26-3Sashi16Axis-inHold",
+      "notes": "インの残しが前提。",
+      "oneMark": {
+        "startOrder": [
+          "3",
+          "(1|6)",
+          "(2|4|5)"
+        ],
+        "linkedPairs": [
+          [
+            "3",
+            "1"
+          ],
+          [
+            "3",
+            "6"
+          ]
+        ],
+        "thirdPool": [
+          "2",
+          "4",
+          "5",
+          "6",
+          "1"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.8748
+    },
+    {
+      "id": "C27-4Sashi12Axis-cornerSharp",
+      "notes": "角の差し一撃。",
+      "oneMark": {
+        "startOrder": [
+          "4",
+          "(1|2)",
+          "(3|5|6)"
+        ],
+        "linkedPairs": [
+          [
+            "4",
+            "1"
+          ],
+          [
+            "4",
+            "2"
+          ]
+        ],
+        "thirdPool": [
+          "3",
+          "5",
+          "6",
+          "2",
+          "1"
+        ],
+        "thirdBias": "exRank3rdMix"
+      },
+      "weight": 0.90396
+    },
+    {
+      "id": "C28-4Sashi35Axis-withOuter",
+      "notes": "外の食い込み前提。",
+      "oneMark": {
+        "startOrder": [
+          "4",
+          "(3|5)",
+          "(1|2|6)"
+        ],
+        "linkedPairs": [
+          [
+            "4",
+            "3"
+          ],
+          [
+            "4",
+            "5"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "2",
+          "6",
+          "5",
+          "3"
+        ],
+        "thirdBias": "national3rdMix"
+      },
+      "weight": 0.8748
+    },
+    {
+      "id": "C29-4Sashi16Axis-holdInside",
+      "notes": "角差しも内の残し重視。",
+      "oneMark": {
+        "startOrder": [
+          "4",
+          "(1|6)",
+          "(2|3|5)"
+        ],
+        "linkedPairs": [
+          [
+            "4",
+            "1"
+          ],
+          [
+            "4",
+            "6"
+          ]
+        ],
+        "thirdPool": [
+          "2",
+          "3",
+          "5",
+          "6",
+          "1"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.8748
+    },
+    {
+      "id": "C31-5Sashi24Axis-tight",
+      "notes": "相手を2艇に絞って狙う。",
+      "oneMark": {
+        "startOrder": [
+          "5",
+          "(2|4)",
+          "(1|3|6)"
+        ],
+        "linkedPairs": [
+          [
+            "5",
+            "2"
+          ],
+          [
+            "5",
+            "4"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "3",
+          "6",
+          "4",
+          "2"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.86508
+    },
+    {
+      "id": "C32-5Sashi12Axis-inHold",
+      "notes": "内の信頼度が高い場面の差し。",
+      "oneMark": {
+        "startOrder": [
+          "5",
+          "(1|2)",
+          "(3|4|6)"
+        ],
+        "linkedPairs": [
+          [
+            "5",
+            "1"
+          ],
+          [
+            "5",
+            "2"
+          ]
+        ],
+        "thirdPool": [
+          "3",
+          "4",
+          "6",
+          "2",
+          "1"
+        ],
+        "thirdBias": "national3rdMix"
+      },
+      "weight": 0.86508
+    },
+    {
+      "id": "C33-6Sashi13Axis-tailwind",
+      "notes": "追い風で最外差しの伸び。",
+      "oneMark": {
+        "startOrder": [
+          "6",
+          "(1|3)",
+          "(2|4|5)"
+        ],
+        "linkedPairs": [
+          [
+            "6",
+            "1"
+          ],
+          [
+            "6",
+            "3"
+          ]
+        ],
+        "thirdPool": [
+          "2",
+          "4",
+          "5",
+          "3",
+          "1"
+        ],
+        "thirdBias": "exRank3rdMix"
+      },
+      "weight": 0.85536
+    },
+    {
+      "id": "C34-6Sashi24Axis-tailwind",
+      "notes": "最外差しで内角を拾う。",
+      "oneMark": {
+        "startOrder": [
+          "6",
+          "(2|4)",
+          "(1|3|5)"
+        ],
+        "linkedPairs": [
+          [
+            "6",
+            "2"
+          ],
+          [
+            "6",
+            "4"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "3",
+          "5",
+          "4",
+          "2"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.85536
+    },
+    {
+      "id": "C42-2Sashi34Axis-choppy",
+      "notes": "小荒れで差し有利、外は3着寄り。",
+      "oneMark": {
+        "startOrder": [
+          "2",
+          "(3|4)",
+          "(1|5|6)"
+        ],
+        "linkedPairs": [
+          [
+            "2",
+            "3"
+          ],
+          [
+            "2",
+            "4"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "5",
+          "6",
+          "4",
+          "3"
+        ],
+        "thirdBias": "national3rdMix"
+      },
+      "weight": 0.88452
+    },
+    {
+      "id": "C43-2Sashi16Axis-inHoldLite",
+      "notes": "インは軽く残る見立て。",
+      "oneMark": {
+        "startOrder": [
+          "2",
+          "(1|6)",
+          "(3|4|5)"
+        ],
+        "linkedPairs": [
+          [
+            "2",
+            "1"
+          ],
+          [
+            "2",
+            "6"
+          ]
+        ],
+        "thirdPool": [
+          "3",
+          "4",
+          "5",
+          "6",
+          "1"
+        ],
+        "thirdBias": "exRank3rdMix"
+      },
+      "weight": 0.8748
+    },
+    {
+      "id": "C44-3Sashi12Axis-headWindLite",
+      "notes": "弱向かいで差しが届きやすい。",
+      "oneMark": {
+        "startOrder": [
+          "3",
+          "(1|2)",
+          "(4|5|6)"
+        ],
+        "linkedPairs": [
+          [
+            "3",
+            "1"
+          ],
+          [
+            "3",
+            "2"
+          ]
+        ],
+        "thirdPool": [
+          "4",
+          "5",
+          "6",
+          "2",
+          "1"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.89424
+    },
+    {
+      "id": "C45-3Sashi25Axis-outerAssist",
+      "notes": "外の並走サポートが効く差し。",
+      "oneMark": {
+        "startOrder": [
+          "3",
+          "(2|5)",
+          "(1|4|6)"
+        ],
+        "linkedPairs": [
+          [
+            "3",
+            "2"
+          ],
+          [
+            "3",
+            "5"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "4",
+          "6",
+          "5",
+          "2"
+        ],
+        "thirdBias": "national3rdMix"
+      },
+      "weight": 0.88452
+    },
+    {
+      "id": "C46-3Sashi14Axis-inHold",
+      "notes": "イン壁が機能しつつも3差し浮上。",
+      "oneMark": {
+        "startOrder": [
+          "3",
+          "(1|4)",
+          "(2|5|6)"
+        ],
+        "linkedPairs": [
+          [
+            "3",
+            "1"
+          ],
+          [
+            "3",
+            "4"
+          ]
+        ],
+        "thirdPool": [
+          "2",
+          "5",
+          "6",
+          "4",
+          "1"
+        ],
+        "thirdBias": "exRank3rdMix"
+      },
+      "weight": 0.8748
+    },
+    {
+      "id": "C47-4Sashi15Axis-stable",
+      "notes": "角から差し切り、1と外伸びを相手本線。",
+      "oneMark": {
+        "startOrder": [
+          "4",
+          "(1|5)",
+          "(2|3|6)"
+        ],
+        "linkedPairs": [
+          [
+            "4",
+            "1"
+          ],
+          [
+            "4",
+            "5"
+          ]
+        ],
+        "thirdPool": [
+          "2",
+          "3",
+          "6",
+          "5",
+          "1"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.89424
+    },
+    {
+      "id": "C48-4Sashi26Axis-tight",
+      "notes": "角差し後の相手を2艇に絞る。",
+      "oneMark": {
+        "startOrder": [
+          "4",
+          "(2|6)",
+          "(1|3|5)"
+        ],
+        "linkedPairs": [
+          [
+            "4",
+            "2"
+          ],
+          [
+            "4",
+            "6"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "3",
+          "5",
+          "6",
+          "2"
+        ],
+        "thirdBias": "national3rdMix"
+      },
+      "weight": 0.8748
+    },
+    {
+      "id": "C49-4Sashi13Axis-inFirm",
+      "notes": "イン信頼度が高い差し展開。",
+      "oneMark": {
+        "startOrder": [
+          "4",
+          "(1|3)",
+          "(2|5|6)"
+        ],
+        "linkedPairs": [
+          [
+            "4",
+            "1"
+          ],
+          [
+            "4",
+            "3"
+          ]
+        ],
+        "thirdPool": [
+          "2",
+          "5",
+          "6",
+          "3",
+          "1"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.88452
+    },
+    {
+      "id": "C50-5Sashi14Axis-longTurn",
+      "notes": "伸びを活かし長回りの差し。",
+      "oneMark": {
+        "startOrder": [
+          "5",
+          "(1|4)",
+          "(2|3|6)"
+        ],
+        "linkedPairs": [
+          [
+            "5",
+            "1"
+          ],
+          [
+            "5",
+            "4"
+          ]
+        ],
+        "thirdPool": [
+          "2",
+          "3",
+          "6",
+          "4",
+          "1"
+        ],
+        "thirdBias": "exRank3rdMix"
+      },
+      "weight": 0.8748
+    },
+    {
+      "id": "C51-5Sashi23Axis-outerBias",
+      "notes": "外の直線が生きる差し構図。",
+      "oneMark": {
+        "startOrder": [
+          "5",
+          "(2|3)",
+          "(1|4|6)"
+        ],
+        "linkedPairs": [
+          [
+            "5",
+            "2"
+          ],
+          [
+            "5",
+            "3"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "4",
+          "6",
+          "3",
+          "2"
+        ],
+        "thirdBias": "national3rdMix"
+      },
+      "weight": 0.86508
+    },
+    {
+      "id": "C52-5Sashi16Axis-inTrace",
+      "notes": "内の隊列をトレースして差し。",
+      "oneMark": {
+        "startOrder": [
+          "5",
+          "(1|6)",
+          "(2|3|4)"
+        ],
+        "linkedPairs": [
+          [
+            "5",
+            "1"
+          ],
+          [
+            "5",
+            "6"
+          ]
+        ],
+        "thirdPool": [
+          "2",
+          "3",
+          "4",
+          "6",
+          "1"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.86508
+    },
+    {
+      "id": "C53-6Sashi14Axis-fair",
+      "notes": "穏やかで最外差しが機能。",
+      "oneMark": {
+        "startOrder": [
+          "6",
+          "(1|4)",
+          "(2|3|5)"
+        ],
+        "linkedPairs": [
+          [
+            "6",
+            "1"
+          ],
+          [
+            "6",
+            "4"
+          ]
+        ],
+        "thirdPool": [
+          "2",
+          "3",
+          "5",
+          "4",
+          "1"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.85536
+    },
+    {
+      "id": "C54-6Sashi25Axis-follow",
+      "notes": "5の伸びフォローで最外差し活性。",
+      "oneMark": {
+        "startOrder": [
+          "6",
+          "(2|5)",
+          "(1|3|4)"
+        ],
+        "linkedPairs": [
+          [
+            "6",
+            "2"
+          ],
+          [
+            "6",
+            "5"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "3",
+          "4",
+          "5",
+          "2"
+        ],
+        "thirdBias": "national3rdMix"
+      },
+      "weight": 0.85536
+    },
+    {
+      "id": "D01-inBigDelay-centerPush",
+      "notes": "1の壁消失。3-4優勢、2が相手本線。",
+      "oneMark": {
+        "startOrder": [
+          "(2|3|4)",
+          "(3|4|5)",
+          "(5|2|6)"
+        ],
+        "linkedPairs": [
+          [
+            "3",
+            "4"
+          ],
+          [
+            "2",
+            "3"
+          ]
+        ],
+        "thirdPool": [
+          "5",
+          "2",
+          "6",
+          "4",
+          "3"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.6998399999999999
+    },
+    {
+      "id": "D02-inBigDelay-outerSlipIn",
+      "notes": "外の伸びが効き5が2着軸、3or4と争い。",
+      "oneMark": {
+        "startOrder": [
+          "(3|4)",
+          "5",
+          "(2|6)"
+        ],
+        "linkedPairs": [
+          [
+            "4",
+            "5"
+          ],
+          [
+            "3",
+            "5"
+          ]
+        ],
+        "thirdPool": [
+          "2",
+          "6",
+          "5",
+          "4",
+          "3"
+        ],
+        "thirdBias": "exRank3rdMix"
+      },
+      "weight": 0.6803999999999999
+    },
+    {
+      "id": "D03-inBigDelay-headwindHold",
+      "notes": "向かい風で差し届きやすく3が主導。",
+      "oneMark": {
+        "startOrder": [
+          "3",
+          "(2|4)",
+          "(5|6)"
+        ],
+        "linkedPairs": [
+          [
+            "3",
+            "2"
+          ],
+          [
+            "3",
+            "4"
+          ]
+        ],
+        "thirdPool": [
+          "5",
+          "6",
+          "4",
+          "2"
+        ],
+        "thirdBias": "national3rdMix"
+      },
+      "weight": 0.66096
+    },
+    {
+      "id": "D04-twoBigDelay-centerTandem",
+      "notes": "逃がし喪失で3-4主導。2着は1か5。",
+      "oneMark": {
+        "startOrder": [
+          "(3|4)",
+          "(1|5)",
+          "(6|2)"
+        ],
+        "linkedPairs": [
+          [
+            "3",
+            "4"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "5",
+          "6",
+          "4",
+          "3"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.64152
+    },
+    {
+      "id": "D05-twoBigDelay-inFollowHold",
+      "notes": "1は少し残り、相手は4or5。",
+      "oneMark": {
+        "startOrder": [
+          "3",
+          "1",
+          "(4|5)"
+        ],
+        "linkedPairs": [
+          [
+            "3",
+            "1"
+          ]
+        ],
+        "thirdPool": [
+          "4",
+          "5",
+          "6"
+        ],
+        "thirdBias": "exRank3rdMix"
+      },
+      "weight": 0.62208
+    },
+    {
+      "id": "D06-twoBigDelay-outerBias",
+      "notes": "外の伸び優勢。2着は5、3着争い広め。",
+      "oneMark": {
+        "startOrder": [
+          "4",
+          "5",
+          "(1|3|6)"
+        ],
+        "linkedPairs": [
+          [
+            "4",
+            "5"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "3",
+          "6",
+          "5",
+          "4"
+        ],
+        "thirdBias": "national3rdMix"
+      },
+      "weight": 0.60264
+    },
+    {
+      "id": "D07-threeBigDelay-cornerOpens",
+      "notes": "3が凹んで4が自在。2着は1か2中心。",
+      "oneMark": {
+        "startOrder": [
+          "4",
+          "(1|2)",
+          "(5|6)"
+        ],
+        "linkedPairs": [
+          [
+            "4",
+            "2"
+          ]
+        ],
+        "thirdPool": [
+          "5",
+          "6",
+          "1",
+          "2",
+          "4"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.62208
+    },
+    {
+      "id": "D08-threeBigDelay-inTrace",
+      "notes": "角の攻めに1が対応。相手は2か外。",
+      "oneMark": {
+        "startOrder": [
+          "4",
+          "1",
+          "(2|5)"
+        ],
+        "linkedPairs": [
+          [
+            "4",
+            "1"
+          ]
+        ],
+        "thirdPool": [
+          "2",
+          "5",
+          "6"
+        ],
+        "thirdBias": "exRank3rdMix"
+      },
+      "weight": 0.61236
+    },
+    {
+      "id": "D09-threeBigDelay-outerCutIn",
+      "notes": "4の攻めに5が差し場を得る。",
+      "oneMark": {
+        "startOrder": [
+          "4",
+          "5",
+          "(1|2|6)"
+        ],
+        "linkedPairs": [
+          [
+            "4",
+            "5"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "2",
+          "6",
+          "5",
+          "4"
+        ],
+        "thirdBias": "national3rdMix"
+      },
+      "weight": 0.59292
+    },
+    {
+      "id": "D10-fourBigDelay-inReturn",
+      "notes": "角不発で内有利回帰、2着は2or3。",
+      "oneMark": {
+        "startOrder": [
+          "1",
+          "(2|3)",
+          "(5|6|4)"
+        ],
+        "linkedPairs": [
+          [
+            "2",
+            "3"
+          ]
+        ],
+        "thirdPool": [
+          "5",
+          "6",
+          "4",
+          "2",
+          "3",
+          "1"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.64152
+    },
+    {
+      "id": "D11-fourBigDelay-headwindInside",
+      "notes": "風も手伝い内の残り強め。",
+      "oneMark": {
+        "startOrder": [
+          "1",
+          "2",
+          "(3|5)"
+        ],
+        "linkedPairs": [
+          [
+            "1",
+            "2"
+          ]
+        ],
+        "thirdPool": [
+          "3",
+          "5",
+          "6"
+        ],
+        "thirdBias": "exRank3rdMix"
+      },
+      "weight": 0.62208
+    },
+    {
+      "id": "D12-fourBigDelay-outerTrace",
+      "notes": "1先マイに外の直線が相手。",
+      "oneMark": {
+        "startOrder": [
+          "1",
+          "(5|6)",
+          "(2|3)"
+        ],
+        "linkedPairs": [
+          [
+            "5",
+            "6"
+          ]
+        ],
+        "thirdPool": [
+          "2",
+          "3",
+          "6",
+          "5"
+        ],
+        "thirdBias": "national3rdMix"
+      },
+      "weight": 0.5831999999999999
+    },
+    {
+      "id": "D13-fiveBigDelay-centerShift",
+      "notes": "外の連動が切れ4-3が主役に。",
+      "oneMark": {
+        "startOrder": [
+          "(1|4|3)",
+          "(4|3|2)",
+          "(6|1)"
+        ],
+        "linkedPairs": [
+          [
+            "4",
+            "3"
+          ]
+        ],
+        "thirdPool": [
+          "6",
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.5637599999999999
+    },
+    {
+      "id": "D14-fiveBigDelay-inHoldLite",
+      "notes": "4主導、1は少し残る。相手3か2。",
+      "oneMark": {
+        "startOrder": [
+          "4",
+          "1",
+          "(3|2)"
+        ],
+        "linkedPairs": [
+          [
+            "4",
+            "1"
+          ]
+        ],
+        "thirdPool": [
+          "3",
+          "2",
+          "6"
+        ],
+        "thirdBias": "exRank3rdMix"
+      },
+      "weight": 0.55404
+    },
+    {
+      "id": "D15-fiveBigDelay-tailwindRisk",
+      "notes": "追い風で握りにくく内寄り決着。",
+      "oneMark": {
+        "startOrder": [
+          "1",
+          "(2|4)",
+          "(3|6)"
+        ],
+        "linkedPairs": [
+          [
+            "2",
+            "4"
+          ]
+        ],
+        "thirdPool": [
+          "3",
+          "6",
+          "4",
+          "2"
+        ],
+        "thirdBias": "national3rdMix"
+      },
+      "weight": 0.54432
+    },
+    {
+      "id": "D16-sixBigDelay-centerTight",
+      "notes": "6が離れて4-5が主導権、内勢が相手。",
+      "oneMark": {
+        "startOrder": [
+          "(4|5)",
+          "(1|2)",
+          "(3|6)"
+        ],
+        "linkedPairs": [
+          [
+            "4",
+            "5"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "2",
+          "3",
+          "5",
+          "4"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.5637599999999999
+    },
+    {
+      "id": "D17-sixBigDelay-inProtect",
+      "notes": "角の攻めに1が対応。相手は5か2。",
+      "oneMark": {
+        "startOrder": [
+          "4",
+          "1",
+          "(5|2)"
+        ],
+        "linkedPairs": [
+          [
+            "4",
+            "1"
+          ]
+        ],
+        "thirdPool": [
+          "5",
+          "2",
+          "3"
+        ],
+        "thirdBias": "exRank3rdMix"
+      },
+      "weight": 0.55404
+    },
+    {
+      "id": "D18-sixBigDelay-outerFollowLost",
+      "notes": "6の援護が消えて内・角に流れる。",
+      "oneMark": {
+        "startOrder": [
+          "1",
+          "(2|4)",
+          "(5|3)"
+        ],
+        "linkedPairs": [
+          [
+            "2",
+            "4"
+          ]
+        ],
+        "thirdPool": [
+          "5",
+          "3",
+          "4",
+          "2"
+        ],
+        "thirdBias": "national3rdMix"
+      },
+      "weight": 0.54432
+    },
+    {
+      "id": "D20-twoBigDelay-tightInside",
+      "notes": "内タイトで1-3の軸形成、相手は4か5。",
+      "oneMark": {
+        "startOrder": [
+          "1",
+          "3",
+          "(4|5)"
+        ],
+        "linkedPairs": [
+          [
+            "1",
+            "3"
+          ]
+        ],
+        "thirdPool": [
+          "4",
+          "5",
+          "6"
+        ],
+        "thirdBias": "exRank3rdMix"
+      },
+      "weight": 0.61236
+    },
+    {
+      "id": "D21-threeBigDelay-tailwindPush",
+      "notes": "追い風で角が握り切る展開。",
+      "oneMark": {
+        "startOrder": [
+          "4",
+          "(1|5)",
+          "(2|6)"
+        ],
+        "linkedPairs": [
+          [
+            "4",
+            "5"
+          ],
+          [
+            "4",
+            "1"
+          ]
+        ],
+        "thirdPool": [
+          "2",
+          "6",
+          "1",
+          "5"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.5831999999999999
+    },
+    {
+      "id": "D23-fourBigDelay-centerDrive",
+      "notes": "角不発で3が自在に攻める展開。",
+      "oneMark": {
+        "startOrder": [
+          "3",
+          "(1|2)",
+          "(5|6)"
+        ],
+        "linkedPairs": [
+          [
+            "3",
+            "2"
+          ]
+        ],
+        "thirdPool": [
+          "5",
+          "6",
+          "1",
+          "2"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.60264
+    },
+    {
+      "id": "D24-fourBigDelay-outerAttackFails",
+      "notes": "5の攻めも不発で内残し。",
+      "oneMark": {
+        "startOrder": [
+          "1",
+          "(2|3)",
+          "(5|6)"
+        ],
+        "linkedPairs": [
+          [
+            "1",
+            "2"
+          ],
+          [
+            "1",
+            "3"
+          ]
+        ],
+        "thirdPool": [
+          "5",
+          "6",
+          "3",
+          "2"
+        ],
+        "thirdBias": "national3rdMix"
+      },
+      "weight": 0.5637599999999999
+    },
+    {
+      "id": "D25-fiveBigDelay-outerNoDrive",
+      "notes": "6の伸びも不発で内優位。",
+      "oneMark": {
+        "startOrder": [
+          "(1|4)",
+          "(2|3)",
+          "6"
+        ],
+        "linkedPairs": [
+          [
+            "4",
+            "1"
+          ]
+        ],
+        "thirdPool": [
+          "2",
+          "3",
+          "6",
+          "4"
+        ],
+        "thirdBias": "exRank3rdMix"
+      },
+      "weight": 0.5346000000000001
+    },
+    {
+      "id": "D26-fiveBigDelay-tailwindOuter",
+      "notes": "追い風で外差し届くパターン。",
+      "oneMark": {
+        "startOrder": [
+          "4",
+          "6",
+          "(1|2)"
+        ],
+        "linkedPairs": [
+          [
+            "4",
+            "6"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "2",
+          "3"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.54432
+    },
+    {
+      "id": "D28-sixBigDelay-makuriZashiFollow",
+      "notes": "角攻めに続く5差し抜け。",
+      "oneMark": {
+        "startOrder": [
+          "4",
+          "5",
+          "(1|2)"
+        ],
+        "linkedPairs": [
+          [
+            "4",
+            "5"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "2",
+          "3"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.5637599999999999
+    },
+    {
+      "id": "D29-inBigDelay-doubleCenter",
+      "notes": "ダブル攻めで外の展開も広がる。",
+      "oneMark": {
+        "startOrder": [
+          "3",
+          "4",
+          "(2|5)"
+        ],
+        "linkedPairs": [
+          [
+            "3",
+            "4"
+          ]
+        ],
+        "thirdPool": [
+          "2",
+          "5",
+          "6"
+        ],
+        "thirdBias": "exRank3rdMix"
+      },
+      "weight": 0.6803999999999999
+    },
+    {
+      "id": "D31-twoBigDelay-centerWide",
+      "notes": "逃がし不発でセンター厚め。",
+      "oneMark": {
+        "startOrder": [
+          "(3|4)",
+          "(1|5)",
+          "(6|2)"
+        ],
+        "linkedPairs": [
+          [
+            "3",
+            "4"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "5",
+          "6",
+          "4"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.62208
+    },
+    {
+      "id": "D32-twoBigDelay-innerHold",
+      "notes": "イン強力時は1残し濃厚。",
+      "oneMark": {
+        "startOrder": [
+          "1",
+          "(3|4)",
+          "(5|6)"
+        ],
+        "linkedPairs": [
+          [
+            "1",
+            "3"
+          ],
+          [
+            "1",
+            "4"
+          ]
+        ],
+        "thirdPool": [
+          "5",
+          "6",
+          "4",
+          "3"
+        ],
+        "thirdBias": "exRank3rdMix"
+      },
+      "weight": 0.6318
+    },
+    {
+      "id": "D33-threeBigDelay-outerRush",
+      "notes": "外の突進力が生きる展開。",
+      "oneMark": {
+        "startOrder": [
+          "(5|6)",
+          "4",
+          "(1|2)"
+        ],
+        "linkedPairs": [
+          [
+            "5",
+            "6"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        "thirdBias": "national3rdMix"
+      },
+      "weight": 0.55404
+    },
+    {
+      "id": "D34-threeBigDelay-innerBackdoor",
+      "notes": "内差し展開で2浮上。",
+      "oneMark": {
+        "startOrder": [
+          "2",
+          "(4|1)",
+          "(5|6)"
+        ],
+        "linkedPairs": [
+          [
+            "2",
+            "4"
+          ],
+          [
+            "2",
+            "1"
+          ]
+        ],
+        "thirdPool": [
+          "5",
+          "6",
+          "4",
+          "1"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.59292
+    },
+    {
+      "id": "D35-fourBigDelay-centerPair",
+      "notes": "内枠寄りのセンター連動。",
+      "oneMark": {
+        "startOrder": [
+          "(2|3)",
+          "1",
+          "(5|6)"
+        ],
+        "linkedPairs": [
+          [
+            "2",
+            "3"
+          ]
+        ],
+        "thirdPool": [
+          "5",
+          "6",
+          "1",
+          "3"
+        ],
+        "thirdBias": "exRank3rdMix"
+      },
+      "weight": 0.60264
+    },
+    {
+      "id": "D36-fourBigDelay-outerDrift",
+      "notes": "外直線優勢パターン。",
+      "oneMark": {
+        "startOrder": [
+          "5",
+          "6",
+          "(1|2)"
+        ],
+        "linkedPairs": [
+          [
+            "5",
+            "6"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "2",
+          "3"
+        ],
+        "thirdBias": "national3rdMix"
+      },
+      "weight": 0.5346000000000001
+    },
+    {
+      "id": "D37-fiveBigDelay-innerPair",
+      "notes": "内有利で1-2軸。",
+      "oneMark": {
+        "startOrder": [
+          "1",
+          "2",
+          "(3|4)"
+        ],
+        "linkedPairs": [
+          [
+            "1",
+            "2"
+          ]
+        ],
+        "thirdPool": [
+          "3",
+          "4",
+          "6"
+        ],
+        "thirdBias": "exRank3rdMix"
+      },
+      "weight": 0.5831999999999999
+    },
+    {
+      "id": "D38-fiveBigDelay-centerSwing",
+      "notes": "センター差しで浮上。",
+      "oneMark": {
+        "startOrder": [
+          "4",
+          "(1|3)",
+          "(2|6)"
+        ],
+        "linkedPairs": [
+          [
+            "4",
+            "1"
+          ],
+          [
+            "4",
+            "3"
+          ]
+        ],
+        "thirdPool": [
+          "2",
+          "6",
+          "1",
+          "3"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.5637599999999999
+    },
+    {
+      "id": "D39-sixBigDelay-innerCompact",
+      "notes": "外の援護なく内締まり展開。",
+      "oneMark": {
+        "startOrder": [
+          "1",
+          "2",
+          "(3|4)"
+        ],
+        "linkedPairs": [
+          [
+            "1",
+            "2"
+          ]
+        ],
+        "thirdPool": [
+          "3",
+          "4",
+          "5"
+        ],
+        "thirdBias": "exRank3rdMix"
+      },
+      "weight": 0.59292
+    },
+    {
+      "id": "D40-sixBigDelay-centerOvertake",
+      "notes": "角と隣の3が共に浮上。",
+      "oneMark": {
+        "startOrder": [
+          "4",
+          "3",
+          "(1|2)"
+        ],
+        "linkedPairs": [
+          [
+            "4",
+            "3"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "2",
+          "5"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.57348
+    },
+    {
+      "id": "D41-inBigDelay-23TandemTail",
+      "notes": "追い風でセンターラインが素直に先行。",
+      "oneMark": {
+        "startOrder": [
+          "2",
+          "3",
+          "(4|5)"
+        ],
+        "linkedPairs": [
+          [
+            "2",
+            "3"
+          ]
+        ],
+        "thirdPool": [
+          "4",
+          "5",
+          "6"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.66096
+    },
+    {
+      "id": "D42-inBigDelay-34PressContra",
+      "notes": "向かい風で握り系が生きやすく3-4台頭。",
+      "oneMark": {
+        "startOrder": [
+          "3",
+          "4",
+          "(2|5)"
+        ],
+        "linkedPairs": [
+          [
+            "3",
+            "4"
+          ]
+        ],
+        "thirdPool": [
+          "2",
+          "5",
+          "6"
+        ],
+        "thirdBias": "exRank3rdMix"
+      },
+      "weight": 0.6706799999999999
+    },
+    {
+      "id": "D43-twoBigDelay-34WidePush",
+      "notes": "逃がし喪失でセンターが幅を使って前へ。",
+      "oneMark": {
+        "startOrder": [
+          "(3|4)",
+          "1",
+          "(5|6)"
+        ],
+        "linkedPairs": [
+          [
+            "3",
+            "4"
+          ]
+        ],
+        "thirdPool": [
+          "5",
+          "6",
+          "1",
+          "4"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.61236
+    },
+    {
+      "id": "D44-twoBigDelay-1HoldWith3",
+      "notes": "イン残しつつ3が強気に差す。",
+      "oneMark": {
+        "startOrder": [
+          "1",
+          "3",
+          "(4|5)"
+        ],
+        "linkedPairs": [
+          [
+            "1",
+            "3"
+          ]
+        ],
+        "thirdPool": [
+          "4",
+          "5",
+          "6"
+        ],
+        "thirdBias": "exRank3rdMix"
+      },
+      "weight": 0.62208
+    },
+    {
+      "id": "D45-threeBigDelay-4LeadWith5Follow",
+      "notes": "角→外の連動で先手。",
+      "oneMark": {
+        "startOrder": [
+          "4",
+          "5",
+          "(1|2)"
+        ],
+        "linkedPairs": [
+          [
+            "4",
+            "5"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "2",
+          "6"
+        ],
+        "thirdBias": "national3rdMix"
+      },
+      "weight": 0.5831999999999999
+    },
+    {
+      "id": "D46-threeBigDelay-2BackdoorWith4",
+      "notes": "3が空けた内を2が差し、4が外から並走。",
+      "oneMark": {
+        "startOrder": [
+          "2",
+          "4",
+          "(1|5)"
+        ],
+        "linkedPairs": [
+          [
+            "2",
+            "4"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "5",
+          "6"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.59292
+    },
+    {
+      "id": "D47-fourBigDelay-1Compact23Battle",
+      "notes": "角不発で内に隊列が戻る。",
+      "oneMark": {
+        "startOrder": [
+          "1",
+          "(2|3)",
+          "(5|6)"
+        ],
+        "linkedPairs": [
+          [
+            "2",
+            "3"
+          ]
+        ],
+        "thirdPool": [
+          "5",
+          "6",
+          "2",
+          "3"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.60264
+    },
+    {
+      "id": "D48-fourBigDelay-3Lead1Hold",
+      "notes": "3の自在戦で先行、1は最小ロスで残る。",
+      "oneMark": {
+        "startOrder": [
+          "3",
+          "1",
+          "(2|5)"
+        ],
+        "linkedPairs": [
+          [
+            "3",
+            "1"
+          ]
+        ],
+        "thirdPool": [
+          "2",
+          "5",
+          "6"
+        ],
+        "thirdBias": "exRank3rdMix"
+      },
+      "weight": 0.5831999999999999
+    },
+    {
+      "id": "D49-fiveBigDelay-1Lead2Assist",
+      "notes": "外の連動消えて内盤石。",
+      "oneMark": {
+        "startOrder": [
+          "1",
+          "2",
+          "(3|4)"
+        ],
+        "linkedPairs": [
+          [
+            "1",
+            "2"
+          ]
+        ],
+        "thirdPool": [
+          "3",
+          "4",
+          "6"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.59292
+    },
+    {
+      "id": "D51-sixBigDelay-45Parallel",
+      "notes": "外の援護消えも角〜外で先手。",
+      "oneMark": {
+        "startOrder": [
+          "(4|5)",
+          "(1|2)",
+          "3"
+        ],
+        "linkedPairs": [
+          [
+            "4",
+            "5"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "2",
+          "3",
+          "5"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.57348
+    },
+    {
+      "id": "D52-sixBigDelay-1Lead4Follow",
+      "notes": "イン強力で4が対抗。",
+      "oneMark": {
+        "startOrder": [
+          "1",
+          "4",
+          "(2|3)"
+        ],
+        "linkedPairs": [
+          [
+            "1",
+            "4"
+          ]
+        ],
+        "thirdPool": [
+          "2",
+          "3",
+          "5"
+        ],
+        "thirdBias": "exRank3rdMix"
+      },
+      "weight": 0.5831999999999999
+    },
+    {
+      "id": "D53-inBigDelay-24Tandem",
+      "notes": "2の差し・4の絞りの同時成立。",
+      "oneMark": {
+        "startOrder": [
+          "2",
+          "4",
+          "(3|5)"
+        ],
+        "linkedPairs": [
+          [
+            "2",
+            "4"
+          ]
+        ],
+        "thirdPool": [
+          "3",
+          "5",
+          "6"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.65124
+    },
+    {
+      "id": "D54-inBigDelay-35Hook",
+      "notes": "3の切り込みに5が差し込む連動。",
+      "oneMark": {
+        "startOrder": [
+          "3",
+          "5",
+          "(2|4)"
+        ],
+        "linkedPairs": [
+          [
+            "3",
+            "5"
+          ]
+        ],
+        "thirdPool": [
+          "2",
+          "4",
+          "6"
+        ],
+        "thirdBias": "national3rdMix"
+      },
+      "weight": 0.64152
+    },
+    {
+      "id": "D55-twoBigDelay-31Inside",
+      "notes": "逃がし欠けで3が自由、1は最内で残す。",
+      "oneMark": {
+        "startOrder": [
+          "3",
+          "1",
+          "(4|5)"
+        ],
+        "linkedPairs": [
+          [
+            "3",
+            "1"
+          ]
+        ],
+        "thirdPool": [
+          "4",
+          "5",
+          "6"
+        ],
+        "thirdBias": "exRank3rdMix"
+      },
+      "weight": 0.61236
+    },
+    {
+      "id": "D56-threeBigDelay-46Launch",
+      "notes": "外伸び条件下で角・大外が同時台頭。",
+      "oneMark": {
+        "startOrder": [
+          "(4|6)",
+          "(1|2)",
+          "5"
+        ],
+        "linkedPairs": [
+          [
+            "4",
+            "6"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "2",
+          "5",
+          "3"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.57348
+    },
+    {
+      "id": "D57-fourBigDelay-21Tandem",
+      "notes": "角抜けで内に流れが戻る典型。",
+      "oneMark": {
+        "startOrder": [
+          "2",
+          "1",
+          "(3|5)"
+        ],
+        "linkedPairs": [
+          [
+            "2",
+            "1"
+          ]
+        ],
+        "thirdPool": [
+          "3",
+          "5",
+          "6"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.59292
+    },
+    {
+      "id": "D58-fiveBigDelay-42Edge",
+      "notes": "外穴でセンターと内差しが噛み合う。",
+      "oneMark": {
+        "startOrder": [
+          "4",
+          "2",
+          "(1|3)"
+        ],
+        "linkedPairs": [
+          [
+            "4",
+            "2"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "3",
+          "6"
+        ],
+        "thirdBias": "exRank3rdMix"
+      },
+      "weight": 0.5831999999999999
+    },
+    {
+      "id": "D59-sixBigDelay-54Rail",
+      "notes": "外援護消えても5-4が勢い維持。",
+      "oneMark": {
+        "startOrder": [
+          "5",
+          "4",
+          "(1|2)"
+        ],
+        "linkedPairs": [
+          [
+            "5",
+            "4"
+          ]
+        ],
+        "thirdPool": [
+          "1",
+          "2",
+          "3"
+        ],
+        "thirdBias": "course3rdMix"
+      },
+      "weight": 0.5637599999999999
+    },
+    {
+      "id": "D60-sixBigDelay-1Shield3Dive",
+      "notes": "インの盾に3差しが噛み合う形。",
+      "oneMark": {
+        "startOrder": [
+          "1",
+          "3",
+          "(2|4)"
+        ],
+        "linkedPairs": [
+          [
+            "1",
+            "3"
+          ]
+        ],
+        "thirdPool": [
+          "2",
+          "4",
+          "5"
+        ],
+        "thirdBias": "national3rdMix"
+      },
+      "weight": 0.5831999999999999
+    }
+  ],
+  "probs": {
+    "2-1-5": 0.43266857810342974,
+    "2-5-1": 0.1673654029945843,
+    "1-5-2": 0.057177445046193064,
+    "1-2-5": 0.2628469788680047,
+    "5-2-1": 0.04727514070298399,
+    "5-1-2": 0.03266645428480408
+  },
+  "bets": {
+    "compact": "2-15-15, 1-25-25, 5-12-12",
+    "main": [
+      [
+        2,
+        1,
+        5
+      ],
+      [
+        1,
+        2,
+        5
+      ],
+      [
+        2,
+        5,
+        1
+      ],
+      [
+        1,
+        5,
+        2
+      ],
+      [
+        5,
+        2,
+        1
+      ],
+      [
+        5,
+        1,
+        2
+      ]
+    ],
+    "ana": []
+  }
+}
