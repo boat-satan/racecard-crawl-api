@@ -6,16 +6,12 @@
       "id": "A01-escape-basic",
       "type": "A",
       "title": "イン逃げ基準",
-      "baseWeight": 1.0,
-      "requires": {
-        "attackType": ["none", "mildPressure"],
-        "head": ["1"],
-        "inReliability": "normalUp"
-      },
+      "baseWeight": 1.00,
+      "requires": { "attackType": ["none","mildPressure"], "head": ["1"], "inReliability": "normalUp" },
       "oneMark": {
-        "startOrder": ["1", "(2|3)", "(4|5)", "6"],
-        "linkedPairs": [["2", "3"]],
-        "thirdPool": ["4", "5", "2", "3", "6"],
+        "startOrder": ["1","(2|3)","(4|5)","6"],
+        "linkedPairs": [["2","3"]],
+        "thirdPool": ["4","5","2","3","6"],
         "thirdBias": "course3rdMix"
       },
       "notes": "標準のイン逃げ。2-3の連動を優先。"
@@ -24,17 +20,12 @@
       "id": "A02-escape-strong",
       "type": "A",
       "title": "イン逃げ強め（イン快速）",
-      "baseWeight": 1.3,
-      "requires": {
-        "attackType": ["none"],
-        "head": ["1"],
-        "inReliability": "high",
-        "inAvgST": "fast"
-      },
+      "baseWeight": 1.30,
+      "requires": { "attackType": ["none"], "head": ["1"], "inReliability": "high", "inAvgST": "fast" },
       "oneMark": {
-        "startOrder": ["1", "(2|3)", "(3|2)", "(4|5)", "6"],
-        "linkedPairs": [["2", "3"]],
-        "thirdPool": ["4", "5", "6", "2", "3"],
+        "startOrder": ["1","(2|3)","(3|2)","(4|5)","6"],
+        "linkedPairs": [["2","3"]],
+        "thirdPool": ["4","5","6","2","3"],
         "thirdBias": "exRank3rdMix"
       },
       "notes": "1が出て先マイ。2=3の順不同連動を強調。"
@@ -43,36 +34,824 @@
       "id": "A03-escape-windyContra",
       "type": "A",
       "title": "向かい風でもイン残し",
-      "baseWeight": 0.8,
-      "requires": {
-        "attackType": ["none", "lightMakuriTry"],
-        "head": ["1"],
-        "wind": "contra",
-        "dashAdvantage": false
-      },
+      "baseWeight": 0.80,
+      "requires": { "attackType": ["none","lightMakuriTry"], "head": ["1"], "wind": "contra", "dashAdvantage": false },
       "oneMark": {
-        "startOrder": ["1", "(3|2)", "(4|5)", "6"],
-        "linkedPairs": [["2", "4"], ["3", "4"]],
-        "thirdPool": ["5", "2", "3", "6", "4"],
+        "startOrder": ["1","(3|2)","(4|5)","6"],
+        "linkedPairs": [["2","4"],["3","4"]],
+        "thirdPool": ["5","2","3","6","4"],
         "thirdBias": "national3rdMix"
       },
       "notes": "風に耐えて1先マイ。2-4 or 3-4の連動も少量。"
     },
-
+    {
+      "id": "A04-escape-tailwind",
+      "type": "A",
+      "title": "追い風で流れ気味も押し切り",
+      "baseWeight": 1.05,
+      "requires": { "attackType": ["none"], "head": ["1"], "wind": "tail", "inReliability": "normalUp" },
+      "oneMark": {
+        "startOrder": ["1","2","(3|4|5)","6"],
+        "linkedPairs": [["1","2"]],
+        "thirdPool": ["3","4","5","6","2"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "1が少し流れても2が壁で支援。"
+    },
+    {
+      "id": "A05-escape-23tight",
+      "type": "A",
+      "title": "1-2-3でタイトに通過",
+      "baseWeight": 1.10,
+      "requires": { "attackType": ["none"], "head": ["1"], "inAvgST": "normal" },
+      "oneMark": {
+        "startOrder": ["1","2","3","(4|5|6)"],
+        "linkedPairs": [["2","3"]],
+        "thirdPool": ["4","5","6","3","2"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "2が先踏ん張り、3が差して続く。"
+    },
+    {
+      "id": "A06-escape-3press",
+      "type": "A",
+      "title": "3のプレッシャー受けつつ逃げ",
+      "baseWeight": 0.95,
+      "requires": { "attackType": ["mildPressure"], "head": ["1"], "threeCourseAggressive": true },
+      "oneMark": {
+        "startOrder": ["1","3","(2|4|5)","6"],
+        "linkedPairs": [["1","3"]],
+        "thirdPool": ["2","4","5","6","3"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "3が掛けるが1が受けきる想定。"
+    },
+    {
+      "id": "A07-escape-outerFollow4",
+      "type": "A",
+      "title": "外勢4が差して2着",
+      "baseWeight": 0.90,
+      "requires": { "attackType": ["none"], "head": ["1"], "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["1","4","(2|3|5|6)"],
+        "linkedPairs": [["1","4"]],
+        "thirdPool": ["2","3","5","6","4"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "4の伸び寄りで2着浮上。"
+    },
+    {
+      "id": "A08-escape-outerFollow5",
+      "type": "A",
+      "title": "外勢5が差し場拾って2着",
+      "baseWeight": 0.88,
+      "requires": { "attackType": ["none"], "head": ["1"], "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["1","5","(2|3|4|6)"],
+        "linkedPairs": [["1","5"]],
+        "thirdPool": ["2","3","4","6","5"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "外の握りからの差し返しで2着。"
+    },
+    {
+      "id": "A09-escape-weak2wall",
+      "type": "A",
+      "title": "2の壁弱めでも1逃げ残し",
+      "baseWeight": 0.92,
+      "requires": { "attackType": ["none"], "head": ["1"], "lane2Wall": "weak" },
+      "oneMark": {
+        "startOrder": ["1","(3|2)","(4|5)","6"],
+        "linkedPairs": [["1","3"]],
+        "thirdPool": ["2","4","5","6","3"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "2壁が甘くても1が先マイで凌ぐ。"
+    },
+    {
+      "id": "A10-escape-strong2wall",
+      "type": "A",
+      "title": "2の壁強力でイン鉄板",
+      "baseWeight": 1.20,
+      "requires": { "attackType": ["none"], "head": ["1"], "lane2Wall": "strong" },
+      "oneMark": {
+        "startOrder": ["1","2","(3|4)","(5|6)"],
+        "linkedPairs": [["1","2"]],
+        "thirdPool": ["3","4","5","6","2"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "2が完璧な援護。"
+    },
+    {
+      "id": "A11-escape-2follow",
+      "type": "A",
+      "title": "1逃げ→2が素直について2着",
+      "baseWeight": 0.90,
+      "requires": { "head": ["1"], "attackType": ["none"] },
+      "oneMark": {
+        "startOrder": ["1","2","(3|4|5|6)"],
+        "linkedPairs": [["1","2"]],
+        "thirdPool": ["3","4","5","6"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "素直に2が続く基本形。"
+    },
+    {
+      "id": "A12-escape-3follow",
+      "type": "A",
+      "title": "1逃げ→3が押し上げ2着",
+      "baseWeight": 0.80,
+      "requires": { "head": ["1"], "attackType": ["none","mildPressure"] },
+      "oneMark": {
+        "startOrder": ["1","3","(2|4|5|6)"],
+        "linkedPairs": [["1","3"]],
+        "thirdPool": ["2","4","5","6"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "3が差し気味に2着へ。"
+    },
+    {
+      "id": "A13-escape-23shuffle",
+      "type": "A",
+      "title": "2=3入れ替え濃厚",
+      "baseWeight": 1.00,
+      "requires": { "head": ["1"], "attackType": ["none"] },
+      "oneMark": {
+        "startOrder": ["1","(2|3)","(3|2)","(4|5)","6"],
+        "linkedPairs": [["2","3"]],
+        "thirdPool": ["4","5","6","2","3"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "2-3の順不同で決まりやすい。"
+    },
+    {
+      "id": "A14-escape-tight14",
+      "type": "A",
+      "title": "1-4がタイトに通過",
+      "baseWeight": 0.85,
+      "requires": { "head": ["1"], "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["1","4","(2|3)","(5|6)"],
+        "linkedPairs": [["1","4"]],
+        "thirdPool": ["2","3","5","6","4"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "4が差して内差し返し。"
+    },
+    {
+      "id": "A15-escape-tight15",
+      "type": "A",
+      "title": "1-5がタイトに通過",
+      "baseWeight": 0.82,
+      "requires": { "head": ["1"], "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["1","5","(2|3|4)","6"],
+        "linkedPairs": [["1","5"]],
+        "thirdPool": ["2","3","4","6","5"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "5が内差しで食らいつく。"
+    },
+    {
+      "id": "A16-escape-1slightlyLate",
+      "type": "A",
+      "title": "1やや遅れも先マイ到達",
+      "baseWeight": 0.78,
+      "requires": { "attackType": ["mildPressure"], "head": ["1"], "inAvgST": "slow" },
+      "oneMark": {
+        "startOrder": ["1","(2|3)","4","(5|6)"],
+        "linkedPairs": [["2","3"]],
+        "thirdPool": ["4","5","6","2","3"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "少し遅れても回り足でカバー。"
+    },
+    {
+      "id": "A17-escape-22goodST",
+      "type": "A",
+      "title": "2が好STでも1逃げ維持",
+      "baseWeight": 0.97,
+      "requires": { "attackType": ["none"], "head": ["1"], "lane2ST": "fast" },
+      "oneMark": {
+        "startOrder": ["1","2","(3|4|5)","6"],
+        "linkedPairs": [["1","2"]],
+        "thirdPool": ["3","4","5","6","2"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "2の好発にも動じず押し切り。"
+    },
+    {
+      "id": "A18-escape-33goodST",
+      "type": "A",
+      "title": "3が好STで差し迫るも逃げ",
+      "baseWeight": 0.93,
+      "requires": { "attackType": ["mildPressure"], "head": ["1"], "lane3ST": "fast" },
+      "oneMark": {
+        "startOrder": ["1","3","(2|4)","(5|6)"],
+        "linkedPairs": [["1","3"]],
+        "thirdPool": ["2","4","5","6","3"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "3の攻めを受けてもしのぐ。"
+    },
+    {
+      "id": "A19-escape-roughWater",
+      "type": "A",
+      "title": "うねり・波で全体慎重でも逃げ",
+      "baseWeight": 0.90,
+      "requires": { "attackType": ["none"], "head": ["1"], "wave": "high" },
+      "oneMark": {
+        "startOrder": ["1","(2|3)","(4|5)","6"],
+        "linkedPairs": [["2","3"]],
+        "thirdPool": ["4","5","6","2","3"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "安定走で内残し。"
+    },
+    {
+      "id": "A20-escape-nightCalm",
+      "type": "A",
+      "title": "気象穏やか・機力勝ちで逃げ切り",
+      "baseWeight": 1.05,
+      "requires": { "attackType": ["none"], "head": ["1"], "inReliability": "normalUp" },
+      "oneMark": {
+        "startOrder": ["1","(2|3)","(4|5)","6"],
+        "linkedPairs": [["2","3"]],
+        "thirdPool": ["4","5","2","3","6"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "平水面で地力通り。"
+    },
+    {
+      "id": "A21-escape-16tight",
+      "type": "A",
+      "title": "1-6が内外でタイト通過",
+      "baseWeight": 0.78,
+      "requires": { "attackType": ["none"], "head": ["1"], "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["1","6","(2|3|4|5)"],
+        "linkedPairs": [["1","6"]],
+        "thirdPool": ["2","3","4","5","6"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "6が外全速で追走し2着候補。"
+    },
+    {
+      "id": "A22-escape-12tight",
+      "type": "A",
+      "title": "1-2で先行固定・3着流動",
+      "baseWeight": 1.08,
+      "requires": { "attackType": ["none"], "head": ["1"], "lane2Wall": "strong" },
+      "oneMark": {
+        "startOrder": ["1","2","(3|4|5|6)"],
+        "linkedPairs": [["1","2"]],
+        "thirdPool": ["3","4","5","6","2"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "壁強く1-2固定気味で三着争い広め。"
+    },
+    {
+      "id": "A23-escape-13tight",
+      "type": "A",
+      "title": "1-3タイト（2は控え）",
+      "baseWeight": 0.90,
+      "requires": { "attackType": ["mildPressure"], "head": ["1"], "lane2Wall": "weak" },
+      "oneMark": {
+        "startOrder": ["1","3","(2|4|5|6)"],
+        "linkedPairs": [["1","3"]],
+        "thirdPool": ["2","4","5","6","3"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "2の援護薄く3が食い込む。"
+    },
+    {
+      "id": "A24-escape-23wideThird",
+      "type": "A",
+      "title": "1逃げ→2=3で二着争い・三着外広め",
+      "baseWeight": 1.00,
+      "requires": { "attackType": ["none"], "head": ["1"] },
+      "oneMark": {
+        "startOrder": ["1","(2|3)","(3|2)","(4|5|6)"],
+        "linkedPairs": [["2","3"]],
+        "thirdPool": ["4","5","6","2","3"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "2=3は拮抗、三着は外含め広め。"
+    },
+    {
+      "id": "A25-escape-24link",
+      "type": "A",
+      "title": "1逃げ→2-4連動が強い",
+      "baseWeight": 0.92,
+      "requires": { "attackType": ["none"], "head": ["1"], "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["1","(2|4)","3","(5|6)"],
+        "linkedPairs": [["2","4"]],
+        "thirdPool": ["5","6","3","4","2"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "4の差しで2と連動。"
+    },
+    {
+      "id": "A26-escape-25link",
+      "type": "A",
+      "title": "1逃げ→2-5連動（外伸び）",
+      "baseWeight": 0.88,
+      "requires": { "attackType": ["none"], "head": ["1"], "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["1","(2|5)","3","(4|6)"],
+        "linkedPairs": [["2","5"]],
+        "thirdPool": ["4","6","3","5","2"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "5が伸び気配で2と連動。"
+    },
+    {
+      "id": "A27-escape-34pairBehind",
+      "type": "A",
+      "title": "1押し切り・後方は3-4で隊列作りやすい",
+      "baseWeight": 0.85,
+      "requires": { "attackType": ["none"], "head": ["1"], "threeCourseAggressive": true },
+      "oneMark": {
+        "startOrder": ["1","(3|4)","2","(5|6)"],
+        "linkedPairs": [["3","4"]],
+        "thirdPool": ["5","6","2","4","3"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "3-4が並走気味のシーン想定。"
+    },
+    {
+      "id": "A28-escape-4pressButHold",
+      "type": "A",
+      "title": "4の攻め気配も1が受け切る",
+      "baseWeight": 0.90,
+      "requires": { "attackType": ["mildPressure"], "head": ["1"], "slitPusher": 4 },
+      "oneMark": {
+        "startOrder": ["1","(2|4)","3","(5|6)"],
+        "linkedPairs": [["1","2"],["1","4"]],
+        "thirdPool": ["3","5","6","4","2"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "4の仕掛けを1が凌ぎ、2か4が相手。"
+    },
+    {
+      "id": "A29-escape-5pressButHold",
+      "type": "A",
+      "title": "5が伸びるが1が押し切り",
+      "baseWeight": 0.86,
+      "requires": { "attackType": ["mildPressure"], "head": ["1"], "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["1","(2|5)","3","(4|6)"],
+        "linkedPairs": [["1","2"],["1","5"]],
+        "thirdPool": ["3","4","6","5","2"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "5が仕掛け、2と二着争い。"
+    },
+    {
+      "id": "A30-escape-62pressButHold",
+      "type": "A",
+      "title": "6と2が食い下がるが押し切り",
+      "baseWeight": 0.80,
+      "requires": { "attackType": ["mildPressure"], "head": ["1"], "lane2ST": "fast", "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["1","(2|6)","3","(4|5)"],
+        "linkedPairs": [["2","6"]],
+        "thirdPool": ["4","5","3","6","2"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "内外の圧を両方受ける展開。"
+    },
+    {
+      "id": "A31-escape-2lateButHold",
+      "type": "A",
+      "title": "2がやや遅れも1先制維持",
+      "baseWeight": 0.94,
+      "requires": { "attackType": ["none"], "head": ["1"], "lane2ST": "slow" },
+      "oneMark": {
+        "startOrder": ["1","3","2","(4|5|6)"],
+        "linkedPairs": [["1","3"]],
+        "thirdPool": ["4","5","6","2","3"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "2の壁薄でも1-3が軸。"
+    },
+    {
+      "id": "A32-escape-3lateButHold",
+      "type": "A",
+      "title": "3遅れで2が相手の基本形",
+      "baseWeight": 0.96,
+      "requires": { "attackType": ["none"], "head": ["1"], "lane3ST": "slow" },
+      "oneMark": {
+        "startOrder": ["1","2","(4|5)","3"],
+        "linkedPairs": [["1","2"]],
+        "thirdPool": ["4","5","6","3","2"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "3の攻め薄、2が相手。"
+    },
+    {
+      "id": "A33-escape-tight12vs34",
+      "type": "A",
+      "title": "1-2先行に3-4が迫る",
+      "baseWeight": 0.98,
+      "requires": { "attackType": ["mildPressure"], "head": ["1"] },
+      "oneMark": {
+        "startOrder": ["1","2","(3|4)","(5|6)"],
+        "linkedPairs": [["3","4"],["1","2"]],
+        "thirdPool": ["5","6","4","3","2"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "前後2ペアの構図。"
+    },
+    {
+      "id": "A34-escape-1turnGood",
+      "type": "A",
+      "title": "回り足上位で押し切り",
+      "baseWeight": 1.06,
+      "requires": { "attackType": ["none"], "head": ["1"], "inTurn": "good" },
+      "oneMark": {
+        "startOrder": ["1","(2|3)","(4|5)","6"],
+        "linkedPairs": [["2","3"]],
+        "thirdPool": ["4","5","6","2","3"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "ターン優位で危なげなく逃げ。"
+    },
+    {
+      "id": "A35-escape-1strGood",
+      "type": "A",
+      "title": "直線優位で楽に先マイ",
+      "baseWeight": 1.04,
+      "requires": { "attackType": ["none"], "head": ["1"], "inStraight": "good" },
+      "oneMark": {
+        "startOrder": ["1","2","(3|4)","(5|6)"],
+        "linkedPairs": [["1","2"]],
+        "thirdPool": ["3","4","5","6","2"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "伸びで先手。"
+    },
+    {
+      "id": "A36-escape-withTideOuter",
+      "type": "A",
+      "title": "潮流で外勢伸びも1押し切り",
+      "baseWeight": 0.90,
+      "requires": { "attackType": ["mildPressure"], "head": ["1"], "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["1","(4|5)","2","(3|6)"],
+        "linkedPairs": [["4","5"]],
+        "thirdPool": ["3","6","2","5","4"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "外伸びつつも内が優位維持。"
+    },
+    {
+      "id": "A37-escape-126boxy",
+      "type": "A",
+      "title": "1-2-6が先団形成",
+      "baseWeight": 0.92,
+      "requires": { "attackType": ["none"], "head": ["1"], "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["1","(2|6)","(6|2)","(3|4|5)"],
+        "linkedPairs": [["2","6"]],
+        "thirdPool": ["3","4","5","6","2"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "2と6の入れ替え濃厚。"
+    },
+    {
+      "id": "A38-escape-135mix",
+      "type": "A",
+      "title": "1-3-5絡みの混戦で押し切り",
+      "baseWeight": 0.86,
+      "requires": { "attackType": ["mildPressure"], "head": ["1"] },
+      "oneMark": {
+        "startOrder": ["1","3","(5|2)","(4|6)"],
+        "linkedPairs": [["3","5"]],
+        "thirdPool": ["2","4","6","5","3"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "3と5の並走からの内残し。"
+    },
+    {
+      "id": "A39-escape-124mix",
+      "type": "A",
+      "title": "1-2-4が先行し、3着は広め",
+      "baseWeight": 0.98,
+      "requires": { "attackType": ["none"], "head": ["1"] },
+      "oneMark": {
+        "startOrder": ["1","2","4","(3|5|6)"],
+        "linkedPairs": [["2","4"]],
+        "thirdPool": ["3","5","6","4","2"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "2-4の並走で相手固定気味。"
+    },
+    {
+      "id": "A40-escape-1holdWideThird",
+      "type": "A",
+      "title": "1逃げ確度高・三着総流れ寄り",
+      "baseWeight": 1.10,
+      "requires": { "attackType": ["none"], "head": ["1"], "inReliability": "high" },
+      "oneMark": {
+        "startOrder": ["1","(2|3)","(4|5)","6"],
+        "linkedPairs": [["2","3"]],
+        "thirdPool": ["2","3","4","5","6"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "頭鉄板で3着は展開次第の広め。"
+    },
+    {
+      "id": "A41-escape-145mix",
+      "type": "A",
+      "title": "1-4-5が先行・外勢優位気配",
+      "baseWeight": 0.88,
+      "requires": { "attackType": ["none"], "head": ["1"], "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["1","(4|5)","(5|4)","(2|3|6)"],
+        "linkedPairs": [["4","5"]],
+        "thirdPool": ["2","3","6","5","4"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "外側が2着争いを形成するパターン。"
+    },
+    {
+      "id": "A42-escape-1tightVsOuter",
+      "type": "A",
+      "title": "1逃げも外勢が密着",
+      "baseWeight": 0.84,
+      "requires": { "attackType": ["mildPressure"], "head": ["1"], "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["1","(4|6)","(2|3|5)"],
+        "linkedPairs": [["4","6"]],
+        "thirdPool": ["2","3","5","6","4"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "外伸び勢のプレッシャーを受ける展開。"
+    },
+    {
+      "id": "A43-escape-123pressOuter",
+      "type": "A",
+      "title": "1-2-3で先団形成も外追撃",
+      "baseWeight": 0.90,
+      "requires": { "attackType": ["none"], "head": ["1"] },
+      "oneMark": {
+        "startOrder": ["1","2","3","(4|5|6)"],
+        "linkedPairs": [["1","2"],["2","3"]],
+        "thirdPool": ["4","5","6","3","2"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "内枠決着気味だが外から圧。"
+    },
+    {
+      "id": "A44-escape-135outerThird",
+      "type": "A",
+      "title": "1-3固定で3着は外勢中心",
+      "baseWeight": 0.86,
+      "requires": { "attackType": ["none"], "head": ["1"], "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["1","3","(4|5|6)"],
+        "linkedPairs": [["1","3"]],
+        "thirdPool": ["4","5","6","2","3"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "外枠の3着台頭パターン。"
+    },
+    {
+      "id": "A45-escape-12outerPress",
+      "type": "A",
+      "title": "1-2固定・外から4,5が迫る",
+      "baseWeight": 0.88,
+      "requires": { "attackType": ["mildPressure"], "head": ["1"], "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["1","2","(4|5)","(3|6)"],
+        "linkedPairs": [["4","5"]],
+        "thirdPool": ["3","6","5","4","2"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "内2艇が逃げ粘り、外が猛追。"
+    },
+    {
+      "id": "A46-escape-143mix",
+      "type": "A",
+      "title": "1-4-3先行・外は控え",
+      "baseWeight": 0.92,
+      "requires": { "attackType": ["none"], "head": ["1"], "slitPusher": 4 },
+      "oneMark": {
+        "startOrder": ["1","4","3","(2|5|6)"],
+        "linkedPairs": [["4","3"]],
+        "thirdPool": ["2","5","6","3","4"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "4の伸びで3が連動。"
+    },
+    {
+      "id": "A47-escape-154outerLate",
+      "type": "A",
+      "title": "1-5-4並走・2,3遅れ気味",
+      "baseWeight": 0.80,
+      "requires": { "attackType": ["none"], "head": ["1"], "lane2ST": "slow", "lane3ST": "slow" },
+      "oneMark": {
+        "startOrder": ["1","5","4","(2|3|6)"],
+        "linkedPairs": [["5","4"]],
+        "thirdPool": ["2","3","6","4","5"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "外勢が序盤から台頭。"
+    },
+    {
+      "id": "A48-escape-14tight26mix",
+      "type": "A",
+      "title": "1-4固定・2と6が三着争い",
+      "baseWeight": 0.87,
+      "requires": { "attackType": ["none"], "head": ["1"], "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["1","4","(2|6)","(3|5)"],
+        "linkedPairs": [["2","6"]],
+        "thirdPool": ["3","5","6","2","4"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "4が相手、3着に2か6。"
+    },
+    {
+      "id": "A49-escape-1holdOuter246",
+      "type": "A",
+      "title": "1頭固定・2,4,6で接戦",
+      "baseWeight": 0.85,
+      "requires": { "attackType": ["none"], "head": ["1"], "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["1","(2|4|6)","(4|6|2)","(3|5)"],
+        "linkedPairs": [["2","4"],["4","6"],["2","6"]],
+        "thirdPool": ["3","5","6","4","2"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "複数ペアの相手候補。"
+    },
+    {
+      "id": "A50-escape-15outerClose",
+      "type": "A",
+      "title": "1-5で先行・外6が迫る",
+      "baseWeight": 0.82,
+      "requires": { "attackType": ["mildPressure"], "head": ["1"], "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["1","5","6","(2|3|4)"],
+        "linkedPairs": [["5","6"]],
+        "thirdPool": ["2","3","4","6","5"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "5と6の外コンビが接近。"
+    },
+    {
+      "id": "A51-escape-1inner234",
+      "type": "A",
+      "title": "1-2-3-4で内勢が制圧",
+      "baseWeight": 0.96,
+      "requires": { "attackType": ["none"], "head": ["1"], "outerNobi": false },
+      "oneMark": {
+        "startOrder": ["1","2","3","4","(5|6)"],
+        "linkedPairs": [["2","3"],["3","4"]],
+        "thirdPool": ["5","6","4","3","2"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "内4艇が隊列。"
+    },
+    {
+      "id": "A52-escape-134outer6",
+      "type": "A",
+      "title": "1-3-4で先行・外6が台頭",
+      "baseWeight": 0.84,
+      "requires": { "attackType": ["none"], "head": ["1"], "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["1","3","4","6","(2|5)"],
+        "linkedPairs": [["4","6"]],
+        "thirdPool": ["2","5","6","4","3"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "外6が絡むパターン。"
+    },
+    {
+      "id": "A53-escape-126tightOuter4",
+      "type": "A",
+      "title": "1-2-6が先団・外4が差し込む",
+      "baseWeight": 0.82,
+      "requires": { "attackType": ["mildPressure"], "head": ["1"], "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["1","(2|6)","(6|2)","4","(3|5)"],
+        "linkedPairs": [["2","6"],["4","6"]],
+        "thirdPool": ["3","5","4","6","2"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "内外混戦型。"
+    },
+    {
+      "id": "A54-escape-1holdOuter356",
+      "type": "A",
+      "title": "1固定・3,5,6で二着争い",
+      "baseWeight": 0.80,
+      "requires": { "attackType": ["mildPressure"], "head": ["1"] },
+      "oneMark": {
+        "startOrder": ["1","(3|5|6)","(5|6|3)","(2|4)"],
+        "linkedPairs": [["3","5"],["5","6"],["3","6"]],
+        "thirdPool": ["2","4","6","5","3"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "外枠寄りの二着争い。"
+    },
+    {
+      "id": "A55-escape-145outer2",
+      "type": "A",
+      "title": "1-4-5先行・2が差し残し",
+      "baseWeight": 0.83,
+      "requires": { "attackType": ["none"], "head": ["1"] },
+      "oneMark": {
+        "startOrder": ["1","(4|5)","(5|4)","2","(3|6)"],
+        "linkedPairs": [["4","5"]],
+        "thirdPool": ["3","6","2","5","4"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "外先行＋内差し残り型。"
+    },
+    {
+      "id": "A56-escape-1holdTight36",
+      "type": "A",
+      "title": "1固定・3と6が接戦",
+      "baseWeight": 0.81,
+      "requires": { "attackType": ["mildPressure"], "head": ["1"], "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["1","(3|6)","(6|3)","(2|4|5)"],
+        "linkedPairs": [["3","6"]],
+        "thirdPool": ["2","4","5","6","3"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "外寄りで二着争い。"
+    },
+    {
+      "id": "A57-escape-13outer245",
+      "type": "A",
+      "title": "1-3固定・外2,4,5で争い",
+      "baseWeight": 0.82,
+      "requires": { "attackType": ["mildPressure"], "head": ["1"] },
+      "oneMark": {
+        "startOrder": ["1","3","(2|4|5)","(6)"],
+        "linkedPairs": [["2","4"],["4","5"],["2","5"]],
+        "thirdPool": ["6","5","4","2","3"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "3が相手、残りは外で競る。"
+    },
+    {
+      "id": "A58-escape-1outer234",
+      "type": "A",
+      "title": "1固定・外2,3,4が有力",
+      "baseWeight": 0.85,
+      "requires": { "attackType": ["none"], "head": ["1"], "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["1","(2|3|4)","(3|4|2)","(5|6)"],
+        "linkedPairs": [["2","3"],["3","4"],["2","4"]],
+        "thirdPool": ["5","6","4","3","2"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "外からの差し込みも注意。"
+    },
+    {
+      "id": "A59-escape-124tightOuter5",
+      "type": "A",
+      "title": "1-2-4固定・5が追走",
+      "baseWeight": 0.84,
+      "requires": { "attackType": ["none"], "head": ["1"], "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["1","2","4","5","(3|6)"],
+        "linkedPairs": [["2","4"]],
+        "thirdPool": ["3","6","5","4","2"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "5の伸びで4に迫る構図。"
+    },
+    {
+      "id": "A60-escape-1outerWideBattle",
+      "type": "A",
+      "title": "1固定・外勢総出の二着争い",
+      "baseWeight": 0.80,
+      "requires": { "attackType": ["mildPressure"], "head": ["1"], "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["1","(4|5|6)","(5|6|4)","(2|3)"],
+        "linkedPairs": [["4","5"],["5","6"],["4","6"]],
+        "thirdPool": ["2","3","6","5","4"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "外が全員絡む混戦。"
+    },
     {
       "id": "B01-4corner-makuri-full",
       "type": "B",
       "title": "4カド全速まくり",
       "baseWeight": 1.2,
-      "requires": {
-        "attackType": ["fullMakuri"],
-        "slitLeader": 4,
-        "dashAdvantage": true
-      },
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 4, "dashAdvantage": true },
       "oneMark": {
-        "startOrder": ["4", "(5|3)", "(1|2|6)"],
-        "linkedPairs": [["4", "5"], ["4", "3"]],
-        "thirdPool": ["1", "2", "6", "5", "3"],
+        "startOrder": ["4","(5|3)","(1|2|6)"],
+        "linkedPairs": [["4","5"],["4","3"]],
+        "thirdPool": ["1","2","6","5","3"],
         "thirdBias": "course3rdMix"
       },
       "notes": "4→(5|3) 連動を強調。インは3着残り寄り。"
@@ -82,14 +861,11 @@
       "type": "B",
       "title": "3のまくり差し→1残り",
       "baseWeight": 1.0,
-      "requires": {
-        "attackType": ["makuriZashi"],
-        "slitLeader": 3
-      },
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 3 },
       "oneMark": {
-        "startOrder": ["3", "(1|4)", "(2|5|6)"],
-        "linkedPairs": [["3", "1"], ["3", "4"]],
-        "thirdPool": ["2", "5", "6", "1", "4"],
+        "startOrder": ["3","(1|4)","(2|5|6)"],
+        "linkedPairs": [["3","1"],["3","4"]],
+        "thirdPool": ["2","5","6","1","4"],
         "thirdBias": "exRank3rdMix"
       },
       "notes": "1が壁で少し残るパターン。"
@@ -99,15 +875,11 @@
       "type": "B",
       "title": "5の差し切り（4の攻めで内が空く）",
       "baseWeight": 0.9,
-      "requires": {
-        "attackType": ["fullMakuri", "lightMakuriTry"],
-        "slitPusher": 4,
-        "outerFollow": 5
-      },
+      "requires": { "attackType": ["fullMakuri","lightMakuriTry"], "slitPusher": 4, "outerFollow": 5 },
       "oneMark": {
-        "startOrder": ["5", "(4|3)", "(1|2|6)"],
-        "linkedPairs": [["5", "4"], ["5", "3"]],
-        "thirdPool": ["1", "2", "6", "4", "3"],
+        "startOrder": ["5","(4|3)","(1|2|6)"],
+        "linkedPairs": [["5","4"],["5","3"]],
+        "thirdPool": ["1","2","6","4","3"],
         "thirdBias": "course3rdMix"
       },
       "notes": "4の攻めで差し場→5頭。"
@@ -117,196 +889,3324 @@
       "type": "B",
       "title": "2の差し届かず→4が絞って頭",
       "baseWeight": 0.7,
-      "requires": {
-        "attackType": ["fullMakuri"],
-        "slitLeader": 4,
-        "twoCoursePassive": true
-      },
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 4, "twoCoursePassive": true },
       "oneMark": {
-        "startOrder": ["4", "(3|5)", "(1|2|6)"],
-        "linkedPairs": [["3", "5"]],
-        "thirdPool": ["1", "2", "6", "5", "3"],
+        "startOrder": ["4","(3|5)","(1|2|6)"],
+        "linkedPairs": [["3","5"]],
+        "thirdPool": ["1","2","6","5","3"],
         "thirdBias": "national3rdMix"
       },
       "notes": "2は受け気味で連外れ寄り。"
     },
-
     {
-      "id": "C01-2pure-sashi",
-      "type": "C",
-      "title": "2の純差し",
-      "baseWeight": 1.0,
-      "requires": {
-        "attackType": ["sashi"],
-        "head": ["1", "2"],
-        "inWeakness": "sashare"
-      },
+      "id": "B05-3fullMakuri",
+      "type": "B",
+      "title": "3コース全速まくり",
+      "baseWeight": 1.1,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 3 },
       "oneMark": {
-        "startOrder": ["2", "(1|3)", "(4|5|6)"],
-        "linkedPairs": [["2", "1"], ["2", "3"]],
-        "thirdPool": ["4", "5", "6", "1", "3"],
+        "startOrder": ["3","(4|2)","(5|1|6)"],
+        "linkedPairs": [["3","4"],["3","2"]],
+        "thirdPool": ["5","1","6","4","2"],
         "thirdBias": "course3rdMix"
       },
-      "notes": "1が差され負け気味の成績・天候時。"
+      "notes": "3が握って先頭、外または内1艇が続く。"
     },
     {
-      "id": "C02-2sashi-into3follow",
-      "type": "C",
-      "title": "2差し→3が連動で2着",
-      "baseWeight": 0.9,
-      "requires": {
-        "attackType": ["sashi"],
-        "threeCourseAggressive": true
-      },
+      "id": "B06-3makuriZashiOuterFollow",
+      "type": "B",
+      "title": "3まくり差し→5が展開突き",
+      "baseWeight": 0.95,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 3, "outerFollow": 5 },
       "oneMark": {
-        "startOrder": ["2", "3", "(1|4|5|6)"],
-        "linkedPairs": [["2", "3"]],
-        "thirdPool": ["1", "4", "5", "6"],
+        "startOrder": ["3","(1|5)","(4|2|6)"],
+        "linkedPairs": [["3","5"]],
+        "thirdPool": ["4","2","6","5","1"],
         "thirdBias": "exRank3rdMix"
       },
-      "notes": "2-3連動を明確に押すケース。"
+      "notes": "5の外差し連動。"
     },
     {
-      "id": "C03-3sashi-into1残り",
-      "type": "C",
-      "title": "3の差し→1少し残り",
-      "baseWeight": 0.8,
-      "requires": {
-        "attackType": ["sashi", "makuriZashi"],
-        "inReliability": "normalDown"
-      },
+      "id": "B07-4cornerMakuriZashi",
+      "type": "B",
+      "title": "4カドまくり差し→1残し",
+      "baseWeight": 0.92,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 4 },
       "oneMark": {
-        "startOrder": ["3", "(1|4)", "(2|5|6)"],
-        "linkedPairs": [["3", "1"]],
-        "thirdPool": ["2", "5", "6", "4", "1"],
+        "startOrder": ["4","(1|5)","(3|2|6)"],
+        "linkedPairs": [["4","1"],["4","5"]],
+        "thirdPool": ["3","2","6","1","5"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "1が少し残るパターン。"
+    },
+    {
+      "id": "B08-2makuriZashiWide",
+      "type": "B",
+      "title": "2まくり差し→3,4が連動",
+      "baseWeight": 0.93,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 2 },
+      "oneMark": {
+        "startOrder": ["2","(3|4)","(5|1|6)"],
+        "linkedPairs": [["2","3"],["2","4"]],
+        "thirdPool": ["5","1","6","4","3"],
         "thirdBias": "course3rdMix"
       },
-      "notes": "3の差し決まり目。"
+      "notes": "内からの鋭いまくり差し。"
     },
-
     {
-      "id": "D01-in-bigDelay",
+      "id": "B09-5fullMakuri",
+      "type": "B",
+      "title": "5コース全速まくり",
+      "baseWeight": 0.88,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 5 },
+      "oneMark": {
+        "startOrder": ["5","(6|4)","(3|1|2)"],
+        "linkedPairs": [["5","6"],["5","4"]],
+        "thirdPool": ["3","1","2","6","4"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "外枠から一気のまくり。"
+    },
+    {
+      "id": "B10-5makuriZashiInnerFollow",
+      "type": "B",
+      "title": "5まくり差し→4が続く",
+      "baseWeight": 0.86,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 5, "innerFollow": 4 },
+      "oneMark": {
+        "startOrder": ["5","4","(6|3|2|1)"],
+        "linkedPairs": [["5","4"]],
+        "thirdPool": ["6","3","2","1","4"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "4が差し場を得る形。"
+    },
+    {
+      "id": "B11-2fullMakuri",
+      "type": "B",
+      "title": "2コース全速まくり",
+      "baseWeight": 1.0,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 2 },
+      "oneMark": {
+        "startOrder": ["2","(3|4)","(5|1|6)"],
+        "linkedPairs": [["2","3"],["2","4"]],
+        "thirdPool": ["5","1","6","4","3"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "2の握りマイから展開作り。"
+    },
+    {
+      "id": "B12-2makuriZashiOuterPush",
+      "type": "B",
+      "title": "2まくり差し→5,6展開突き",
+      "baseWeight": 0.94,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 2, "outerFollow": [5,6] },
+      "oneMark": {
+        "startOrder": ["2","(5|6)","(3|4|1)"],
+        "linkedPairs": [["2","5"],["2","6"]],
+        "thirdPool": ["3","4","1","6","5"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "外勢の伸びが生きる形。"
+    },
+    {
+      "id": "B13-4makuriOuterBlock",
+      "type": "B",
+      "title": "4カドまくり→5ブロック2着",
+      "baseWeight": 0.89,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 4, "outerFollow": 5 },
+      "oneMark": {
+        "startOrder": ["4","5","(3|1|6|2)"],
+        "linkedPairs": [["4","5"]],
+        "thirdPool": ["3","1","6","2","5"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "5が外をブロックしつつ続く。"
+    },
+    {
+      "id": "B14-3makuriZashiTight",
+      "type": "B",
+      "title": "3まくり差し→4差し抜け",
+      "baseWeight": 0.91,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 3, "innerFollow": 4 },
+      "oneMark": {
+        "startOrder": ["3","4","(1|5|2|6)"],
+        "linkedPairs": [["3","4"]],
+        "thirdPool": ["1","5","2","6","4"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "4が差し場を得る。"
+    },
+    {
+      "id": "B15-6outerMakuri",
+      "type": "B",
+      "title": "6大外まくり",
+      "baseWeight": 0.82,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 6 },
+      "oneMark": {
+        "startOrder": ["6","(5|4)","(3|2|1)"],
+        "linkedPairs": [["6","5"],["6","4"]],
+        "thirdPool": ["3","2","1","5","4"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "大外一撃。"
+    },
+    {
+      "id": "B16-6makuriZashiWide",
+      "type": "B",
+      "title": "6まくり差し→内勢連動",
+      "baseWeight": 0.8,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 6 },
+      "oneMark": {
+        "startOrder": ["6","(1|4)","(5|3|2)"],
+        "linkedPairs": [["6","1"],["6","4"]],
+        "thirdPool": ["5","3","2","1","4"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "内勢が残る形。"
+    },
+    {
+      "id": "B17-4cornerTightMakuri",
+      "type": "B",
+      "title": "4カド絞りまくり",
+      "baseWeight": 0.9,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 4, "tightTurn": true },
+      "oneMark": {
+        "startOrder": ["4","(3|5)","(1|2|6)"],
+        "linkedPairs": [["4","3"],["4","5"]],
+        "thirdPool": ["1","2","6","5","3"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "イン受け流しからの絞り。"
+    },
+    {
+      "id": "B18-2tightMakuri",
+      "type": "B",
+      "title": "2タイトまくり→3続き",
+      "baseWeight": 0.88,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 2, "tightTurn": true, "innerFollow": 3 },
+      "oneMark": {
+        "startOrder": ["2","3","(4|5|1|6)"],
+        "linkedPairs": [["2","3"]],
+        "thirdPool": ["4","5","1","6","3"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "3が差し場を得て続く。"
+    },
+    {
+      "id": "B19-3makuriToOuter",
+      "type": "B",
+      "title": "3まくり→5外伸び2着",
+      "baseWeight": 0.87,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 3, "outerFollow": 5 },
+      "oneMark": {
+        "startOrder": ["3","5","(4|6|1|2)"],
+        "linkedPairs": [["3","5"]],
+        "thirdPool": ["4","6","1","2","5"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "外伸び活かす。"
+    },
+    {
+      "id": "B20-5outerMakuriZashiTight",
+      "type": "B",
+      "title": "5まくり差し→6が差し込む",
+      "baseWeight": 0.85,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 5, "outerFollow": 6 },
+      "oneMark": {
+        "startOrder": ["5","6","(4|3|1|2)"],
+        "linkedPairs": [["5","6"]],
+        "thirdPool": ["4","3","1","2","6"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "6が展開突き差し。"
+    },
+    {
+      "id": "B21-4makuriZashiOuterWide",
+      "type": "B",
+      "title": "4まくり差し→5,6外連動",
+      "baseWeight": 0.85,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 4, "outerFollow": [5,6] },
+      "oneMark": {
+        "startOrder": ["4","(5|6)","(3|1|2)"],
+        "linkedPairs": [["4","5"],["4","6"]],
+        "thirdPool": ["3","1","2","6","5"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "外2艇の伸びが利く形。"
+    },
+    {
+      "id": "B22-3tightMakuriZashi",
+      "type": "B",
+      "title": "3タイトまくり差し→1残り",
+      "baseWeight": 0.84,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 3, "tightTurn": true },
+      "oneMark": {
+        "startOrder": ["3","1","(4|5|6|2)"],
+        "linkedPairs": [["3","1"]],
+        "thirdPool": ["4","5","6","2","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し幅小さめで1残る形。"
+    },
+    {
+      "id": "B23-2outerPushMakuri",
+      "type": "B",
+      "title": "2外押しまくり→4頭",
+      "baseWeight": 0.83,
+      "requires": { "attackType": ["fullMakuri"], "slitPusher": 2, "outerFollow": 4 },
+      "oneMark": {
+        "startOrder": ["4","(3|5)","(1|2|6)"],
+        "linkedPairs": [["4","3"],["4","5"]],
+        "thirdPool": ["1","2","6","5","3"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "外の流れを活かして4が先頭へ。"
+    },
+    {
+      "id": "B24-5cornerMakuri",
+      "type": "B",
+      "title": "5カドまくり→6続き",
+      "baseWeight": 0.8,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 5, "cornerStart": true, "outerFollow": 6 },
+      "oneMark": {
+        "startOrder": ["5","6","(4|3|1|2)"],
+        "linkedPairs": [["5","6"]],
+        "thirdPool": ["4","3","1","2","6"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "外ワンツー決着型。"
+    },
+    {
+      "id": "B25-6cornerMakuriZashi",
+      "type": "B",
+      "title": "6カドまくり差し→4続き",
+      "baseWeight": 0.78,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 6, "cornerStart": true, "innerFollow": 4 },
+      "oneMark": {
+        "startOrder": ["6","4","(5|3|2|1)"],
+        "linkedPairs": [["6","4"]],
+        "thirdPool": ["5","3","2","1","4"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "4が展開差し。"
+    },
+    {
+      "id": "B26-3outerWideMakuri",
+      "type": "B",
+      "title": "3外伸びまくり→5,6続き",
+      "baseWeight": 0.82,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 3, "outerFollow": [5,6] },
+      "oneMark": {
+        "startOrder": ["3","(5|6)","(4|1|2)"],
+        "linkedPairs": [["3","5"],["3","6"]],
+        "thirdPool": ["4","1","2","6","5"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "外ワイド連動型。"
+    },
+    {
+      "id": "B27-4makuriTightInner",
+      "type": "B",
+      "title": "4タイトまくり→2差し残り",
+      "baseWeight": 0.81,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 4, "tightTurn": true, "innerFollow": 2 },
+      "oneMark": {
+        "startOrder": ["4","2","(3|5|6|1)"],
+        "linkedPairs": [["4","2"]],
+        "thirdPool": ["3","5","6","1","2"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "2が差して2着。"
+    },
+    {
+      "id": "B28-2makuriWide",
+      "type": "B",
+      "title": "2まくり→3,4続き",
+      "baseWeight": 0.85,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 2 },
+      "oneMark": {
+        "startOrder": ["2","(3|4)","(5|6|1)"],
+        "linkedPairs": [["2","3"],["2","4"]],
+        "thirdPool": ["5","6","1","4","3"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "中枠ワイド決着型。"
+    },
+    {
+      "id": "B29-5makuriInnerFollow",
+      "type": "B",
+      "title": "5まくり→4差し続き",
+      "baseWeight": 0.79,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 5, "innerFollow": 4 },
+      "oneMark": {
+        "startOrder": ["5","4","(6|3|2|1)"],
+        "linkedPairs": [["5","4"]],
+        "thirdPool": ["6","3","2","1","4"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "4が差し残す形。"
+    },
+    {
+      "id": "B30-6makuriWideFollow",
+      "type": "B",
+      "title": "6まくり→4,5続き",
+      "baseWeight": 0.78,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 6, "outerFollow": [4,5] },
+      "oneMark": {
+        "startOrder": ["6","(4|5)","(3|2|1)"],
+        "linkedPairs": [["6","4"],["6","5"]],
+        "thirdPool": ["3","2","1","5","4"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "中外の展開連動。"
+    },
+    {
+      "id": "B31-3makuriZashiTandem",
+      "type": "B",
+      "title": "3まくり差し→4,2並走",
+      "baseWeight": 0.83,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 3 },
+      "oneMark": {
+        "startOrder": ["3","(4|2)","(5|6|1)"],
+        "linkedPairs": [["3","4"],["3","2"]],
+        "thirdPool": ["5","6","1","4","2"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し後の並走型。"
+    },
+    {
+      "id": "B32-4cornerWideMakuri",
+      "type": "B",
+      "title": "4カドまくり→5,6外伸び",
+      "baseWeight": 0.84,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 4, "outerFollow": [5,6] },
+      "oneMark": {
+        "startOrder": ["4","(5|6)","(3|1|2)"],
+        "linkedPairs": [["4","5"],["4","6"]],
+        "thirdPool": ["3","1","2","6","5"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "外が続くワイド型。"
+    },
+    {
+      "id": "B33-2makuriTightWide",
+      "type": "B",
+      "title": "2タイトまくり→3,5続き",
+      "baseWeight": 0.82,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 2, "tightTurn": true },
+      "oneMark": {
+        "startOrder": ["2","(3|5)","(4|6|1)"],
+        "linkedPairs": [["2","3"],["2","5"]],
+        "thirdPool": ["4","6","1","5","3"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "中枠・外枠連動型。"
+    },
+    {
+      "id": "B34-5cornerMakuriZashi",
+      "type": "B",
+      "title": "5カドまくり差し→4続き",
+      "baseWeight": 0.8,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 5, "cornerStart": true, "innerFollow": 4 },
+      "oneMark": {
+        "startOrder": ["5","4","(6|3|2|1)"],
+        "linkedPairs": [["5","4"]],
+        "thirdPool": ["6","3","2","1","4"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "4が差して残る。"
+    },
+    {
+      "id": "B35-6cornerWideMakuri",
+      "type": "B",
+      "title": "6カドまくり→4,5続き",
+      "baseWeight": 0.78,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 6, "cornerStart": true, "outerFollow": [4,5] },
+      "oneMark": {
+        "startOrder": ["6","(4|5)","(3|2|1)"],
+        "linkedPairs": [["6","4"],["6","5"]],
+        "thirdPool": ["3","2","1","5","4"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "外2艇が続く形。"
+    },
+    {
+      "id": "B36-3makuriZashiOuterWide",
+      "type": "B",
+      "title": "3まくり差し→5,6外伸び",
+      "baseWeight": 0.82,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 3, "outerFollow": [5,6] },
+      "oneMark": {
+        "startOrder": ["3","(5|6)","(4|1|2)"],
+        "linkedPairs": [["3","5"],["3","6"]],
+        "thirdPool": ["4","1","2","6","5"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "差し後の外勢連動。"
+    },
+    {
+      "id": "B37-4tightMakuriZashi",
+      "type": "B",
+      "title": "4タイトまくり差し→1残り",
+      "baseWeight": 0.81,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 4, "tightTurn": true },
+      "oneMark": {
+        "startOrder": ["4","1","(5|3|2|6)"],
+        "linkedPairs": [["4","1"]],
+        "thirdPool": ["5","3","2","6","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "インが残る差し型。"
+    },
+    {
+      "id": "B38-2outerWideMakuri",
+      "type": "B",
+      "title": "2外伸びまくり→5,6続き",
+      "baseWeight": 0.8,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 2, "outerFollow": [5,6] },
+      "oneMark": {
+        "startOrder": ["2","(5|6)","(3|4|1)"],
+        "linkedPairs": [["2","5"],["2","6"]],
+        "thirdPool": ["3","4","1","6","5"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "外ワイド決着型。"
+    },
+    {
+      "id": "B39-5outerMakuriWide",
+      "type": "B",
+      "title": "5外伸びまくり→4,6続き",
+      "baseWeight": 0.78,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 5, "outerFollow": [4,6] },
+      "oneMark": {
+        "startOrder": ["5","(4|6)","(3|2|1)"],
+        "linkedPairs": [["5","4"],["5","6"]],
+        "thirdPool": ["3","2","1","6","4"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "外勢連動型。"
+    },
+    {
+      "id": "B40-6outerMakuriZashiTandem",
+      "type": "B",
+      "title": "6まくり差し→4,5並走",
+      "baseWeight": 0.76,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 6, "outerFollow": [4,5] },
+      "oneMark": {
+        "startOrder": ["6","(4|5)","(3|2|1)"],
+        "linkedPairs": [["6","4"],["6","5"]],
+        "thirdPool": ["3","2","1","5","4"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "外並走型。"
+    },
+    {
+      "id": "B41-4MakuriInside23",
+      "type": "B",
+      "title": "4まくり→内2,3食らいつく",
+      "baseWeight": 0.84,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 4 },
+      "oneMark": {
+        "startOrder": ["4","(2|3)","(5|6|1)"],
+        "linkedPairs": [["4","2"],["4","3"]],
+        "thirdPool": ["5","6","1","3","2"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "4の握りで内側の残り目も発生。"
+    },
+    {
+      "id": "B42-4MakuriZashi23",
+      "type": "B",
+      "title": "4まくり差し→2,3が続く",
+      "baseWeight": 0.83,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 4 },
+      "oneMark": {
+        "startOrder": ["4","(2|3)","(5|6|1)"],
+        "linkedPairs": [["4","2"],["4","3"]],
+        "thirdPool": ["5","6","1","3","2"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "タイト差しで2,3の残り強め。"
+    },
+    {
+      "id": "B43-3MakuriInside12",
+      "type": "B",
+      "title": "3まくり→1,2内残り",
+      "baseWeight": 0.82,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 3 },
+      "oneMark": {
+        "startOrder": ["3","(1|2)","(4|5|6)"],
+        "linkedPairs": [["3","1"],["3","2"]],
+        "thirdPool": ["4","5","6","2","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "3の握り切り。内の壁が2着候補に。"
+    },
+    {
+      "id": "B44-3MakuriZashi1Anchor",
+      "type": "B",
+      "title": "3まくり差し→1アンカー",
+      "baseWeight": 0.84,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 3 },
+      "oneMark": {
+        "startOrder": ["3","1","(4|5|6|2)"],
+        "linkedPairs": [["3","1"]],
+        "thirdPool": ["4","5","6","2","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し幅小で1が相手筆頭。"
+    },
+    {
+      "id": "B45-5Makuri34Follow",
+      "type": "B",
+      "title": "5まくり→3,4続く",
+      "baseWeight": 0.8,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 5 },
+      "oneMark": {
+        "startOrder": ["5","(3|4)","(6|2|1)"],
+        "linkedPairs": [["5","3"],["5","4"]],
+        "thirdPool": ["6","2","1","4","3"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "外の連動で決まる展開。"
+    },
+    {
+      "id": "B46-6Makuri35Follow",
+      "type": "B",
+      "title": "6まくり→3,5続く",
+      "baseWeight": 0.79,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 6 },
+      "oneMark": {
+        "startOrder": ["6","(3|5)","(4|2|1)"],
+        "linkedPairs": [["6","3"],["6","5"]],
+        "thirdPool": ["4","2","1","5","3"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "最外からの一撃＋中枠相手。"
+    },
+    {
+      "id": "B47-2Makuri45Chase",
+      "type": "B",
+      "title": "2まくり→4,5追走",
+      "baseWeight": 0.82,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 2 },
+      "oneMark": {
+        "startOrder": ["2","(4|5)","(3|6|1)"],
+        "linkedPairs": [["2","4"],["2","5"]],
+        "thirdPool": ["3","6","1","5","4"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "2先制からの外勢台頭。"
+    },
+    {
+      "id": "B48-2MakuriZashi4Anchor",
+      "type": "B",
+      "title": "2まくり差し→4アンカー",
+      "baseWeight": 0.81,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 2 },
+      "oneMark": {
+        "startOrder": ["2","4","(3|5|6|1)"],
+        "linkedPairs": [["2","4"]],
+        "thirdPool": ["3","5","6","1","4"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "絞って差して2-4基調。"
+    },
+    {
+      "id": "B49-4MakuriWide156",
+      "type": "B",
+      "title": "4まくり→1,5,6で相手探し",
+      "baseWeight": 0.8,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 4 },
+      "oneMark": {
+        "startOrder": ["4","(1|5|6)","(3|2)"],
+        "linkedPairs": [["4","1"],["4","5"],["4","6"]],
+        "thirdPool": ["3","2","6","5","1"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "頭固定で相手広め。"
+    },
+    {
+      "id": "B50-4MakuriZashiWide156",
+      "type": "B",
+      "title": "4まくり差し→1,5,6で相手探し",
+      "baseWeight": 0.8,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 4 },
+      "oneMark": {
+        "startOrder": ["4","(1|5|6)","(3|2)"],
+        "linkedPairs": [["4","1"],["4","5"],["4","6"]],
+        "thirdPool": ["3","2","6","5","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し目でも相手は同傾向。"
+    },
+    {
+      "id": "B51-3MakuriTight15",
+      "type": "B",
+      "title": "3タイトまくり→1,5が相手",
+      "baseWeight": 0.82,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 3, "tightTurn": true },
+      "oneMark": {
+        "startOrder": ["3","(1|5)","(4|6|2)"],
+        "linkedPairs": [["3","1"],["3","5"]],
+        "thirdPool": ["4","6","2","5","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "内と外が相手の両睨み。"
+    },
+    {
+      "id": "B52-3MakuriZashi15",
+      "type": "B",
+      "title": "3まくり差し→1,5残り",
+      "baseWeight": 0.83,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 3 },
+      "oneMark": {
+        "startOrder": ["3","(1|5)","(4|6|2)"],
+        "linkedPairs": [["3","1"],["3","5"]],
+        "thirdPool": ["4","6","2","5","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し幅で1と5の残りが濃い。"
+    },
+    {
+      "id": "B53-5MakuriTight46",
+      "type": "B",
+      "title": "5タイトまくり→4,6相手",
+      "baseWeight": 0.79,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 5, "tightTurn": true },
+      "oneMark": {
+        "startOrder": ["5","(4|6)","(3|2|1)"],
+        "linkedPairs": [["5","4"],["5","6"]],
+        "thirdPool": ["3","2","1","6","4"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "外同士の連動。"
+    },
+    {
+      "id": "B54-5MakuriZashi4Keep",
+      "type": "B",
+      "title": "5まくり差し→4キープ",
+      "baseWeight": 0.8,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 5 },
+      "oneMark": {
+        "startOrder": ["5","4","(6|3|2|1)"],
+        "linkedPairs": [["5","4"]],
+        "thirdPool": ["6","3","2","1","4"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "5-4軸で相手流動。"
+    },
+    {
+      "id": "B55-6MakuriTight45",
+      "type": "B",
+      "title": "6タイトまくり→4,5相手",
+      "baseWeight": 0.78,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 6, "tightTurn": true },
+      "oneMark": {
+        "startOrder": ["6","(4|5)","(3|2|1)"],
+        "linkedPairs": [["6","4"],["6","5"]],
+        "thirdPool": ["3","2","1","5","4"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "最外からの一撃で外並走。"
+    },
+    {
+      "id": "B56-6MakuriZashi4Keep",
+      "type": "B",
+      "title": "6まくり差し→4キープ",
+      "baseWeight": 0.79,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 6 },
+      "oneMark": {
+        "startOrder": ["6","4","(5|3|2|1)"],
+        "linkedPairs": [["6","4"]],
+        "thirdPool": ["5","3","2","1","4"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し目で4が軸相手に。"
+    },
+    {
+      "id": "B57-2MakuriInside13",
+      "type": "B",
+      "title": "2まくり→1,3の内残り",
+      "baseWeight": 0.82,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 2 },
+      "oneMark": {
+        "startOrder": ["2","(1|3)","(4|5|6)"],
+        "linkedPairs": [["2","1"],["2","3"]],
+        "thirdPool": ["4","5","6","3","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "2先制で内の相手探し。"
+    },
+    {
+      "id": "B58-2MakuriZashi1Keep",
+      "type": "B",
+      "title": "2まくり差し→1キープ",
+      "baseWeight": 0.83,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 2 },
+      "oneMark": {
+        "startOrder": ["2","1","(3|4|5|6)"],
+        "linkedPairs": [["2","1"]],
+        "thirdPool": ["3","4","5","6","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "インが2着筆頭。"
+    },
+    {
+      "id": "B59-4MakuriWith2or5",
+      "type": "B",
+      "title": "4まくり→2または5が相手",
+      "baseWeight": 0.81,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 4 },
+      "oneMark": {
+        "startOrder": ["4","(2|5)","(3|6|1)"],
+        "linkedPairs": [["4","2"],["4","5"]],
+        "thirdPool": ["3","6","1","5","2"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "相手は内か外の二択想定。"
+    },
+    {
+      "id": "B60-4MakuriZashiWith2or5",
+      "type": "B",
+      "title": "4まくり差し→2または5が相手",
+      "baseWeight": 0.81,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 4 },
+      "oneMark": {
+        "startOrder": ["4","(2|5)","(3|6|1)"],
+        "linkedPairs": [["4","2"],["4","5"]],
+        "thirdPool": ["3","6","1","5","2"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し目でも同じ相手構図。"
+    },
+    {
+      "id": "B61-3MakuriWide56",
+      "type": "B",
+      "title": "3まくり→外(5,6)が相手",
+      "baseWeight": 0.82,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 3 },
+      "oneMark": {
+        "startOrder": ["3","(5|6)","(4|2|1)"],
+        "linkedPairs": [["3","5"],["3","6"]],
+        "thirdPool": ["4","2","1","6","5"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "3の握りで外が連動。"
+    },
+    {
+      "id": "B62-3MakuriZashi5Keep",
+      "type": "B",
+      "title": "3まくり差し→5が軸相手",
+      "baseWeight": 0.83,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 3 },
+      "oneMark": {
+        "startOrder": ["3","5","(6|4|2|1)"],
+        "linkedPairs": [["3","5"]],
+        "thirdPool": ["6","4","2","1","5"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し目で外5が強く残る。"
+    },
+    {
+      "id": "B63-4MakuriTight23",
+      "type": "B",
+      "title": "4タイトまくり→2,3が相手",
+      "baseWeight": 0.84,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 4, "tightTurn": true },
+      "oneMark": {
+        "startOrder": ["4","(2|3)","(5|6|1)"],
+        "linkedPairs": [["4","2"],["4","3"]],
+        "thirdPool": ["5","6","1","3","2"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "絞り切りで内側の立て直しも相手に。"
+    },
+    {
+      "id": "B64-4MakuriZashi2Keep",
+      "type": "B",
+      "title": "4まくり差し→2キープ",
+      "baseWeight": 0.82,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 4 },
+      "oneMark": {
+        "startOrder": ["4","2","(5|6|3|1)"],
+        "linkedPairs": [["4","2"]],
+        "thirdPool": ["5","6","3","1","2"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し幅で2の残り目濃厚。"
+    },
+    {
+      "id": "B65-5MakuriInside12",
+      "type": "B",
+      "title": "5まくり→内(1,2)が相手",
+      "baseWeight": 0.8,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 5 },
+      "oneMark": {
+        "startOrder": ["5","(1|2)","(4|6|3)"],
+        "linkedPairs": [["5","1"],["5","2"]],
+        "thirdPool": ["4","6","3","2","1"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "外一撃後に内の残りと勝負。"
+    },
+    {
+      "id": "B66-5MakuriZashi1Anchor",
+      "type": "B",
+      "title": "5まくり差し→1アンカー",
+      "baseWeight": 0.81,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 5 },
+      "oneMark": {
+        "startOrder": ["5","1","(2|4|6|3)"],
+        "linkedPairs": [["5","1"]],
+        "thirdPool": ["2","4","6","3","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "インが2着筆頭で残る。"
+    },
+    {
+      "id": "B67-6MakuriFollow45",
+      "type": "B",
+      "title": "6まくり→4,5が続く",
+      "baseWeight": 0.79,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 6 },
+      "oneMark": {
+        "startOrder": ["6","(4|5)","(3|2|1)"],
+        "linkedPairs": [["6","4"],["6","5"]],
+        "thirdPool": ["3","2","1","5","4"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "最外一撃＋中外並走。"
+    },
+    {
+      "id": "B68-6MakuriZashi5Keep",
+      "type": "B",
+      "title": "6まくり差し→5キープ",
+      "baseWeight": 0.8,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 6 },
+      "oneMark": {
+        "startOrder": ["6","5","(4|3|2|1)"],
+        "linkedPairs": [["6","5"]],
+        "thirdPool": ["4","3","2","1","5"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し目で5が残る展開。"
+    },
+    {
+      "id": "B69-3MakuriPushChain56",
+      "type": "B",
+      "title": "3まくり→(5→6)の押し上げ連鎖",
+      "baseWeight": 0.81,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 3, "pushChain": true },
+      "oneMark": {
+        "startOrder": ["3","(5|6)","(4|2|1)"],
+        "linkedPairs": [["3","5"],["5","6"]],
+        "thirdPool": ["4","2","1","6","5"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "3起点の外押し上げ連鎖。"
+    },
+    {
+      "id": "B70-4MakuriZashiInside13",
+      "type": "B",
+      "title": "4まくり差し→内(1,3)が相手",
+      "baseWeight": 0.82,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 4 },
+      "oneMark": {
+        "startOrder": ["4","(1|3)","(5|6|2)"],
+        "linkedPairs": [["4","1"],["4","3"]],
+        "thirdPool": ["5","6","2","3","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "内の立て直しが2着に浮上。"
+    },
+    {
+      "id": "B71-2MakuriOutside56",
+      "type": "B",
+      "title": "2まくり→外(5,6)が相手",
+      "baseWeight": 0.81,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 2 },
+      "oneMark": {
+        "startOrder": ["2","(5|6)","(3|4|1)"],
+        "linkedPairs": [["2","5"],["2","6"]],
+        "thirdPool": ["3","4","1","6","5"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "2先制で外の伸びが同調。"
+    },
+    {
+      "id": "B72-2MakuriZashi3Keep",
+      "type": "B",
+      "title": "2まくり差し→3キープ",
+      "baseWeight": 0.82,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 2 },
+      "oneMark": {
+        "startOrder": ["2","3","(5|4|6|1)"],
+        "linkedPairs": [["2","3"]],
+        "thirdPool": ["5","4","6","1","3"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "3が差し返し位置で残る。"
+    },
+    {
+      "id": "B73-5MakuriInside34",
+      "type": "B",
+      "title": "5まくり→内(3,4)が相手",
+      "baseWeight": 0.8,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 5 },
+      "oneMark": {
+        "startOrder": ["5","(3|4)","(6|2|1)"],
+        "linkedPairs": [["5","3"],["5","4"]],
+        "thirdPool": ["6","2","1","4","3"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "5先頭でセンター勢が残る。"
+    },
+    {
+      "id": "B74-6MakuriInside34",
+      "type": "B",
+      "title": "6まくり→内(3,4)が相手",
+      "baseWeight": 0.79,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 6 },
+      "oneMark": {
+        "startOrder": ["6","(3|4)","(5|2|1)"],
+        "linkedPairs": [["6","3"],["6","4"]],
+        "thirdPool": ["5","2","1","4","3"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "外一撃でも内センターが追走。"
+    },
+    {
+      "id": "B75-4MakuriWith16",
+      "type": "B",
+      "title": "4まくり→1 or 6が相手",
+      "baseWeight": 0.81,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 4 },
+      "oneMark": {
+        "startOrder": ["4","(1|6)","(5|3|2)"],
+        "linkedPairs": [["4","1"],["4","6"]],
+        "thirdPool": ["5","3","2","6","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "相手は最内か最外で二極化。"
+    },
+    {
+      "id": "B76-4MakuriZashiWith16",
+      "type": "B",
+      "title": "4まくり差し→1 or 6が相手",
+      "baseWeight": 0.82,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 4 },
+      "oneMark": {
+        "startOrder": ["4","(1|6)","(5|3|2)"],
+        "linkedPairs": [["4","1"],["4","6"]],
+        "thirdPool": ["5","3","2","6","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し幅で1の残り、6の伸び両想定。"
+    },
+    {
+      "id": "B77-3MakuriInside12",
+      "type": "B",
+      "title": "3まくり→内(1,2)が相手",
+      "baseWeight": 0.82,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 3 },
+      "oneMark": {
+        "startOrder": ["3","(1|2)","(4|5|6)"],
+        "linkedPairs": [["3","1"],["3","2"]],
+        "thirdPool": ["4","5","6","2","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "3の一撃でも内が建て直す。"
+    },
+    {
+      "id": "B78-3MakuriZashi1Keep",
+      "type": "B",
+      "title": "3まくり差し→1キープ",
+      "baseWeight": 0.83,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 3 },
+      "oneMark": {
+        "startOrder": ["3","1","(2|4|5|6)"],
+        "linkedPairs": [["3","1"]],
+        "thirdPool": ["2","4","5","6","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "インが相手筆頭で残る。"
+    },
+    {
+      "id": "B79-5MakuriWide146",
+      "type": "B",
+      "title": "5まくり→1,4,6で相手探し",
+      "baseWeight": 0.8,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 5 },
+      "oneMark": {
+        "startOrder": ["5","(1|4|6)","(3|2)"],
+        "linkedPairs": [["5","1"],["5","4"],["5","6"]],
+        "thirdPool": ["3","2","6","4","1"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "相手広めで点数調整向き。"
+    },
+    {
+      "id": "B80-6MakuriZashiWide145",
+      "type": "B",
+      "title": "6まくり差し→1,4,5で相手探し",
+      "baseWeight": 0.8,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 6 },
+      "oneMark": {
+        "startOrder": ["6","(1|4|5)","(3|2)"],
+        "linkedPairs": [["6","1"],["6","4"],["6","5"]],
+        "thirdPool": ["3","2","5","4","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し目でも相手は1,4,5の広め構図。"
+    },
+    {
+      "id": "B81-4MakuriPressWide25",
+      "type": "B",
+      "title": "4まくり圧→2,5広め相手",
+      "baseWeight": 0.82,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 4, "dashAdvantage": true },
+      "oneMark": {
+        "startOrder": ["4","(2|5)","(3|6|1)"],
+        "linkedPairs": [["4","2"],["4","5"]],
+        "thirdPool": ["3","6","1","5","2"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "4の圧倒先制で2か5が相手。"
+    },
+    {
+      "id": "B82-4MakuriZashi23Tight",
+      "type": "B",
+      "title": "4まくり差し→2,3食い下がり",
+      "baseWeight": 0.83,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 4 },
+      "oneMark": {
+        "startOrder": ["4","(2|3)","(5|6|1)"],
+        "linkedPairs": [["4","2"],["4","3"]],
+        "thirdPool": ["5","6","1","3","2"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し幅が合い内側が2着争い。"
+    },
+    {
+      "id": "B83-3MakuriLean45",
+      "type": "B",
+      "title": "3まくり→4,5寄り",
+      "baseWeight": 0.81,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 3 },
+      "oneMark": {
+        "startOrder": ["3","(4|5)","(1|2|6)"],
+        "linkedPairs": [["3","4"],["3","5"]],
+        "thirdPool": ["1","2","6","5","4"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "3の握りで外側が追走。"
+    },
+    {
+      "id": "B84-3MakuriZashi1Tail",
+      "type": "B",
+      "title": "3まくり差し→1が食らいつく",
+      "baseWeight": 0.84,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 3 },
+      "oneMark": {
+        "startOrder": ["3","1","(4|5|6|2)"],
+        "linkedPairs": [["3","1"]],
+        "thirdPool": ["4","5","6","2","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "イン粘りで相手筆頭が1。"
+    },
+    {
+      "id": "B85-5MakuriPress46",
+      "type": "B",
+      "title": "5まくり圧→4,6が相手",
+      "baseWeight": 0.8,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 5, "dashAdvantage": true },
+      "oneMark": {
+        "startOrder": ["5","(4|6)","(3|2|1)"],
+        "linkedPairs": [["5","4"],["5","6"]],
+        "thirdPool": ["3","2","1","6","4"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "5が先制、角受けと大外が連動。"
+    },
+    {
+      "id": "B86-5MakuriZashi2Cling",
+      "type": "B",
+      "title": "5まくり差し→2が粘る",
+      "baseWeight": 0.81,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 5 },
+      "oneMark": {
+        "startOrder": ["5","2","(4|6|3|1)"],
+        "linkedPairs": [["5","2"]],
+        "thirdPool": ["4","6","3","1","2"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し目で2残り濃厚。"
+    },
+    {
+      "id": "B87-6MakuriChain54",
+      "type": "B",
+      "title": "6まくり→5→4の連鎖",
+      "baseWeight": 0.79,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 6, "pushChain": true },
+      "oneMark": {
+        "startOrder": ["6","(5|4)","(3|2|1)"],
+        "linkedPairs": [["6","5"],["5","4"]],
+        "thirdPool": ["3","2","1","4","5"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "最外発進から外勢が順に浮上。"
+    },
+    {
+      "id": "B88-6MakuriZashi1Hold",
+      "type": "B",
+      "title": "6まくり差し→1が残して相手",
+      "baseWeight": 0.8,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 6 },
+      "oneMark": {
+        "startOrder": ["6","1","(5|4|3|2)"],
+        "linkedPairs": [["6","1"]],
+        "thirdPool": ["5","4","3","2","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し目でインが2着軸。"
+    },
+    {
+      "id": "B89-2MakuriPress34",
+      "type": "B",
+      "title": "2まくり圧→3,4が相手",
+      "baseWeight": 0.82,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 2, "tightTurn": true },
+      "oneMark": {
+        "startOrder": ["2","(3|4)","(5|6|1)"],
+        "linkedPairs": [["2","3"],["2","4"]],
+        "thirdPool": ["5","6","1","4","3"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "2先制でセンターが連動。"
+    },
+    {
+      "id": "B90-2MakuriZashi1Tail",
+      "type": "B",
+      "title": "2まくり差し→1が相手筆頭",
+      "baseWeight": 0.83,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 2 },
+      "oneMark": {
+        "startOrder": ["2","1","(3|4|5|6)"],
+        "linkedPairs": [["2","1"]],
+        "thirdPool": ["3","4","5","6","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し返し位置で1が残る。"
+    },
+    {
+      "id": "B91-4MakuriOuter56",
+      "type": "B",
+      "title": "4まくり→外(5,6)が相手浮上",
+      "baseWeight": 0.81,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 4 },
+      "oneMark": {
+        "startOrder": ["4","(5|6)","(3|2|1)"],
+        "linkedPairs": [["4","5"],["4","6"]],
+        "thirdPool": ["3","2","1","6","5"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "カド起点で外勢も位置取り良化。"
+    },
+    {
+      "id": "B92-4MakuriZashiInside12",
+      "type": "B",
+      "title": "4まくり差し→内(1,2)が相手",
+      "baseWeight": 0.82,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 4 },
+      "oneMark": {
+        "startOrder": ["4","(1|2)","(5|6|3)"],
+        "linkedPairs": [["4","1"],["4","2"]],
+        "thirdPool": ["5","6","3","2","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し幅で内が立て直し。"
+    },
+    {
+      "id": "B93-3MakuriInside12Tight",
+      "type": "B",
+      "title": "3まくり→内(1,2)食らいつき",
+      "baseWeight": 0.82,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 3, "tightTurn": true },
+      "oneMark": {
+        "startOrder": ["3","(1|2)","(4|5|6)"],
+        "linkedPairs": [["3","1"],["3","2"]],
+        "thirdPool": ["4","5","6","2","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "タイトに握っても内が残る構図。"
+    },
+    {
+      "id": "B94-3MakuriZashi24Mesh",
+      "type": "B",
+      "title": "3まくり差し→2,4で2着競り",
+      "baseWeight": 0.83,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 3 },
+      "oneMark": {
+        "startOrder": ["3","(2|4)","(1|5|6)"],
+        "linkedPairs": [["3","2"],["3","4"]],
+        "thirdPool": ["1","5","6","4","2"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し目で2と4が競り合い。"
+    },
+    {
+      "id": "B95-5Makuri14Dual",
+      "type": "B",
+      "title": "5まくり→1 or 4の二択",
+      "baseWeight": 0.8,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 5 },
+      "oneMark": {
+        "startOrder": ["5","(1|4)","(6|3|2)"],
+        "linkedPairs": [["5","1"],["5","4"]],
+        "thirdPool": ["6","3","2","4","1"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "相手が内or角で二極化。"
+    },
+    {
+      "id": "B96-5MakuriZashi16Dual",
+      "type": "B",
+      "title": "5まくり差し→1 or 6が相手",
+      "baseWeight": 0.81,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 5 },
+      "oneMark": {
+        "startOrder": ["5","(1|6)","(4|3|2)"],
+        "linkedPairs": [["5","1"],["5","6"]],
+        "thirdPool": ["4","3","2","6","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し幅で1の残りか6の伸び。"
+    },
+    {
+      "id": "B97-6Makuri14Dual",
+      "type": "B",
+      "title": "6まくり→1 or 4が相手",
+      "baseWeight": 0.79,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 6 },
+      "oneMark": {
+        "startOrder": ["6","(1|4)","(5|3|2)"],
+        "linkedPairs": [["6","1"],["6","4"]],
+        "thirdPool": ["5","3","2","4","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "最外から1か4のどちらかが相手。"
+    },
+    {
+      "id": "B98-6MakuriZashi12Anchor",
+      "type": "B",
+      "title": "6まくり差し→1,2がアンカー",
+      "baseWeight": 0.8,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 6 },
+      "oneMark": {
+        "startOrder": ["6","(1|2)","(5|4|3)"],
+        "linkedPairs": [["6","1"],["6","2"]],
+        "thirdPool": ["5","4","3","2","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し目で内の残り優勢。"
+    },
+    {
+      "id": "B99-2MakuriWide456",
+      "type": "B",
+      "title": "2まくり→外(4,5,6)広く相手",
+      "baseWeight": 0.81,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 2 },
+      "oneMark": {
+        "startOrder": ["2","(4|5|6)","(3|1)"],
+        "linkedPairs": [["2","4"],["2","5"],["2","6"]],
+        "thirdPool": ["3","1","6","5","4"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "2先制で外勢の差し場拡大。"
+    },
+    {
+      "id": "B100-2MakuriZashi3Anchor",
+      "type": "B",
+      "title": "2まくり差し→3アンカー固定",
+      "baseWeight": 0.82,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 2 },
+      "oneMark": {
+        "startOrder": ["2","3","(4|5|6|1)"],
+        "linkedPairs": [["2","3"]],
+        "thirdPool": ["4","5","6","1","3"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "3が2着の軸で残る差し構図。"
+    },
+    {
+      "id": "B101-4MakuriPunch12Hold",
+      "type": "B",
+      "title": "4まくり一撃→内(1,2)残し相手",
+      "baseWeight": 0.84,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 4, "dashAdvantage": true },
+      "oneMark": {
+        "startOrder": ["4","(1|2)","(5|6|3)"],
+        "linkedPairs": [["4","1"],["4","2"]],
+        "thirdPool": ["5","6","3","2","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "4が握って先制、内壁が2着軸。"
+    },
+    {
+      "id": "B102-4MakuriZashi35Mesh",
+      "type": "B",
+      "title": "4まくり差し→3,5で競り",
+      "baseWeight": 0.83,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 4 },
+      "oneMark": {
+        "startOrder": ["4","(3|5)","(1|2|6)"],
+        "linkedPairs": [["4","3"],["4","5"]],
+        "thirdPool": ["1","2","6","5","3"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し幅が合いセンター同士の争い。"
+    },
+    {
+      "id": "B103-3MakuriPush26",
+      "type": "B",
+      "title": "3まくり→2,6が相手",
+      "baseWeight": 0.82,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 3 },
+      "oneMark": {
+        "startOrder": ["3","(2|6)","(4|5|1)"],
+        "linkedPairs": [["3","2"],["3","6"]],
+        "thirdPool": ["4","5","1","6","2"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "3のスピード戦で内外が相手。"
+    },
+    {
+      "id": "B104-3MakuriZashi14Anchor",
+      "type": "B",
+      "title": "3まくり差し→1,4がアンカー",
+      "baseWeight": 0.84,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 3 },
+      "oneMark": {
+        "startOrder": ["3","(1|4)","(2|5|6)"],
+        "linkedPairs": [["3","1"],["3","4"]],
+        "thirdPool": ["2","5","6","4","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差して内と角受けを軸に。"
+    },
+    {
+      "id": "B105-5MakuriPress41",
+      "type": "B",
+      "title": "5まくり圧→4 or 1相手",
+      "baseWeight": 0.81,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 5, "dashAdvantage": true },
+      "oneMark": {
+        "startOrder": ["5","(4|1)","(6|3|2)"],
+        "linkedPairs": [["5","4"],["5","1"]],
+        "thirdPool": ["6","3","2","1","4"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "5先制、角かインが食らいつく。"
+    },
+    {
+      "id": "B106-5MakuriZashi24Tight",
+      "type": "B",
+      "title": "5まくり差し→2,4でタイトに",
+      "baseWeight": 0.82,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 5 },
+      "oneMark": {
+        "startOrder": ["5","(2|4)","(6|3|1)"],
+        "linkedPairs": [["5","2"],["5","4"]],
+        "thirdPool": ["6","3","1","4","2"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差しで内寄りの競り。"
+    },
+    {
+      "id": "B107-6MakuriPress45",
+      "type": "B",
+      "title": "6まくり圧→4,5連動",
+      "baseWeight": 0.8,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 6, "pushChain": true },
+      "oneMark": {
+        "startOrder": ["6","(4|5)","(3|2|1)"],
+        "linkedPairs": [["6","5"],["6","4"]],
+        "thirdPool": ["3","2","1","5","4"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "最外発進で外勢が面で効く。"
+    },
+    {
+      "id": "B108-6MakuriZashi13Hold",
+      "type": "B",
+      "title": "6まくり差し→1,3が残り相手",
+      "baseWeight": 0.81,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 6 },
+      "oneMark": {
+        "startOrder": ["6","(1|3)","(5|4|2)"],
+        "linkedPairs": [["6","1"],["6","3"]],
+        "thirdPool": ["5","4","2","3","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し目で内とセンターが軸。"
+    },
+    {
+      "id": "B109-2MakuriBurst34",
+      "type": "B",
+      "title": "2まくり強襲→3,4が相手",
+      "baseWeight": 0.83,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 2, "tightTurn": true },
+      "oneMark": {
+        "startOrder": ["2","(3|4)","(5|6|1)"],
+        "linkedPairs": [["2","3"],["2","4"]],
+        "thirdPool": ["5","6","1","4","3"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "2の握りでセンター連動。"
+    },
+    {
+      "id": "B110-2MakuriZashi13Axis",
+      "type": "B",
+      "title": "2まくり差し→1,3軸相手",
+      "baseWeight": 0.84,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 2 },
+      "oneMark": {
+        "startOrder": ["2","(1|3)","(4|5|6)"],
+        "linkedPairs": [["2","1"],["2","3"]],
+        "thirdPool": ["4","5","6","3","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し返しで内と3が有力。"
+    },
+    {
+      "id": "B111-4MakuriPress35Wide",
+      "type": "B",
+      "title": "4まくり圧→3,5相手で外広め",
+      "baseWeight": 0.81,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 4 },
+      "oneMark": {
+        "startOrder": ["4","(3|5)","(6|2|1)"],
+        "linkedPairs": [["4","3"],["4","5"]],
+        "thirdPool": ["6","2","1","5","3"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "角一撃から外勢優位の並走。"
+    },
+    {
+      "id": "B112-4MakuriZashi21Mesh",
+      "type": "B",
+      "title": "4まくり差し→2,1が絡む",
+      "baseWeight": 0.83,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 4 },
+      "oneMark": {
+        "startOrder": ["4","(2|1)","(5|6|3)"],
+        "linkedPairs": [["4","2"],["4","1"]],
+        "thirdPool": ["5","6","3","2","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差して内の立て直し待ち。"
+    },
+    {
+      "id": "B113-3Makuri45Chain",
+      "type": "B",
+      "title": "3まくり→4→5の連鎖浮上",
+      "baseWeight": 0.8,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 3, "pushChain": true },
+      "oneMark": {
+        "startOrder": ["3","(4|5)","(6|2|1)"],
+        "linkedPairs": [["3","4"],["4","5"]],
+        "thirdPool": ["6","2","1","5","4"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "3起点の外面連鎖で優勢。"
+    },
+    {
+      "id": "B114-3MakuriZashi12Lean",
+      "type": "B",
+      "title": "3まくり差し→1,2寄り",
+      "baseWeight": 0.82,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 3 },
+      "oneMark": {
+        "startOrder": ["3","(1|2)","(4|5|6)"],
+        "linkedPairs": [["3","1"],["3","2"]],
+        "thirdPool": ["4","5","6","2","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差して内の残り濃厚。"
+    },
+    {
+      "id": "B115-5MakuriOuter46",
+      "type": "B",
+      "title": "5まくり→外(4,6)が強い",
+      "baseWeight": 0.8,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 5 },
+      "oneMark": {
+        "startOrder": ["5","(4|6)","(3|2|1)"],
+        "linkedPairs": [["5","4"],["5","6"]],
+        "thirdPool": ["3","2","1","6","4"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "外側の伸びを相手本線に。"
+    },
+    {
+      "id": "B116-5MakuriZashi31Axis",
+      "type": "B",
+      "title": "5まくり差し→3,1が軸",
+      "baseWeight": 0.82,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 5 },
+      "oneMark": {
+        "startOrder": ["5","(3|1)","(6|4|2)"],
+        "linkedPairs": [["5","3"],["5","1"]],
+        "thirdPool": ["6","4","2","1","3"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し幅で3と1が相手。"
+    },
+    {
+      "id": "B117-6MakuriInside23",
+      "type": "B",
+      "title": "6まくり→内(2,3)が食い下がり",
+      "baseWeight": 0.79,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 6 },
+      "oneMark": {
+        "startOrder": ["6","(2|3)","(5|4|1)"],
+        "linkedPairs": [["6","2"],["6","3"]],
+        "thirdPool": ["5","4","1","3","2"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "最外からでも内のしぶとさ残る。"
+    },
+    {
+      "id": "B118-6MakuriZashi25Mesh",
+      "type": "B",
+      "title": "6まくり差し→2,5が2着争い",
+      "baseWeight": 0.8,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 6 },
+      "oneMark": {
+        "startOrder": ["6","(2|5)","(4|3|1)"],
+        "linkedPairs": [["6","2"],["6","5"]],
+        "thirdPool": ["4","3","1","5","2"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し目で内と外のせめぎ合い。"
+    },
+    {
+      "id": "B119-2MakuriOuter56",
+      "type": "B",
+      "title": "2まくり→外(5,6)が相手濃厚",
+      "baseWeight": 0.81,
+      "requires": { "attackType": ["fullMakuri"], "slitLeader": 2 },
+      "oneMark": {
+        "startOrder": ["2","(5|6)","(3|4|1)"],
+        "linkedPairs": [["2","5"],["2","6"]],
+        "thirdPool": ["3","4","1","6","5"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "2先制で外の差し場拡大。"
+    },
+    {
+      "id": "B120-2MakuriZashi41Anchor",
+      "type": "B",
+      "title": "2まくり差し→4,1アンカー",
+      "baseWeight": 0.83,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 2 },
+      "oneMark": {
+        "startOrder": ["2","(4|1)","(5|6|3)"],
+        "linkedPairs": [["2","4"],["2","1"]],
+        "thirdPool": ["5","6","3","1","4"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し目で角とインが軸。"
+    },
+    {
+      "id": "C01-2PureSashi-13Axis",
+      "type": "C",
+      "title": "2純差し→1,3が軸",
+      "baseWeight": 1.0,
+      "requires": { "attackType": ["sashi"], "head": ["2"], "inWeakness": "sashare" },
+      "oneMark": {
+        "startOrder": ["2","(1|3)","(4|5|6)"],
+        "linkedPairs": [["2","1"],["2","3"]],
+        "thirdPool": ["4","5","6","3","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "2差しが届き、内とセンターの並走軸。"
+    },
+    {
+      "id": "C02-2Sashi34Axis",
+      "type": "C",
+      "title": "2差し→3,4相手",
+      "baseWeight": 0.95,
+      "requires": { "attackType": ["sashi"], "threeCourseAggressive": true },
+      "oneMark": {
+        "startOrder": ["2","(3|4)","(1|5|6)"],
+        "linkedPairs": [["2","3"],["2","4"]],
+        "thirdPool": ["1","5","6","4","3"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "3の伸び差しや4の外まわりが相手。"
+    },
+    {
+      "id": "C03-3Sashi14Axis",
+      "type": "C",
+      "title": "3差し→1,4軸",
+      "baseWeight": 0.94,
+      "requires": { "attackType": ["sashi"], "head": ["3"] },
+      "oneMark": {
+        "startOrder": ["3","(1|4)","(2|5|6)"],
+        "linkedPairs": [["3","1"],["3","4"]],
+        "thirdPool": ["2","5","6","4","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "3差しが決まり内と角受けが有力。"
+    },
+    {
+      "id": "C04-3Sashi25Axis",
+      "type": "C",
+      "title": "3差し→2,5が2着争い",
+      "baseWeight": 0.93,
+      "requires": { "attackType": ["sashi"], "outerFollow": 5 },
+      "oneMark": {
+        "startOrder": ["3","(2|5)","(1|4|6)"],
+        "linkedPairs": [["3","2"],["3","5"]],
+        "thirdPool": ["1","4","6","5","2"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し場に入った外勢も絡む。"
+    },
+    {
+      "id": "C05-4Sashi13Axis",
+      "type": "C",
+      "title": "4差し→1,3軸",
+      "baseWeight": 0.92,
+      "requires": { "attackType": ["sashi"], "slitLeader": 4 },
+      "oneMark": {
+        "startOrder": ["4","(1|3)","(2|5|6)"],
+        "linkedPairs": [["4","1"],["4","3"]],
+        "thirdPool": ["2","5","6","3","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "4角差しで内外を割る展開。"
+    },
+    {
+      "id": "C06-4Sashi25Axis",
+      "type": "C",
+      "title": "4差し→2,5が残り",
+      "baseWeight": 0.91,
+      "requires": { "attackType": ["sashi"], "outerFollow": 5 },
+      "oneMark": {
+        "startOrder": ["4","(2|5)","(1|3|6)"],
+        "linkedPairs": [["4","2"],["4","5"]],
+        "thirdPool": ["1","3","6","5","2"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "角差しから外の残しが相手。"
+    },
+    {
+      "id": "C07-5Sashi14Axis",
+      "type": "C",
+      "title": "5差し→1,4軸",
+      "baseWeight": 0.9,
+      "requires": { "attackType": ["sashi"], "slitLeader": 5 },
+      "oneMark": {
+        "startOrder": ["5","(1|4)","(2|3|6)"],
+        "linkedPairs": [["5","1"],["5","4"]],
+        "thirdPool": ["2","3","6","4","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "大外差しでもイン残し軸。"
+    },
+    {
+      "id": "C08-5Sashi23Axis",
+      "type": "C",
+      "title": "5差し→2,3軸",
+      "baseWeight": 0.9,
+      "requires": { "attackType": ["sashi"], "outerFollow": 6 },
+      "oneMark": {
+        "startOrder": ["5","(2|3)","(1|4|6)"],
+        "linkedPairs": [["5","2"],["5","3"]],
+        "thirdPool": ["1","4","6","3","2"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "外差しで内側の艇を相手に。"
+    },
+    {
+      "id": "C09-6Sashi14Axis",
+      "type": "C",
+      "title": "6差し→1,4軸",
+      "baseWeight": 0.89,
+      "requires": { "attackType": ["sashi"], "slitLeader": 6 },
+      "oneMark": {
+        "startOrder": ["6","(1|4)","(2|3|5)"],
+        "linkedPairs": [["6","1"],["6","4"]],
+        "thirdPool": ["2","3","5","4","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "最外差しでもイン・角残し軸。"
+    },
+    {
+      "id": "C10-6Sashi23Axis",
+      "type": "C",
+      "title": "6差し→2,3軸",
+      "baseWeight": 0.89,
+      "requires": { "attackType": ["sashi"], "outerFollow": 4 },
+      "oneMark": {
+        "startOrder": ["6","(2|3)","(1|4|5)"],
+        "linkedPairs": [["6","2"],["6","3"]],
+        "thirdPool": ["1","4","5","3","2"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "差し幅で内センター残し。"
+    },
+    {
+      "id": "C11-2MakuriZashi14Axis",
+      "type": "C",
+      "title": "2まくり差し→1,4軸",
+      "baseWeight": 0.95,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 2 },
+      "oneMark": {
+        "startOrder": ["2","(1|4)","(3|5|6)"],
+        "linkedPairs": [["2","1"],["2","4"]],
+        "thirdPool": ["3","5","6","4","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し返して内と角受けが有力。"
+    },
+    {
+      "id": "C12-2MakuriZashi35Axis",
+      "type": "C",
+      "title": "2まくり差し→3,5軸",
+      "baseWeight": 0.94,
+      "requires": { "attackType": ["makuriZashi"], "outerFollow": 5 },
+      "oneMark": {
+        "startOrder": ["2","(3|5)","(1|4|6)"],
+        "linkedPairs": [["2","3"],["2","5"]],
+        "thirdPool": ["1","4","6","5","3"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "差し後の外食い込みを相手。"
+    },
+    {
+      "id": "C13-3MakuriZashi14Axis",
+      "type": "C",
+      "title": "3まくり差し→1,4軸",
+      "baseWeight": 0.93,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 3 },
+      "oneMark": {
+        "startOrder": ["3","(1|4)","(2|5|6)"],
+        "linkedPairs": [["3","1"],["3","4"]],
+        "thirdPool": ["2","5","6","4","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し返して内と角受けが有力。"
+    },
+    {
+      "id": "C14-3MakuriZashi25Axis",
+      "type": "C",
+      "title": "3まくり差し→2,5軸",
+      "baseWeight": 0.92,
+      "requires": { "attackType": ["makuriZashi"], "outerFollow": 5 },
+      "oneMark": {
+        "startOrder": ["3","(2|5)","(1|4|6)"],
+        "linkedPairs": [["3","2"],["3","5"]],
+        "thirdPool": ["1","4","6","5","2"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "外食い込みと内残しを相手。"
+    },
+    {
+      "id": "C15-4MakuriZashi13Axis",
+      "type": "C",
+      "title": "4まくり差し→1,3軸",
+      "baseWeight": 0.91,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 4 },
+      "oneMark": {
+        "startOrder": ["4","(1|3)","(2|5|6)"],
+        "linkedPairs": [["4","1"],["4","3"]],
+        "thirdPool": ["2","5","6","3","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "角差しから内センター残し。"
+    },
+    {
+      "id": "C16-4MakuriZashi25Axis",
+      "type": "C",
+      "title": "4まくり差し→2,5軸",
+      "baseWeight": 0.91,
+      "requires": { "attackType": ["makuriZashi"], "outerFollow": 5 },
+      "oneMark": {
+        "startOrder": ["4","(2|5)","(1|3|6)"],
+        "linkedPairs": [["4","2"],["4","5"]],
+        "thirdPool": ["1","3","6","5","2"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "角差し後の外食い込み軸。"
+    },
+    {
+      "id": "C17-5MakuriZashi13Axis",
+      "type": "C",
+      "title": "5まくり差し→1,3軸",
+      "baseWeight": 0.9,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 5 },
+      "oneMark": {
+        "startOrder": ["5","(1|3)","(2|4|6)"],
+        "linkedPairs": [["5","1"],["5","3"]],
+        "thirdPool": ["2","4","6","3","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "外差し後のイン・センター残し軸。"
+    },
+    {
+      "id": "C18-5MakuriZashi24Axis",
+      "type": "C",
+      "title": "5まくり差し→2,4軸",
+      "baseWeight": 0.9,
+      "requires": { "attackType": ["makuriZashi"], "outerFollow": 6 },
+      "oneMark": {
+        "startOrder": ["5","(2|4)","(1|3|6)"],
+        "linkedPairs": [["5","2"],["5","4"]],
+        "thirdPool": ["1","3","6","4","2"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "外差しで内と角残しを相手。"
+    },
+    {
+      "id": "C19-6MakuriZashi13Axis",
+      "type": "C",
+      "title": "6まくり差し→1,3軸",
+      "baseWeight": 0.89,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 6 },
+      "oneMark": {
+        "startOrder": ["6","(1|3)","(2|4|5)"],
+        "linkedPairs": [["6","1"],["6","3"]],
+        "thirdPool": ["2","4","5","3","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "最外差しでも内・センターが軸。"
+    },
+    {
+      "id": "C20-6MakuriZashi24Axis",
+      "type": "C",
+      "title": "6まくり差し→2,4軸",
+      "baseWeight": 0.89,
+      "requires": { "attackType": ["makuriZashi"], "outerFollow": 5 },
+      "oneMark": {
+        "startOrder": ["6","(2|4)","(1|3|5)"],
+        "linkedPairs": [["6","2"],["6","4"]],
+        "thirdPool": ["1","3","5","4","2"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "差し幅で内と角が有力。"
+    },
+    {
+      "id": "C21-2Sashi146Axis-tight",
+      "type": "C",
+      "title": "2差し→1,4,6で絞り込み",
+      "baseWeight": 0.92,
+      "requires": { "attackType": ["sashi"], "head": ["2"] },
+      "oneMark": {
+        "startOrder": ["2","(1|4)","(3|5|6)"],
+        "linkedPairs": [["2","1"],["2","4"]],
+        "thirdPool": ["6","3","5","1","4"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "2差し本線で内・角・大外絡みを重視。"
+    },
+    {
+      "id": "C22-2Sashi36Axis-headWeakIn",
+      "type": "C",
+      "title": "2差し→3,6軸（イン弱め）",
+      "baseWeight": 0.93,
+      "requires": { "attackType": ["sashi"], "inReliability": "normalDown" },
+      "oneMark": {
+        "startOrder": ["2","(3|6)","(1|4|5)"],
+        "linkedPairs": [["2","3"],["2","6"]],
+        "thirdPool": ["1","4","5","6","3"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "インが甘いと見て外も絡む。"
+    },
+    {
+      "id": "C23-2Sashi34Axis-windyCalm",
+      "type": "C",
+      "title": "2差し→3,4軸（穏やか）",
+      "baseWeight": 0.9,
+      "requires": { "attackType": ["sashi"], "wind": "calm" },
+      "oneMark": {
+        "startOrder": ["2","(3|4)","(1|5|6)"],
+        "linkedPairs": [["2","3"],["2","4"]],
+        "thirdPool": ["1","5","6","4","3"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "静水面で差し切り想定。"
+    },
+    {
+      "id": "C24-3Sashi12Axis-tight",
+      "type": "C",
+      "title": "3差し→1,2軸でタイトに",
+      "baseWeight": 0.92,
+      "requires": { "attackType": ["sashi"], "head": ["3"] },
+      "oneMark": {
+        "startOrder": ["3","(1|2)","(4|5|6)"],
+        "linkedPairs": [["3","1"],["3","2"]],
+        "thirdPool": ["4","5","6","2","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "3差しの王道。"
+    },
+    {
+      "id": "C25-3Sashi45Axis-outerLean",
+      "type": "C",
+      "title": "3差し→4,5軸（外勢寄り）",
+      "baseWeight": 0.91,
+      "requires": { "attackType": ["sashi"], "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["3","(4|5)","(1|2|6)"],
+        "linkedPairs": [["3","4"],["3","5"]],
+        "thirdPool": ["1","2","6","5","4"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "外の伸びが生きる差し展開。"
+    },
+    {
+      "id": "C26-3Sashi16Axis-inHold",
+      "type": "C",
+      "title": "3差し→1,6軸（イン残し）",
+      "baseWeight": 0.9,
+      "requires": { "attackType": ["sashi"], "inReliability": "normalUp" },
+      "oneMark": {
+        "startOrder": ["3","(1|6)","(2|4|5)"],
+        "linkedPairs": [["3","1"],["3","6"]],
+        "thirdPool": ["2","4","5","6","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "インの残しが前提。"
+    },
+    {
+      "id": "C27-4Sashi12Axis-cornerSharp",
+      "type": "C",
+      "title": "4角差し→1,2軸",
+      "baseWeight": 0.93,
+      "requires": { "attackType": ["sashi"], "slitLeader": 4 },
+      "oneMark": {
+        "startOrder": ["4","(1|2)","(3|5|6)"],
+        "linkedPairs": [["4","1"],["4","2"]],
+        "thirdPool": ["3","5","6","2","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "角の差し一撃。"
+    },
+    {
+      "id": "C28-4Sashi35Axis-withOuter",
+      "type": "C",
+      "title": "4差し→3,5軸（外味）",
+      "baseWeight": 0.9,
+      "requires": { "attackType": ["sashi"], "outerFollow": 5 },
+      "oneMark": {
+        "startOrder": ["4","(3|5)","(1|2|6)"],
+        "linkedPairs": [["4","3"],["4","5"]],
+        "thirdPool": ["1","2","6","5","3"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "外の食い込み前提。"
+    },
+    {
+      "id": "C29-4Sashi16Axis-holdInside",
+      "type": "C",
+      "title": "4差し→1,6軸（内残し）",
+      "baseWeight": 0.9,
+      "requires": { "attackType": ["sashi"] },
+      "oneMark": {
+        "startOrder": ["4","(1|6)","(2|3|5)"],
+        "linkedPairs": [["4","1"],["4","6"]],
+        "thirdPool": ["2","3","5","6","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "角差しも内の残し重視。"
+    },
+    {
+      "id": "C30-5Sashi13Axis-deep",
+      "type": "C",
+      "title": "5差し→1,3軸（深イン想定）",
+      "baseWeight": 0.9,
+      "requires": { "attackType": ["sashi"], "head": ["5"] },
+      "oneMark": {
+        "startOrder": ["5","(1|3)","(2|4|6)"],
+        "linkedPairs": [["5","1"],["5","3"]],
+        "thirdPool": ["2","4","6","3","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "深インで差し場ができる想定。"
+    },
+    {
+      "id": "C31-5Sashi24Axis-tight",
+      "type": "C",
+      "title": "5差し→2,4軸でタイトに",
+      "baseWeight": 0.89,
+      "requires": { "attackType": ["sashi"] },
+      "oneMark": {
+        "startOrder": ["5","(2|4)","(1|3|6)"],
+        "linkedPairs": [["5","2"],["5","4"]],
+        "thirdPool": ["1","3","6","4","2"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "相手を2艇に絞って狙う。"
+    },
+    {
+      "id": "C32-5Sashi12Axis-inHold",
+      "type": "C",
+      "title": "5差し→1,2軸（内保全）",
+      "baseWeight": 0.89,
+      "requires": { "attackType": ["sashi"], "inReliability": "high" },
+      "oneMark": {
+        "startOrder": ["5","(1|2)","(3|4|6)"],
+        "linkedPairs": [["5","1"],["5","2"]],
+        "thirdPool": ["3","4","6","2","1"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "内の信頼度が高い場面の差し。"
+    },
+    {
+      "id": "C33-6Sashi13Axis-tailwind",
+      "type": "C",
+      "title": "6差し→1,3軸（追い風）",
+      "baseWeight": 0.88,
+      "requires": { "attackType": ["sashi"], "wind": "tail" },
+      "oneMark": {
+        "startOrder": ["6","(1|3)","(2|4|5)"],
+        "linkedPairs": [["6","1"],["6","3"]],
+        "thirdPool": ["2","4","5","3","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "追い風で最外差しの伸び。"
+    },
+    {
+      "id": "C34-6Sashi24Axis-tailwind",
+      "type": "C",
+      "title": "6差し→2,4軸（追い風）",
+      "baseWeight": 0.88,
+      "requires": { "attackType": ["sashi"], "wind": "tail" },
+      "oneMark": {
+        "startOrder": ["6","(2|4)","(1|3|5)"],
+        "linkedPairs": [["6","2"],["6","4"]],
+        "thirdPool": ["1","3","5","4","2"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "最外差しで内角を拾う。"
+    },
+    {
+      "id": "C35-2MakuriZashi14Axis-calm",
+      "type": "C",
+      "title": "2まくり差し→1,4軸（静水面）",
+      "baseWeight": 0.94,
+      "requires": { "attackType": ["makuriZashi"], "wind": "calm" },
+      "oneMark": {
+        "startOrder": ["2","(1|4)","(3|5|6)"],
+        "linkedPairs": [["2","1"],["2","4"]],
+        "thirdPool": ["3","5","6","4","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "切り返しからの安定着。"
+    },
+    {
+      "id": "C36-2MakuriZashi35Axis-outerLean",
+      "type": "C",
+      "title": "2まくり差し→3,5軸（外寄り）",
+      "baseWeight": 0.93,
+      "requires": { "attackType": ["makuriZashi"], "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["2","(3|5)","(1|4|6)"],
+        "linkedPairs": [["2","3"],["2","5"]],
+        "thirdPool": ["1","4","6","5","3"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "差し返し後の外勢台頭。"
+    },
+    {
+      "id": "C37-3MakuriZashi12Axis-tight",
+      "type": "C",
+      "title": "3まくり差し→1,2軸で絞る",
+      "baseWeight": 0.92,
+      "requires": { "attackType": ["makuriZashi"], "head": ["3"] },
+      "oneMark": {
+        "startOrder": ["3","(1|2)","(4|5|6)"],
+        "linkedPairs": [["3","1"],["3","2"]],
+        "thirdPool": ["4","5","6","2","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "差し返しの王道パターン。"
+    },
+    {
+      "id": "C38-3MakuriZashi45Axis-withCorner",
+      "type": "C",
+      "title": "3まくり差し→4,5軸（角絡み）",
+      "baseWeight": 0.91,
+      "requires": { "attackType": ["makuriZashi"], "slitPusher": 4 },
+      "oneMark": {
+        "startOrder": ["3","(4|5)","(1|2|6)"],
+        "linkedPairs": [["3","4"],["3","5"]],
+        "thirdPool": ["1","2","6","5","4"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "角の援護でさばく展開。"
+    },
+    {
+      "id": "C39-4MakuriZashi12Axis-cornerCut",
+      "type": "C",
+      "title": "4まくり差し→1,2軸（角切り込み）",
+      "baseWeight": 0.92,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 4 },
+      "oneMark": {
+        "startOrder": ["4","(1|2)","(3|5|6)"],
+        "linkedPairs": [["4","1"],["4","2"]],
+        "thirdPool": ["3","5","6","2","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "角からの切り込みで内相手。"
+    },
+    {
+      "id": "C40-4MakuriZashi35Axis-outerFollow",
+      "type": "C",
+      "title": "4まくり差し→3,5軸（外援護）",
+      "baseWeight": 0.91,
+      "requires": { "attackType": ["makuriZashi"], "outerFollow": 5 },
+      "oneMark": {
+        "startOrder": ["4","(3|5)","(1|2|6)"],
+        "linkedPairs": [["4","3"],["4","5"]],
+        "thirdPool": ["1","2","6","5","3"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "外の並走が効く差し返し。"
+    },
+    {
+      "id": "C41-2Sashi15Axis-tightGap",
+      "type": "C",
+      "title": "2差し→1,5軸（差し幅タイト）",
+      "baseWeight": 0.92,
+      "requires": { "attackType": ["sashi"], "head": ["2"] },
+      "oneMark": {
+        "startOrder": ["2","(1|5)","(3|4|6)"],
+        "linkedPairs": [["2","1"],["2","5"]],
+        "thirdPool": ["3","4","6","5","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "差し角度がタイトで内残し+外伸びが相手。"
+    },
+    {
+      "id": "C42-2Sashi34Axis-choppy",
+      "type": "C",
+      "title": "2差し→3,4軸（小荒れ）",
+      "baseWeight": 0.91,
+      "requires": { "attackType": ["sashi"], "wind": "bumpy" },
+      "oneMark": {
+        "startOrder": ["2","(3|4)","(1|5|6)"],
+        "linkedPairs": [["2","3"],["2","4"]],
+        "thirdPool": ["1","5","6","4","3"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "小荒れで差し有利、外は3着寄り。"
+    },
+    {
+      "id": "C43-2Sashi16Axis-inHoldLite",
+      "type": "C",
+      "title": "2差し→1,6軸（イン軽く残し）",
+      "baseWeight": 0.9,
+      "requires": { "attackType": ["sashi"], "inReliability": "normalUp" },
+      "oneMark": {
+        "startOrder": ["2","(1|6)","(3|4|5)"],
+        "linkedPairs": [["2","1"],["2","6"]],
+        "thirdPool": ["3","4","5","6","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "インは軽く残る見立て。"
+    },
+    {
+      "id": "C44-3Sashi12Axis-headWindLite",
+      "type": "C",
+      "title": "3差し→1,2軸（弱向かい風）",
+      "baseWeight": 0.92,
+      "requires": { "attackType": ["sashi"], "wind": "contraLite" },
+      "oneMark": {
+        "startOrder": ["3","(1|2)","(4|5|6)"],
+        "linkedPairs": [["3","1"],["3","2"]],
+        "thirdPool": ["4","5","6","2","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "弱向かいで差しが届きやすい。"
+    },
+    {
+      "id": "C45-3Sashi25Axis-outerAssist",
+      "type": "C",
+      "title": "3差し→2,5軸（外援護）",
+      "baseWeight": 0.91,
+      "requires": { "attackType": ["sashi"], "outerFollow": 5 },
+      "oneMark": {
+        "startOrder": ["3","(2|5)","(1|4|6)"],
+        "linkedPairs": [["3","2"],["3","5"]],
+        "thirdPool": ["1","4","6","5","2"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "外の並走サポートが効く差し。"
+    },
+    {
+      "id": "C46-3Sashi14Axis-inHold",
+      "type": "C",
+      "title": "3差し→1,4軸（内残し）",
+      "baseWeight": 0.9,
+      "requires": { "attackType": ["sashi"], "inReliability": "high" },
+      "oneMark": {
+        "startOrder": ["3","(1|4)","(2|5|6)"],
+        "linkedPairs": [["3","1"],["3","4"]],
+        "thirdPool": ["2","5","6","4","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "イン壁が機能しつつも3差し浮上。"
+    },
+    {
+      "id": "C47-4Sashi15Axis-stable",
+      "type": "C",
+      "title": "4角差し→1,5軸（安定）",
+      "baseWeight": 0.92,
+      "requires": { "attackType": ["sashi"], "slitLeader": 4 },
+      "oneMark": {
+        "startOrder": ["4","(1|5)","(2|3|6)"],
+        "linkedPairs": [["4","1"],["4","5"]],
+        "thirdPool": ["2","3","6","5","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "角から差し切り、1と外伸びを相手本線。"
+    },
+    {
+      "id": "C48-4Sashi26Axis-tight",
+      "type": "C",
+      "title": "4差し→2,6軸（タイト）",
+      "baseWeight": 0.9,
+      "requires": { "attackType": ["sashi"] },
+      "oneMark": {
+        "startOrder": ["4","(2|6)","(1|3|5)"],
+        "linkedPairs": [["4","2"],["4","6"]],
+        "thirdPool": ["1","3","5","6","2"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "角差し後の相手を2艇に絞る。"
+    },
+    {
+      "id": "C49-4Sashi13Axis-inFirm",
+      "type": "C",
+      "title": "4差し→1,3軸（イン堅め）",
+      "baseWeight": 0.91,
+      "requires": { "attackType": ["sashi"], "inReliability": "high" },
+      "oneMark": {
+        "startOrder": ["4","(1|3)","(2|5|6)"],
+        "linkedPairs": [["4","1"],["4","3"]],
+        "thirdPool": ["2","5","6","3","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "イン信頼度が高い差し展開。"
+    },
+    {
+      "id": "C50-5Sashi14Axis-longTurn",
+      "type": "C",
+      "title": "5差し→1,4軸（長回り）",
+      "baseWeight": 0.9,
+      "requires": { "attackType": ["sashi"] },
+      "oneMark": {
+        "startOrder": ["5","(1|4)","(2|3|6)"],
+        "linkedPairs": [["5","1"],["5","4"]],
+        "thirdPool": ["2","3","6","4","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "伸びを活かし長回りの差し。"
+    },
+    {
+      "id": "C51-5Sashi23Axis-outerBias",
+      "type": "C",
+      "title": "5差し→2,3軸（外寄り）",
+      "baseWeight": 0.89,
+      "requires": { "attackType": ["sashi"], "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["5","(2|3)","(1|4|6)"],
+        "linkedPairs": [["5","2"],["5","3"]],
+        "thirdPool": ["1","4","6","3","2"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "外の直線が生きる差し構図。"
+    },
+    {
+      "id": "C52-5Sashi16Axis-inTrace",
+      "type": "C",
+      "title": "5差し→1,6軸（内トレース）",
+      "baseWeight": 0.89,
+      "requires": { "attackType": ["sashi"], "inReliability": "normalUp" },
+      "oneMark": {
+        "startOrder": ["5","(1|6)","(2|3|4)"],
+        "linkedPairs": [["5","1"],["5","6"]],
+        "thirdPool": ["2","3","4","6","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "内の隊列をトレースして差し。"
+    },
+    {
+      "id": "C53-6Sashi14Axis-fair",
+      "type": "C",
+      "title": "6差し→1,4軸（公平水面）",
+      "baseWeight": 0.88,
+      "requires": { "attackType": ["sashi"], "wind": "calm" },
+      "oneMark": {
+        "startOrder": ["6","(1|4)","(2|3|5)"],
+        "linkedPairs": [["6","1"],["6","4"]],
+        "thirdPool": ["2","3","5","4","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "穏やかで最外差しが機能。"
+    },
+    {
+      "id": "C54-6Sashi25Axis-follow",
+      "type": "C",
+      "title": "6差し→2,5軸（フォロー）",
+      "baseWeight": 0.88,
+      "requires": { "attackType": ["sashi"], "outerFollow": 5 },
+      "oneMark": {
+        "startOrder": ["6","(2|5)","(1|3|4)"],
+        "linkedPairs": [["6","2"],["6","5"]],
+        "thirdPool": ["1","3","4","5","2"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "5の伸びフォローで最外差し活性。"
+    },
+    {
+      "id": "C55-2MakuriZashi13Axis-tight",
+      "type": "C",
+      "title": "2まくり差し→1,3軸（タイト）",
+      "baseWeight": 0.94,
+      "requires": { "attackType": ["makuriZashi"], "head": ["2"] },
+      "oneMark": {
+        "startOrder": ["2","(1|3)","(4|5|6)"],
+        "linkedPairs": [["2","1"],["2","3"]],
+        "thirdPool": ["4","5","6","3","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "差し返しの基本形を絞って。"
+    },
+    {
+      "id": "C56-2MakuriZashi46Axis-outerLean",
+      "type": "C",
+      "title": "2まくり差し→4,6軸（外寄り）",
+      "baseWeight": 0.93,
+      "requires": { "attackType": ["makuriZashi"], "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["2","(4|6)","(1|3|5)"],
+        "linkedPairs": [["2","4"],["2","6"]],
+        "thirdPool": ["1","3","5","6","4"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "外伸びが効いて相手は外へ。"
+    },
+    {
+      "id": "C57-3MakuriZashi14Axis-inHold",
+      "type": "C",
+      "title": "3まくり差し→1,4軸（内残し）",
+      "baseWeight": 0.92,
+      "requires": { "attackType": ["makuriZashi"], "inReliability": "normalUp" },
+      "oneMark": {
+        "startOrder": ["3","(1|4)","(2|5|6)"],
+        "linkedPairs": [["3","1"],["3","4"]],
+        "thirdPool": ["2","5","6","4","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "切り込み後に内勢が相手。"
+    },
+    {
+      "id": "C58-3MakuriZashi25Axis-flow",
+      "type": "C",
+      "title": "3まくり差し→2,5軸（流れ良し）",
+      "baseWeight": 0.91,
+      "requires": { "attackType": ["makuriZashi"], "threeCourseAggressive": true },
+      "oneMark": {
+        "startOrder": ["3","(2|5)","(1|4|6)"],
+        "linkedPairs": [["3","2"],["3","5"]],
+        "thirdPool": ["1","4","6","5","2"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "展開が向いて2・外が相手。"
+    },
+    {
+      "id": "C59-4MakuriZashi16Axis-cornerCut",
+      "type": "C",
+      "title": "4まくり差し→1,6軸（角切り込み）",
+      "baseWeight": 0.92,
+      "requires": { "attackType": ["makuriZashi"], "slitLeader": 4 },
+      "oneMark": {
+        "startOrder": ["4","(1|6)","(2|3|5)"],
+        "linkedPairs": [["4","1"],["4","6"]],
+        "thirdPool": ["2","3","5","6","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "角から切り込んでイン/大外が相手。"
+    },
+    {
+      "id": "C60-5MakuriZashi14Axis-followWide",
+      "type": "C",
+      "title": "5まくり差し→1,4軸（広め）",
+      "baseWeight": 0.9,
+      "requires": { "attackType": ["makuriZashi"], "outerFollow": true },
+      "oneMark": {
+        "startOrder": ["5","(1|4)","(2|3|6)"],
+        "linkedPairs": [["5","1"],["5","4"]],
+        "thirdPool": ["2","3","6","4","1"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "外の流れを使い差し返して相手広め。"
+    },
+    {
+      "id": "D01-inBigDelay-centerPush",
       "type": "D",
-      "title": "1が大凹み（壁薄）",
-      "baseWeight": 0.7,
+      "title": "1大凹み→センター主導",
+      "baseWeight": 0.72,
       "requires": { "bigDelayLane": 1 },
       "oneMark": {
-        "startOrder": ["(2|3|4)", "(3|4|5)", "(5|2|1|6)"],
-        "linkedPairs": [["3", "4"], ["2", "3"]],
-        "thirdPool": ["5", "2", "1", "6", "4", "3"],
+        "startOrder": ["(2|3|4)", "(3|4|5)", "(5|2|6)"],
+        "linkedPairs": [["3","4"],["2","3"]],
+        "thirdPool": ["5","2","6","4","3"],
         "thirdBias": "course3rdMix"
       },
-      "notes": "イン壁喪失→センター主導。"
+      "notes": "1の壁消失。3-4優勢、2が相手本線。"
     },
     {
-      "id": "D02-two-bigDelay",
+      "id": "D02-inBigDelay-outerSlipIn",
       "type": "D",
-      "title": "2が大凹み（逃がし喪失）",
-      "baseWeight": 0.6,
-      "requires": { "bigDelayLane": 2 },
+      "title": "1大凹み→外差し滑り込み",
+      "baseWeight": 0.7,
+      "requires": { "bigDelayLane": 1, "outerNobi": true },
       "oneMark": {
-        "startOrder": ["(1|3|4)", "(3|4|5)", "(5|1|6|2)"],
-        "linkedPairs": [["4", "3"]],
-        "thirdPool": ["5", "1", "6", "2", "3", "4"],
+        "startOrder": ["(3|4)", "5", "(2|6)"],
+        "linkedPairs": [["4","5"],["3","5"]],
+        "thirdPool": ["2","6","5","4","3"],
         "thirdBias": "exRank3rdMix"
       },
-      "notes": "2の援護消失で3-4が主導。"
+      "notes": "外の伸びが効き5が2着軸、3or4と争い。"
     },
     {
-      "id": "D03-three-bigDelay",
+      "id": "D03-inBigDelay-headwindHold",
       "type": "D",
-      "title": "3が大凹み",
-      "baseWeight": 0.6,
-      "requires": { "bigDelayLane": 3 },
+      "title": "1大凹み→向かい風で3差し浮上",
+      "baseWeight": 0.68,
+      "requires": { "bigDelayLane": 1, "wind": "contra" },
       "oneMark": {
-        "startOrder": ["(1|2|4)", "(4|2|5)", "(5|1|6|3)"],
-        "linkedPairs": [["4", "2"]],
-        "thirdPool": ["5", "1", "6", "3", "2", "4"],
+        "startOrder": ["3","(2|4)","(5|6)"],
+        "linkedPairs": [["3","2"],["3","4"]],
+        "thirdPool": ["5","6","4","2"],
         "thirdBias": "national3rdMix"
       },
-      "notes": "4のカド流入や2差しが台頭。"
-    },
-    {
-      "id": "D04-four-bigDelay",
-      "type": "D",
-      "title": "4が大凹み（カド不発）",
-      "baseWeight": 0.6,
-      "requires": { "bigDelayLane": 4 },
-      "oneMark": {
-        "startOrder": ["1", "(2|3)", "(5|6|4)"],
-        "linkedPairs": [["2", "3"]],
-        "thirdPool": ["5", "6", "4", "2", "3", "1"],
-        "thirdBias": "course3rdMix"
-      },
-      "notes": "外の伸びが相殺→内優位回帰。"
-    },
-    {
-      "id": "D05-five-bigDelay",
-      "type": "D",
-      "title": "5が大凹み",
-      "baseWeight": 0.5,
-      "requires": { "bigDelayLane": 5 },
-      "oneMark": {
-        "startOrder": ["(1|4|3)", "(4|3|2)", "(6|1|5)"],
-        "linkedPairs": [["4", "3"]],
-        "thirdPool": ["6", "1", "5", "2", "3", "4"],
-        "thirdBias": "exRank3rdMix"
-      },
-      "notes": "外の連動が崩れ、内・カドへ回帰。"
-    },
-    {
-      "id": "D06-six-bigDelay",
-      "type": "D",
-      "title": "6が大凹み",
-      "baseWeight": 0.5,
-      "requires": { "bigDelayLane": 6 },
-      "oneMark": {
-        "startOrder": ["(1|4|5)", "(4|5|3)", "(2|1|6)"],
-        "linkedPairs": [["4", "5"]],
-        "thirdPool": ["2", "1", "6", "3", "5", "4"],
-        "thirdBias": "national3rdMix"
-      },
-      "notes": "6の追走が消え、4-5並走が軸。"
+      "notes": "向かい風で差し届きやすく3が主導。"
     },
 
     {
-      "id": "A11-escape-2follow",
-      "type": "A",
-      "title": "1逃げ→2が素直について2着",
-      "baseWeight": 0.9,
-      "requires": { "head": ["1"], "attackType": ["none"] },
+      "id": "D04-twoBigDelay-centerTandem",
+      "type": "D",
+      "title": "2大凹み→3-4縦列で台頭",
+      "baseWeight": 0.66,
+      "requires": { "bigDelayLane": 2 },
       "oneMark": {
-        "startOrder": ["1", "2", "(3|4|5|6)"],
-        "linkedPairs": [["1", "2"]],
-        "thirdPool": ["3", "4", "5", "6"],
+        "startOrder": ["(3|4)","(1|5)","(6|2)"],
+        "linkedPairs": [["3","4"]],
+        "thirdPool": ["1","5","6","4","3"],
         "thirdBias": "course3rdMix"
-      }
+      },
+      "notes": "逃がし喪失で3-4主導。2着は1か5。"
     },
     {
-      "id": "A12-escape-3follow",
-      "type": "A",
-      "title": "1逃げ→3が押し上げ2着",
-      "baseWeight": 0.8,
-      "requires": { "head": ["1"], "attackType": ["none", "mildPressure"] },
+      "id": "D05-twoBigDelay-inFollowHold",
+      "type": "D",
+      "title": "2大凹み→1残して外が相手",
+      "baseWeight": 0.64,
+      "requires": { "bigDelayLane": 2, "inReliability": "normalUp" },
       "oneMark": {
-        "startOrder": ["1", "3", "(2|4|5|6)"],
-        "linkedPairs": [["1", "3"]],
-        "thirdPool": ["2", "4", "5", "6"],
+        "startOrder": ["3","1","(4|5)"],
+        "linkedPairs": [["3","1"]],
+        "thirdPool": ["4","5","6"],
         "thirdBias": "exRank3rdMix"
-      }
+      },
+      "notes": "1は少し残り、相手は4or5。"
     },
     {
-      "id": "A13-escape-outer2nd",
-      "type": "A",
-      "title": "1逃げ→外勢2着（4or5）",
-      "baseWeight": 0.7,
-      "requires": { "head": ["1"], "outerNobi": true },
+      "id": "D06-twoBigDelay-outerBias",
+      "type": "D",
+      "title": "2大凹み→外勢先行",
+      "baseWeight": 0.62,
+      "requires": { "bigDelayLane": 2, "outerNobi": true },
       "oneMark": {
-        "startOrder": ["1", "(4|5)", "(2|3|6)"],
-        "linkedPairs": [["1", "4"], ["1", "5"]],
-        "thirdPool": ["2", "3", "6", "4", "5"],
+        "startOrder": ["4","5","(1|3|6)"],
+        "linkedPairs": [["4","5"]],
+        "thirdPool": ["1","3","6","5","4"],
         "thirdBias": "national3rdMix"
-      }
+      },
+      "notes": "外の伸び優勢。2着は5、3着争い広め。"
+    },
+
+    {
+      "id": "D07-threeBigDelay-cornerOpens",
+      "type": "D",
+      "title": "3大凹み→角(4)流入",
+      "baseWeight": 0.64,
+      "requires": { "bigDelayLane": 3 },
+      "oneMark": {
+        "startOrder": ["4","(1|2)","(5|6)"],
+        "linkedPairs": [["4","2"]],
+        "thirdPool": ["5","6","1","2","4"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "3が凹んで4が自在。2着は1か2中心。"
+    },
+    {
+      "id": "D08-threeBigDelay-inTrace",
+      "type": "D",
+      "title": "3大凹み→1の残し濃厚",
+      "baseWeight": 0.63,
+      "requires": { "bigDelayLane": 3, "inReliability": "high" },
+      "oneMark": {
+        "startOrder": ["4","1","(2|5)"],
+        "linkedPairs": [["4","1"]],
+        "thirdPool": ["2","5","6"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "角の攻めに1が対応。相手は2か外。"
+    },
+    {
+      "id": "D09-threeBigDelay-outerCutIn",
+      "type": "D",
+      "title": "3大凹み→5の差し込み",
+      "baseWeight": 0.61,
+      "requires": { "bigDelayLane": 3, "outerFollow": 5 },
+      "oneMark": {
+        "startOrder": ["4","5","(1|2|6)"],
+        "linkedPairs": [["4","5"]],
+        "thirdPool": ["1","2","6","5","4"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "4の攻めに5が差し場を得る。"
+    },
+
+    {
+      "id": "D10-fourBigDelay-inReturn",
+      "type": "D",
+      "title": "4大凹み→内回帰（1先マイ）",
+      "baseWeight": 0.66,
+      "requires": { "bigDelayLane": 4 },
+      "oneMark": {
+        "startOrder": ["1","(2|3)","(5|6|4)"],
+        "linkedPairs": [["2","3"]],
+        "thirdPool": ["5","6","4","2","3","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "角不発で内有利回帰、2着は2or3。"
+    },
+    {
+      "id": "D11-fourBigDelay-headwindInside",
+      "type": "D",
+      "title": "4大凹み→向かい風で内厚い",
+      "baseWeight": 0.64,
+      "requires": { "bigDelayLane": 4, "wind": "contra" },
+      "oneMark": {
+        "startOrder": ["1","2","(3|5)"],
+        "linkedPairs": [["1","2"]],
+        "thirdPool": ["3","5","6"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "風も手伝い内の残り強め。"
+    },
+    {
+      "id": "D12-fourBigDelay-outerTrace",
+      "type": "D",
+      "title": "4大凹み→外勢の追走",
+      "baseWeight": 0.6,
+      "requires": { "bigDelayLane": 4, "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["1","(5|6)","(2|3)"],
+        "linkedPairs": [["5","6"]],
+        "thirdPool": ["2","3","6","5"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "1先マイに外の直線が相手。"
+    },
+
+    {
+      "id": "D13-fiveBigDelay-centerShift",
+      "type": "D",
+      "title": "5大凹み→4中心にシフト",
+      "baseWeight": 0.58,
+      "requires": { "bigDelayLane": 5 },
+      "oneMark": {
+        "startOrder": ["(1|4|3)","(4|3|2)","(6|1)"],
+        "linkedPairs": [["4","3"]],
+        "thirdPool": ["6","1","2","3","4"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "外の連動が切れ4-3が主役に。"
+    },
+    {
+      "id": "D14-fiveBigDelay-inHoldLite",
+      "type": "D",
+      "title": "5大凹み→1残し＋角相手",
+      "baseWeight": 0.57,
+      "requires": { "bigDelayLane": 5, "inReliability": "normalUp" },
+      "oneMark": {
+        "startOrder": ["4","1","(3|2)"],
+        "linkedPairs": [["4","1"]],
+        "thirdPool": ["3","2","6"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "4主導、1は少し残る。相手3か2。"
+    },
+    {
+      "id": "D15-fiveBigDelay-tailwindRisk",
+      "type": "D",
+      "title": "5大凹み→追い風で内寄り",
+      "baseWeight": 0.56,
+      "requires": { "bigDelayLane": 5, "wind": "tail" },
+      "oneMark": {
+        "startOrder": ["1","(2|4)","(3|6)"],
+        "linkedPairs": [["2","4"]],
+        "thirdPool": ["3","6","4","2"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "追い風で握りにくく内寄り決着。"
+    },
+
+    {
+      "id": "D16-sixBigDelay-centerTight",
+      "type": "D",
+      "title": "6大凹み→4-5並走軸",
+      "baseWeight": 0.58,
+      "requires": { "bigDelayLane": 6 },
+      "oneMark": {
+        "startOrder": ["(4|5)","(1|2)","(3|6)"],
+        "linkedPairs": [["4","5"]],
+        "thirdPool": ["1","2","3","5","4"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "6が離れて4-5が主導権、内勢が相手。"
+    },
+    {
+      "id": "D17-sixBigDelay-inProtect",
+      "type": "D",
+      "title": "6大凹み→1守って2着争い接戦",
+      "baseWeight": 0.57,
+      "requires": { "bigDelayLane": 6, "inReliability": "high" },
+      "oneMark": {
+        "startOrder": ["4","1","(5|2)"],
+        "linkedPairs": [["4","1"]],
+        "thirdPool": ["5","2","3"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "角の攻めに1が対応。相手は5か2。"
+    },
+    {
+      "id": "D18-sixBigDelay-outerFollowLost",
+      "type": "D",
+      "title": "6大凹み→外フォロー消失で内寄り",
+      "baseWeight": 0.56,
+      "requires": { "bigDelayLane": 6, "outerFollow": false },
+      "oneMark": {
+        "startOrder": ["1","(2|4)","(5|3)"],
+        "linkedPairs": [["2","4"]],
+        "thirdPool": ["5","3","4","2"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "6の援護が消えて内・角に流れる。"
+    },
+
+    {
+      "id": "D19-inBigDelay-mildPressure",
+      "type": "D",
+      "title": "1大凹みでも圧控えめ→3主導",
+      "baseWeight": 0.67,
+      "requires": { "bigDelayLane": 1, "attackType": ["mildPressure","none"] },
+      "oneMark": {
+        "startOrder": ["3","(2|4)","(5|6)"],
+        "linkedPairs": [["3","2"],["3","4"]],
+        "thirdPool": ["5","6","4","2"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "圧が弱くても壁消失で3が先行。"
+    },
+    {
+      "id": "D20-twoBigDelay-tightInside",
+      "type": "D",
+      "title": "2大凹み→内タイトで1-3厚め",
+      "baseWeight": 0.63,
+      "requires": { "bigDelayLane": 2, "inReliability": "high" },
+      "oneMark": {
+        "startOrder": ["1","3","(4|5)"],
+        "linkedPairs": [["1","3"]],
+        "thirdPool": ["4","5","6"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "内タイトで1-3の軸形成、相手は4か5。"
+    },
+    {
+      "id": "D21-threeBigDelay-tailwindPush",
+      "type": "D",
+      "title": "3大凹み→追い風で4握り切り",
+      "baseWeight": 0.60,
+      "requires": { "bigDelayLane": 3, "wind": "tail" },
+      "oneMark": {
+        "startOrder": ["4","(1|5)","(2|6)"],
+        "linkedPairs": [["4","5"],["4","1"]],
+        "thirdPool": ["2","6","1","5"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "追い風で角が握り切る展開。"
+    },
+    {
+      "id": "D22-threeBigDelay-makuriZashiHit",
+      "type": "D",
+      "title": "3大凹み→4まくり差し",
+      "baseWeight": 0.59,
+      "requires": { "bigDelayLane": 3, "attackType": ["makuriZashi"] },
+      "oneMark": {
+        "startOrder": ["4","(1|2)","(5|6)"],
+        "linkedPairs": [["4","1"],["4","2"]],
+        "thirdPool": ["5","6","2","1"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "角がまくり差しに構えて差し抜け。"
+    },
+    {
+      "id": "D23-fourBigDelay-centerDrive",
+      "type": "D",
+      "title": "4大凹み→3がセンター攻め",
+      "baseWeight": 0.62,
+      "requires": { "bigDelayLane": 4 },
+      "oneMark": {
+        "startOrder": ["3","(1|2)","(5|6)"],
+        "linkedPairs": [["3","2"]],
+        "thirdPool": ["5","6","1","2"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "角不発で3が自在に攻める展開。"
+    },
+    {
+      "id": "D24-fourBigDelay-outerAttackFails",
+      "type": "D",
+      "title": "4大凹み→5攻め不発",
+      "baseWeight": 0.58,
+      "requires": { "bigDelayLane": 4, "outerFollow": 5 },
+      "oneMark": {
+        "startOrder": ["1","(2|3)","(5|6)"],
+        "linkedPairs": [["1","2"],["1","3"]],
+        "thirdPool": ["5","6","3","2"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "5の攻めも不発で内残し。"
+    },
+    {
+      "id": "D25-fiveBigDelay-outerNoDrive",
+      "type": "D",
+      "title": "5大凹み→6外伸び不発",
+      "baseWeight": 0.55,
+      "requires": { "bigDelayLane": 5, "outerFollow": 6 },
+      "oneMark": {
+        "startOrder": ["(1|4)","(2|3)","6"],
+        "linkedPairs": [["4","1"]],
+        "thirdPool": ["2","3","6","4"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "6の伸びも不発で内優位。"
+    },
+    {
+      "id": "D26-fiveBigDelay-tailwindOuter",
+      "type": "D",
+      "title": "5大凹み→追い風で6差し込み",
+      "baseWeight": 0.56,
+      "requires": { "bigDelayLane": 5, "wind": "tail" },
+      "oneMark": {
+        "startOrder": ["4","6","(1|2)"],
+        "linkedPairs": [["4","6"]],
+        "thirdPool": ["1","2","3"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "追い風で外差し届くパターン。"
+    },
+    {
+      "id": "D27-sixBigDelay-centerMakuri",
+      "type": "D",
+      "title": "6大凹み→4全速まくり",
+      "baseWeight": 0.60,
+      "requires": { "bigDelayLane": 6, "attackType": ["fullMakuri"], "slitLeader": 4 },
+      "oneMark": {
+        "startOrder": ["4","(5|1)","(2|3)"],
+        "linkedPairs": [["4","5"]],
+        "thirdPool": ["1","2","3","5"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "外のフォロー消失で角まくり一閃。"
+    },
+    {
+      "id": "D28-sixBigDelay-makuriZashiFollow",
+      "type": "D",
+      "title": "6大凹み→5まくり差し",
+      "baseWeight": 0.58,
+      "requires": { "bigDelayLane": 6, "outerFollow": 5 },
+      "oneMark": {
+        "startOrder": ["4","5","(1|2)"],
+        "linkedPairs": [["4","5"]],
+        "thirdPool": ["1","2","3"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "角攻めに続く5差し抜け。"
+    },
+    {
+      "id": "D29-inBigDelay-doubleCenter",
+      "type": "D",
+      "title": "1大凹み→3-4ダブル攻め",
+      "baseWeight": 0.70,
+      "requires": { "bigDelayLane": 1 },
+      "oneMark": {
+        "startOrder": ["3","4","(2|5)"],
+        "linkedPairs": [["3","4"]],
+        "thirdPool": ["2","5","6"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "ダブル攻めで外の展開も広がる。"
+    },
+    {
+      "id": "D30-inBigDelay-centerMakuriZashi",
+      "type": "D",
+      "title": "1大凹み→3まくり差し",
+      "baseWeight": 0.69,
+      "requires": { "bigDelayLane": 1, "attackType": ["makuriZashi"], "slitLeader": 3 },
+      "oneMark": {
+        "startOrder": ["3","(4|2)","(5|6)"],
+        "linkedPairs": [["3","4"],["3","2"]],
+        "thirdPool": ["5","6","4","2"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "壁喪失で3の差し場が大きく開く。"
+    },
+    {
+      "id": "D31-twoBigDelay-centerWide",
+      "type": "D",
+      "title": "2大凹み→3-4ワイド攻め",
+      "baseWeight": 0.64,
+      "requires": { "bigDelayLane": 2 },
+      "oneMark": {
+        "startOrder": ["(3|4)","(1|5)","(6|2)"],
+        "linkedPairs": [["3","4"]],
+        "thirdPool": ["1","5","6","4"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "逃がし不発でセンター厚め。"
+    },
+    {
+      "id": "D32-twoBigDelay-innerHold",
+      "type": "D",
+      "title": "2大凹み→1逃げ残し",
+      "baseWeight": 0.65,
+      "requires": { "bigDelayLane": 2, "inReliability": "high" },
+      "oneMark": {
+        "startOrder": ["1","(3|4)","(5|6)"],
+        "linkedPairs": [["1","3"],["1","4"]],
+        "thirdPool": ["5","6","4","3"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "イン強力時は1残し濃厚。"
+    },
+    {
+      "id": "D33-threeBigDelay-outerRush",
+      "type": "D",
+      "title": "3大凹み→5-6外突進",
+      "baseWeight": 0.57,
+      "requires": { "bigDelayLane": 3, "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["(5|6)","4","(1|2)"],
+        "linkedPairs": [["5","6"]],
+        "thirdPool": ["1","2","3","4"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "外の突進力が生きる展開。"
+    },
+    {
+      "id": "D34-threeBigDelay-innerBackdoor",
+      "type": "D",
+      "title": "3大凹み→2差し台頭",
+      "baseWeight": 0.61,
+      "requires": { "bigDelayLane": 3 },
+      "oneMark": {
+        "startOrder": ["2","(4|1)","(5|6)"],
+        "linkedPairs": [["2","4"],["2","1"]],
+        "thirdPool": ["5","6","4","1"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "内差し展開で2浮上。"
+    },
+    {
+      "id": "D35-fourBigDelay-centerPair",
+      "type": "D",
+      "title": "4大凹み→2-3コンビ",
+      "baseWeight": 0.62,
+      "requires": { "bigDelayLane": 4 },
+      "oneMark": {
+        "startOrder": ["(2|3)","1","(5|6)"],
+        "linkedPairs": [["2","3"]],
+        "thirdPool": ["5","6","1","3"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "内枠寄りのセンター連動。"
+    },
+    {
+      "id": "D36-fourBigDelay-outerDrift",
+      "type": "D",
+      "title": "4大凹み→外勢ドリフト",
+      "baseWeight": 0.55,
+      "requires": { "bigDelayLane": 4, "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["5","6","(1|2)"],
+        "linkedPairs": [["5","6"]],
+        "thirdPool": ["1","2","3"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "外直線優勢パターン。"
+    },
+    {
+      "id": "D37-fiveBigDelay-innerPair",
+      "type": "D",
+      "title": "5大凹み→1-2並走",
+      "baseWeight": 0.60,
+      "requires": { "bigDelayLane": 5 },
+      "oneMark": {
+        "startOrder": ["1","2","(3|4)"],
+        "linkedPairs": [["1","2"]],
+        "thirdPool": ["3","4","6"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "内有利で1-2軸。"
+    },
+    {
+      "id": "D38-fiveBigDelay-centerSwing",
+      "type": "D",
+      "title": "5大凹み→4センター差し",
+      "baseWeight": 0.58,
+      "requires": { "bigDelayLane": 5, "attackType": ["sashi"] },
+      "oneMark": {
+        "startOrder": ["4","(1|3)","(2|6)"],
+        "linkedPairs": [["4","1"],["4","3"]],
+        "thirdPool": ["2","6","1","3"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "センター差しで浮上。"
+    },
+    {
+      "id": "D39-sixBigDelay-innerCompact",
+      "type": "D",
+      "title": "6大凹み→1-2コンパクト隊列",
+      "baseWeight": 0.61,
+      "requires": { "bigDelayLane": 6 },
+      "oneMark": {
+        "startOrder": ["1","2","(3|4)"],
+        "linkedPairs": [["1","2"]],
+        "thirdPool": ["3","4","5"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "外の援護なく内締まり展開。"
+    },
+    {
+      "id": "D40-sixBigDelay-centerOvertake",
+      "type": "D",
+      "title": "6大凹み→4-3センター逆転",
+      "baseWeight": 0.59,
+      "requires": { "bigDelayLane": 6 },
+      "oneMark": {
+        "startOrder": ["4","3","(1|2)"],
+        "linkedPairs": [["4","3"]],
+        "thirdPool": ["1","2","5"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "角と隣の3が共に浮上。"
+    },
+    {
+      "id": "D41-inBigDelay-23TandemTail",
+      "type": "D",
+      "title": "1大凹み→2-3縦列（追い風）",
+      "baseWeight": 0.68,
+      "requires": { "bigDelayLane": 1, "wind": "tail" },
+      "oneMark": {
+        "startOrder": ["2","3","(4|5)"],
+        "linkedPairs": [["2","3"]],
+        "thirdPool": ["4","5","6"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "追い風でセンターラインが素直に先行。"
+    },
+    {
+      "id": "D42-inBigDelay-34PressContra",
+      "type": "D",
+      "title": "1大凹み→3-4圧力（向かい風）",
+      "baseWeight": 0.69,
+      "requires": { "bigDelayLane": 1, "wind": "contra" },
+      "oneMark": {
+        "startOrder": ["3","4","(2|5)"],
+        "linkedPairs": [["3","4"]],
+        "thirdPool": ["2","5","6"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "向かい風で握り系が生きやすく3-4台頭。"
+    },
+    {
+      "id": "D43-twoBigDelay-34WidePush",
+      "type": "D",
+      "title": "2大凹み→3-4ワイド押し上げ",
+      "baseWeight": 0.63,
+      "requires": { "bigDelayLane": 2 },
+      "oneMark": {
+        "startOrder": ["(3|4)","1","(5|6)"],
+        "linkedPairs": [["3","4"]],
+        "thirdPool": ["5","6","1","4"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "逃がし喪失でセンターが幅を使って前へ。"
+    },
+    {
+      "id": "D44-twoBigDelay-1HoldWith3",
+      "type": "D",
+      "title": "2大凹み→1残し＋3が優勢",
+      "baseWeight": 0.64,
+      "requires": { "bigDelayLane": 2, "inReliability": "normalUp" },
+      "oneMark": {
+        "startOrder": ["1","3","(4|5)"],
+        "linkedPairs": [["1","3"]],
+        "thirdPool": ["4","5","6"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "イン残しつつ3が強気に差す。"
+    },
+    {
+      "id": "D45-threeBigDelay-4LeadWith5Follow",
+      "type": "D",
+      "title": "3大凹み→4先頭・5追走",
+      "baseWeight": 0.60,
+      "requires": { "bigDelayLane": 3 },
+      "oneMark": {
+        "startOrder": ["4","5","(1|2)"],
+        "linkedPairs": [["4","5"]],
+        "thirdPool": ["1","2","6"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "角→外の連動で先手。"
+    },
+    {
+      "id": "D46-threeBigDelay-2BackdoorWith4",
+      "type": "D",
+      "title": "3大凹み→2の差し台頭・4が競る",
+      "baseWeight": 0.61,
+      "requires": { "bigDelayLane": 3, "attackType": ["sashi"] },
+      "oneMark": {
+        "startOrder": ["2","4","(1|5)"],
+        "linkedPairs": [["2","4"]],
+        "thirdPool": ["1","5","6"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "3が空けた内を2が差し、4が外から並走。"
+    },
+    {
+      "id": "D47-fourBigDelay-1Compact23Battle",
+      "type": "D",
+      "title": "4大凹み→1が先頭、2-3が2着争い",
+      "baseWeight": 0.62,
+      "requires": { "bigDelayLane": 4 },
+      "oneMark": {
+        "startOrder": ["1","(2|3)","(5|6)"],
+        "linkedPairs": [["2","3"]],
+        "thirdPool": ["5","6","2","3"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "角不発で内に隊列が戻る。"
+    },
+    {
+      "id": "D48-fourBigDelay-3Lead1Hold",
+      "type": "D",
+      "title": "4大凹み→3が先頭・1残し",
+      "baseWeight": 0.60,
+      "requires": { "bigDelayLane": 4, "threeCourseAggressive": true },
+      "oneMark": {
+        "startOrder": ["3","1","(2|5)"],
+        "linkedPairs": [["3","1"]],
+        "thirdPool": ["2","5","6"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "3の自在戦で先行、1は最小ロスで残る。"
+    },
+    {
+      "id": "D49-fiveBigDelay-1Lead2Assist",
+      "type": "D",
+      "title": "5大凹み→1先頭・2援護",
+      "baseWeight": 0.61,
+      "requires": { "bigDelayLane": 5 },
+      "oneMark": {
+        "startOrder": ["1","2","(3|4)"],
+        "linkedPairs": [["1","2"]],
+        "thirdPool": ["3","4","6"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "外の連動消えて内盤石。"
+    },
+    {
+      "id": "D50-fiveBigDelay-4CenterDash",
+      "type": "D",
+      "title": "5大凹み→4センターダッシュ",
+      "baseWeight": 0.58,
+      "requires": { "bigDelayLane": 5, "attackType": ["fullMakuri","lightMakuriTry"] },
+      "oneMark": {
+        "startOrder": ["4","(1|3)","(2|6)"],
+        "linkedPairs": [["4","3"]],
+        "thirdPool": ["1","2","6","3"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "5の穴で4が伸び切る。"
+    },
+    {
+      "id": "D51-sixBigDelay-45Parallel",
+      "type": "D",
+      "title": "6大凹み→4-5の並走先行",
+      "baseWeight": 0.59,
+      "requires": { "bigDelayLane": 6 },
+      "oneMark": {
+        "startOrder": ["(4|5)","(1|2)","3"],
+        "linkedPairs": [["4","5"]],
+        "thirdPool": ["1","2","3","5"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "外の援護消えも角〜外で先手。"
+    },
+    {
+      "id": "D52-sixBigDelay-1Lead4Follow",
+      "type": "D",
+      "title": "6大凹み→1先頭・4追走",
+      "baseWeight": 0.60,
+      "requires": { "bigDelayLane": 6, "inReliability": "high" },
+      "oneMark": {
+        "startOrder": ["1","4","(2|3)"],
+        "linkedPairs": [["1","4"]],
+        "thirdPool": ["2","3","5"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "イン強力で4が対抗。"
+    },
+    {
+      "id": "D53-inBigDelay-24Tandem",
+      "type": "D",
+      "title": "1大凹み→2-4縦列先行",
+      "baseWeight": 0.67,
+      "requires": { "bigDelayLane": 1 },
+      "oneMark": {
+        "startOrder": ["2","4","(3|5)"],
+        "linkedPairs": [["2","4"]],
+        "thirdPool": ["3","5","6"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "2の差し・4の絞りの同時成立。"
+    },
+    {
+      "id": "D54-inBigDelay-35Hook",
+      "type": "D",
+      "title": "1大凹み→3フック・5差し添え",
+      "baseWeight": 0.66,
+      "requires": { "bigDelayLane": 1, "outerFollow": 5 },
+      "oneMark": {
+        "startOrder": ["3","5","(2|4)"],
+        "linkedPairs": [["3","5"]],
+        "thirdPool": ["2","4","6"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "3の切り込みに5が差し込む連動。"
+    },
+    {
+      "id": "D55-twoBigDelay-31Inside",
+      "type": "D",
+      "title": "2大凹み→3先頭・1が続く",
+      "baseWeight": 0.63,
+      "requires": { "bigDelayLane": 2 },
+      "oneMark": {
+        "startOrder": ["3","1","(4|5)"],
+        "linkedPairs": [["3","1"]],
+        "thirdPool": ["4","5","6"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "逃がし欠けで3が自由、1は最内で残す。"
+    },
+    {
+      "id": "D56-threeBigDelay-46Launch",
+      "type": "D",
+      "title": "3大凹み→4-6同発進",
+      "baseWeight": 0.59,
+      "requires": { "bigDelayLane": 3, "outerNobi": true },
+      "oneMark": {
+        "startOrder": ["(4|6)","(1|2)","5"],
+        "linkedPairs": [["4","6"]],
+        "thirdPool": ["1","2","5","3"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "外伸び条件下で角・大外が同時台頭。"
+    },
+    {
+      "id": "D57-fourBigDelay-21Tandem",
+      "type": "D",
+      "title": "4大凹み→2-1縦列（内戻り）",
+      "baseWeight": 0.61,
+      "requires": { "bigDelayLane": 4 },
+      "oneMark": {
+        "startOrder": ["2","1","(3|5)"],
+        "linkedPairs": [["2","1"]],
+        "thirdPool": ["3","5","6"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "角抜けで内に流れが戻る典型。"
+    },
+    {
+      "id": "D58-fiveBigDelay-42Edge",
+      "type": "D",
+      "title": "5大凹み→4が先マイ・2が差し届く",
+      "baseWeight": 0.60,
+      "requires": { "bigDelayLane": 5 },
+      "oneMark": {
+        "startOrder": ["4","2","(1|3)"],
+        "linkedPairs": [["4","2"]],
+        "thirdPool": ["1","3","6"],
+        "thirdBias": "exRank3rdMix"
+      },
+      "notes": "外穴でセンターと内差しが噛み合う。"
+    },
+    {
+      "id": "D59-sixBigDelay-54Rail",
+      "type": "D",
+      "title": "6大凹み→5-4のレール走り",
+      "baseWeight": 0.58,
+      "requires": { "bigDelayLane": 6 },
+      "oneMark": {
+        "startOrder": ["5","4","(1|2)"],
+        "linkedPairs": [["5","4"]],
+        "thirdPool": ["1","2","3"],
+        "thirdBias": "course3rdMix"
+      },
+      "notes": "外援護消えても5-4が勢い維持。"
+    },
+    {
+      "id": "D60-sixBigDelay-1Shield3Dive",
+      "type": "D",
+      "title": "6大凹み→1盾・3が差し込み",
+      "baseWeight": 0.60,
+      "requires": { "bigDelayLane": 6, "attackType": ["sashi"] },
+      "oneMark": {
+        "startOrder": ["1","3","(2|4)"],
+        "linkedPairs": [["1","3"]],
+        "thirdPool": ["2","4","5"],
+        "thirdBias": "national3rdMix"
+      },
+      "notes": "インの盾に3差しが噛み合う形。"
     }
   ]
 }
