@@ -16,25 +16,54 @@ import bets from "../src/predict/bets.mjs";
 // ---------- JSONCローダ（コメント/末尾カンマ許容） ----------
 function readJsonLoose(filePath) {
   const raw = fs.readFileSync(filePath, "utf8");
-  const noComments = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "");
+  const noComments = raw
+    .replace(/\/\*[\s\S]*?\*\//g, "")   // /* ... */
+    .replace(/(^|\s)\/\/.*$/gm, "");    // // ...
   const noTrailingCommas = noComments.replace(/,\s*([\]}])/g, "$1");
   return JSON.parse(noTrailingCommas);
 }
 
 // ===== シナリオリスト読込 =====
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const scenariosPath = path.join(__dirname, "../src/predict/scenarios.json");
-const scenariosList = readJsonLoose(scenariosPath);
+const __dirname  = path.dirname(__filename);
 
-// ===== 入力解決（CLI優先 → 環境変数）=====
-const to2 = (s) => String(s).padStart(2, "0");
+const scenariosPath = path.join(__dirname, "../src/predict/scenarios.json");
+
+let scenariosListRaw;
+let scenariosList;
+try {
+  scenariosListRaw = readJsonLoose(scenariosPath);
+  // もし { scenarios: [...] } 形式なら中身を取り出す
+  if (Array.isArray(scenariosListRaw)) {
+    scenariosList = scenariosListRaw;
+  } else if (scenariosListRaw && Array.isArray(scenariosListRaw.scenarios)) {
+    scenariosList = scenariosListRaw.scenarios;
+  } else {
+    scenariosList = [];
+  }
+} catch (e) {
+  console.error("[ERROR] failed to load scenarios.json:", e?.message);
+  scenariosList = [];
+}
+
+// 配列でなければログ出して空配列扱い
+if (!Array.isArray(scenariosList)) {
+  console.error("[ERROR] scenariosList is not an array. typeof:", typeof scenariosList);
+  console.error("[HINT] scenarios.json は配列、もしくは {\"scenarios\": [...]} の形にしてください。");
+  scenariosList = [];
+}
+
+// ===== 入力の解決（CLI引数 or 環境変数）=====
+function to2(s){ return String(s).padStart(2, "0"); }
+
 function resolveInputPath() {
   const argPath = process.argv[2];
   if (argPath) return path.resolve(argPath);
+
   const DATE = (process.env.DATE || "today").replace(/-/g, "");
-  const PID = to2(process.env.PID || "04");
+  const PID  = to2(process.env.PID || "04");
   const RACE = ((process.env.RACE || "1R").toUpperCase().replace(/[^\d]/g, "") + "R");
+
   return path.join(__dirname, "..", "public", "integrated", "v1", DATE, PID, `${RACE}.json`);
 }
 
@@ -46,12 +75,12 @@ if (!fs.existsSync(raceDataPath)) {
 }
 const raceData = JSON.parse(fs.readFileSync(raceDataPath, "utf8"));
 
-// 日付 / pid / race
+// 日付 / pid / race は統合JSONから取得（安全に）
 const date = (raceData.date || (process.env.DATE || "today")).replace(/-/g, "");
-const pid = to2(raceData.pid || process.env.PID || "04");
+const pid  = to2(raceData.pid || process.env.PID || "04");
 const race = (raceData.race || process.env.RACE || "1R").toUpperCase().replace(/[^\d]/g, "") + "R";
 
-// ===== 1) 前処理チェーン =====
+// ===== 1) 前処理・補正チェーン =====
 let adjusted = envAdjust(raceData);
 adjusted = stPred(adjusted);
 adjusted = slitAndAttack(adjusted);
@@ -59,120 +88,114 @@ adjusted = realClass(adjusted);
 adjusted = venueAdjust(adjusted);
 adjusted = upsetIndex(adjusted);
 
-// ===== 2) シナリオマッチ（1Mまで）=====
+// ===== 2) シナリオマッチ（1Mまでの展開）=====
 function matchScenario(sc, data) {
-  if (sc?.requires?.attackType && !sc.requires.attackType.includes(data.attackType)) return false;
-  if (sc?.requires?.head && !sc.requires.head.includes(data.head)) return false;
+  if (sc?.requires?.attackType) {
+    if (!sc.requires.attackType.includes(data.attackType)) return false;
+  }
+  if (sc?.requires?.head) {
+    if (!sc.requires.head.includes(data.head)) return false;
+  }
   return true;
 }
 
-const matchedScenarios = (Array.isArray(scenariosList) ? scenariosList : [])
-  .filter((sc) => matchScenario(sc, adjusted))
-  .map((sc) => ({
+const matchedScenarios = (scenariosList || []).filter(sc => matchScenario(sc, adjusted))
+  .map(sc => ({
     ...sc,
-    weight: (sc.baseWeight ?? 1) * (adjusted.venueWeight ?? 1) * (adjusted.upsetWeight ?? 1),
+    weight: (sc.baseWeight ?? 1) * (adjusted.venueWeight ?? 1) * (adjusted.upsetWeight ?? 1)
   }));
 
-const effectiveScenarios =
-  matchedScenarios.length ? matchedScenarios : scenariosList.slice(0, 3).map((sc) => ({ ...sc, weight: 1 }));
+// ← ここを堅牢化：配列保証してから slice
+const baseList = Array.isArray(scenariosList) ? scenariosList : [];
+const effectiveScenarios = matchedScenarios.length
+  ? matchedScenarios
+  : baseList.slice(0, 3).map(sc => ({ ...sc, weight: 1 }));
 
-// ===== 3) 道中展開シミュレーション =====
-const scenarioResults = effectiveScenarios.map((sc) => {
-  const finalProb = simulateRace(adjusted, sc.oneMark);
-  return { id: sc.id, notes: sc.notes, oneMark: sc.oneMark, weight: sc.weight, finalProb };
+if (effectiveScenarios.length === 0) {
+  console.error("[WARN] No scenarios available. bets will be fallback-only.");
+}
+
+// ===== 3) 1M後〜ゴールの道中展開シミュレーション =====
+const scenarioResults = effectiveScenarios.map(sc => {
+  let finalProb = {};
+  try {
+    finalProb = simulateRace(adjusted, sc.oneMark) || {};
+  } catch (e) {
+    console.error("[ERROR] simulateRace failed for scenario:", sc?.id, e?.message);
+    finalProb = {};
+  }
+  return {
+    id: sc.id,
+    notes: sc.notes,
+    oneMark: sc.oneMark,
+    weight: sc.weight,
+    finalProb
+  };
 });
 
-// ===== 4) 重み付け合算・正規化 =====
+// ===== 4) シナリオ結果の重み付け合算（正規化）=====
 let aggregated = {};
 let totalWeight = 0;
+
 for (const sr of scenarioResults) {
-  totalWeight += sr.weight;
+  totalWeight += sr.weight || 0;
   for (const [ticket, prob] of Object.entries(sr.finalProb || {})) {
-    aggregated[ticket] = (aggregated[ticket] || 0) + prob * sr.weight;
+    aggregated[ticket] = (aggregated[ticket] || 0) + (Number(prob) || 0) * (sr.weight || 0);
   }
 }
 if (totalWeight > 0) {
   for (const k of Object.keys(aggregated)) aggregated[k] /= totalWeight;
+} else {
+  console.error("[WARN] totalWeight=0; aggregated probs will be empty.");
+  aggregated = {};
 }
 
-// ===== フォールバック：確率が空なら暫定で組む =====
-function buildFallbackProbs(ad) {
-  const probs = {};
-  const slit = Array.isArray(ad.slitOrder) ? ad.slitOrder : [];
-  const lanes = slit.length
-    ? slit.map((x) => Number(x.lane))
-    : (Array.isArray(ad.ranking) ? ad.ranking : []).map((r) => Number(r.lane));
-  if (!lanes.length) return probs;
-
-  const heads = lanes.slice(0, 3);
-  for (const h of heads) {
-    const seconds = lanes.filter((l) => l !== h).slice(0, 3);
-    const thirds = lanes.filter((l) => l !== h).slice(0, 4);
-    for (let i = 0; i < seconds.length; i++) {
-      for (let j = 0; j < thirds.length; j++) {
-        const s = seconds[i],
-          t = thirds[j];
-        if (s === t) continue;
-        const key = `${h}-${s}-${t}`;
-        const wHead = 1.0 - heads.indexOf(h) * 0.1;
-        const wSec = 1.0 - i * 0.1;
-        probs[key] = (probs[key] || 0) + wHead * wSec;
-      }
-    }
-  }
-  const sum = Object.values(probs).reduce((a, b) => a + b, 0);
-  if (sum > 0) for (const k of Object.keys(probs)) probs[k] /= sum;
-  return probs;
+// ===== 5) 買い目生成（18点固定 / compact表記含む）=====
+// bets() が空集合で返る可能性に備えてフォールバック
+let betResult;
+try {
+  betResult = bets(aggregated, 18);
+} catch (e) {
+  console.error("[ERROR] bets() failed:", e?.message);
+  betResult = { compact: "", main: [], ana: [], markdown: "_no bets_" };
 }
-if (!Object.keys(aggregated).length) {
-  aggregated = buildFallbackProbs(adjusted);
+if ((!betResult.main || betResult.main.length === 0) &&
+    (!betResult.compact || betResult.compact.length === 0)) {
+  console.error("[WARN] bets came back empty. probs keys:", Object.keys(aggregated));
 }
 
-// ===== 5) 買い目生成（18点固定 / compact表記）=====
-const betResult = bets(aggregated, 18);
-
-// ===== 6) 出力 =====
+// ===== 6) race.md / race.json を所定フォルダに保存 =====
 const outDir = path.join("public", "predictions", date, pid, race);
 fs.mkdirSync(outDir, { recursive: true });
 
 const predictionData = {
   meta: {
-    date,
-    pid,
-    race,
+    date, pid, race,
     sourceFile: path.relative(process.cwd(), raceDataPath),
-    generatedAt: new Date().toISOString(),
+    generatedAt: new Date().toISOString()
   },
   weather: adjusted.weather || null,
   ranking: adjusted.ranking || null,
   slitOrder: adjusted.slitOrder || null,
   attackType: adjusted.attackType || null,
-  scenarios: scenarioResults.map((s) => ({
-    id: s.id,
-    notes: s.notes,
-    oneMark: s.oneMark,
-    weight: s.weight,
+  scenarios: scenarioResults.map(s => ({
+    id: s.id, notes: s.notes, oneMark: s.oneMark, weight: s.weight
   })),
   probs: aggregated,
-  bets: { compact: betResult.compact, main: betResult.main, ana: betResult.ana },
+  bets: { compact: betResult.compact, main: betResult.main, ana: betResult.ana }
 };
 fs.writeFileSync(path.join(outDir, "race.json"), JSON.stringify(predictionData, null, 2), "utf-8");
 
-// md（compact表記込み）
 const lines = [];
 lines.push(`# 予測 ${date} pid=${pid} race=${race}`);
 if (adjusted?.weather) {
   const w = adjusted.weather;
-  lines.push(
-    `**気象**: ${w.weather ?? ""} / 気温${w.temperature ?? "-"}℃ 風${w.windSpeed ?? "-"}m ${w.windDirection ?? ""} 波高${
-      w.waveHeight ?? "-"
-    }m${w.stabilizer ? "（安定板）" : ""}`
-  );
+  lines.push(`**気象**: ${w.weather ?? ""} / 気温${w.temperature ?? "-"}℃ 風${w.windSpeed ?? "-"}m ${w.windDirection ?? ""} 波高${w.waveHeight ?? "-"}m${w.stabilizer ? "（安定板）" : ""}`);
 }
 if (adjusted?.attackType) lines.push(`**想定攻め手**: ${adjusted.attackType}`);
 lines.push("");
 lines.push("## 買い目（compact）");
-lines.push(betResult.markdown || "");
+lines.push(betResult.markdown || "_no bets_");
 lines.push("");
 lines.push("## 参考（上位評価）");
 if (Array.isArray(adjusted.ranking)) {
@@ -182,6 +205,9 @@ if (Array.isArray(adjusted.ranking)) {
 }
 fs.writeFileSync(path.join(outDir, "race.md"), lines.join("\n"), "utf-8");
 
+// 追加デバッグ（1回だけ要点）
+console.log(`[predict] scenarios loaded: ${Array.isArray(scenariosList) ? scenariosList.length : 0}`);
+console.log(`[predict] matched: ${matchedScenarios.length}, effective: ${effectiveScenarios.length}`);
 console.log(`[predict] wrote:
 - ${path.join(outDir, "race.json")}
 - ${path.join(outDir, "race.md")}
