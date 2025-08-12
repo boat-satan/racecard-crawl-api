@@ -18,7 +18,6 @@ export const ENV_DEFAULTS = {
 };
 
 /** ---------- 個別補正関数 ---------- */
-
 export function envAdjustForST(predST, ctx = {}, cfg = ENV_DEFAULTS) {
   const wind = toNum(ctx.windSpeed, 0);
   const wave = toNum(ctx.waveHeight, 0);
@@ -98,7 +97,7 @@ function toNum(v, def = 0) {
 function clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }
 function round3(x) { return Math.round(x * 1000) / 1000; }
 
-/** ---------- 追加：デフォルトエクスポート本体 ---------- */
+/** ---------- デフォルトエクスポート本体（重複定義なし） ---------- */
 /**
  * レース全体にざっくり環境補正を適用して返す
  * （最小変更：既存フィールドがあれば軽く補正、無ければそのまま）
@@ -117,34 +116,22 @@ export default function envAdjust(race) {
   if (Array.isArray(cloned.ranking)) {
     cloned.ranking = cloned.ranking.map(p => {
       const isIn = p.lane === 1;
-      // 仮のダッシュ判定（進入が分からない場合は4〜6をダッシュ扱い）
-      const isDash = p.lane >= 4;
+      const isDash = p.lane >= 4; // 進入不明時の簡易推定
       const ctx = { ...common, isDash, isIn, tilt: p.tilt };
 
-      const baseST = p.predictedST ?? p.avgST;
-      const adjST = baseST != null ? envAdjustForST(baseST, ctx) : undefined;
+      const baseST    = p.predictedST ?? p.avgST;
+      const baseScore = p.score;
+      const baseUpset = p.upset;
 
-      const baseScore = p.score != null ? p.score : undefined;
-      const adjScore = baseScore != null ? envAdjustForScore(baseScore, ctx) : undefined;
-
-      const baseUpset = p.upset != null ? p.upset : undefined;
-      const adjUpset = baseUpset != null ? envAdjustForUpset(baseUpset, ctx) : undefined;
-
-      return {
-        ...p,
-        ...(adjST   != null ? { predictedST: adjST } : {}),
-        ...(adjScore!= null ? { score: adjScore } : {}),
-        ...(adjUpset!= null ? { upset: adjUpset } : {})
+      const adj = {
+        ...(baseST    != null ? { predictedST: envAdjustForST(baseST, ctx) } : {}),
+        ...(baseScore != null ? { score:      envAdjustForScore(baseScore, ctx) } : {}),
+        ...(baseUpset != null ? { upset:      envAdjustForUpset(baseUpset, ctx) } : {}),
       };
+
+      return { ...p, ...adj };
     });
   }
 
   return cloned;
 }
-
-// ここから追加
-function envAdjust(race) {
-  return race; // 仮の処理（環境補正しないでそのまま返す）
-}
-
-export default envAdjust;
