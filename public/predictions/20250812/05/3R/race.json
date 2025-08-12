@@ -1,0 +1,308 @@
+{
+  "meta": {
+    "date": "20250812",
+    "pid": "05",
+    "race": "3R",
+    "sourceFile": "public/integrated/v1/20250812/05/3R.json",
+    "generatedAt": "2025-08-12T13:47:50.845Z"
+  },
+  "weather": {
+    "weather": "雨",
+    "temperature": 30,
+    "windSpeed": 3,
+    "windDirection": "南西",
+    "waterTemperature": 27,
+    "waveHeight": 0.02,
+    "stabilizer": false
+  },
+  "ranking": null,
+  "slitOrder": [
+    {
+      "lane": 6,
+      "startCourse": 6,
+      "adjustedST": 0.115
+    },
+    {
+      "lane": 5,
+      "startCourse": 5,
+      "adjustedST": 0.155
+    },
+    {
+      "lane": 3,
+      "startCourse": 3,
+      "adjustedST": 0.16
+    },
+    {
+      "lane": 2,
+      "startCourse": 2,
+      "adjustedST": 0.18
+    },
+    {
+      "lane": 1,
+      "startCourse": 1,
+      "adjustedST": 0.21
+    },
+    {
+      "lane": 4,
+      "startCourse": 4,
+      "adjustedST": 0.245
+    }
+  ],
+  "attackType": "none",
+  "scenarios": [
+    {
+      "id": "D01-inBigDelay-centerPush",
+      "weight": 0.71424
+    },
+    {
+      "id": "D02-inBigDelay-outerSlipIn",
+      "weight": 0.6943999999999999
+    },
+    {
+      "id": "D03-inBigDelay-headwindHold",
+      "weight": 0.67456
+    },
+    {
+      "id": "D04-twoBigDelay-centerTandem",
+      "weight": 0.6547200000000001
+    },
+    {
+      "id": "D05-twoBigDelay-inFollowHold",
+      "weight": 0.63488
+    },
+    {
+      "id": "D06-twoBigDelay-outerBias",
+      "weight": 0.61504
+    },
+    {
+      "id": "D07-threeBigDelay-cornerOpens",
+      "weight": 0.63488
+    },
+    {
+      "id": "D08-threeBigDelay-inTrace",
+      "weight": 0.62496
+    },
+    {
+      "id": "D09-threeBigDelay-outerCutIn",
+      "weight": 0.60512
+    },
+    {
+      "id": "D10-fourBigDelay-inReturn",
+      "weight": 0.6547200000000001
+    },
+    {
+      "id": "D11-fourBigDelay-headwindInside",
+      "weight": 0.63488
+    },
+    {
+      "id": "D12-fourBigDelay-outerTrace",
+      "weight": 0.5952
+    },
+    {
+      "id": "D13-fiveBigDelay-centerShift",
+      "weight": 0.57536
+    },
+    {
+      "id": "D14-fiveBigDelay-inHoldLite",
+      "weight": 0.5654399999999999
+    },
+    {
+      "id": "D15-fiveBigDelay-tailwindRisk",
+      "weight": 0.55552
+    },
+    {
+      "id": "D16-sixBigDelay-centerTight",
+      "weight": 0.57536
+    },
+    {
+      "id": "D17-sixBigDelay-inProtect",
+      "weight": 0.5654399999999999
+    },
+    {
+      "id": "D18-sixBigDelay-outerFollowLost",
+      "weight": 0.55552
+    },
+    {
+      "id": "D19-inBigDelay-mildPressure",
+      "weight": 0.66464
+    },
+    {
+      "id": "D20-twoBigDelay-tightInside",
+      "weight": 0.62496
+    },
+    {
+      "id": "D21-threeBigDelay-tailwindPush",
+      "weight": 0.5952
+    },
+    {
+      "id": "D23-fourBigDelay-centerDrive",
+      "weight": 0.61504
+    },
+    {
+      "id": "D24-fourBigDelay-outerAttackFails",
+      "weight": 0.57536
+    },
+    {
+      "id": "D25-fiveBigDelay-outerNoDrive",
+      "weight": 0.5456000000000001
+    },
+    {
+      "id": "D26-fiveBigDelay-tailwindOuter",
+      "weight": 0.55552
+    },
+    {
+      "id": "D28-sixBigDelay-makuriZashiFollow",
+      "weight": 0.57536
+    },
+    {
+      "id": "D29-inBigDelay-doubleCenter",
+      "weight": 0.6943999999999999
+    },
+    {
+      "id": "D31-twoBigDelay-centerWide",
+      "weight": 0.63488
+    },
+    {
+      "id": "D32-twoBigDelay-innerHold",
+      "weight": 0.6448
+    },
+    {
+      "id": "D33-threeBigDelay-outerRush",
+      "weight": 0.5654399999999999
+    },
+    {
+      "id": "D34-threeBigDelay-innerBackdoor",
+      "weight": 0.60512
+    },
+    {
+      "id": "D35-fourBigDelay-centerPair",
+      "weight": 0.61504
+    },
+    {
+      "id": "D36-fourBigDelay-outerDrift",
+      "weight": 0.5456000000000001
+    },
+    {
+      "id": "D37-fiveBigDelay-innerPair",
+      "weight": 0.5952
+    },
+    {
+      "id": "D39-sixBigDelay-innerCompact",
+      "weight": 0.60512
+    },
+    {
+      "id": "D40-sixBigDelay-centerOvertake",
+      "weight": 0.5852799999999999
+    },
+    {
+      "id": "D41-inBigDelay-23TandemTail",
+      "weight": 0.67456
+    },
+    {
+      "id": "D42-inBigDelay-34PressContra",
+      "weight": 0.68448
+    },
+    {
+      "id": "D43-twoBigDelay-34WidePush",
+      "weight": 0.62496
+    },
+    {
+      "id": "D44-twoBigDelay-1HoldWith3",
+      "weight": 0.63488
+    },
+    {
+      "id": "D45-threeBigDelay-4LeadWith5Follow",
+      "weight": 0.5952
+    },
+    {
+      "id": "D47-fourBigDelay-1Compact23Battle",
+      "weight": 0.61504
+    },
+    {
+      "id": "D48-fourBigDelay-3Lead1Hold",
+      "weight": 0.5952
+    },
+    {
+      "id": "D49-fiveBigDelay-1Lead2Assist",
+      "weight": 0.60512
+    },
+    {
+      "id": "D51-sixBigDelay-45Parallel",
+      "weight": 0.5852799999999999
+    },
+    {
+      "id": "D52-sixBigDelay-1Lead4Follow",
+      "weight": 0.5952
+    },
+    {
+      "id": "D53-inBigDelay-24Tandem",
+      "weight": 0.66464
+    },
+    {
+      "id": "D54-inBigDelay-35Hook",
+      "weight": 0.6547200000000001
+    },
+    {
+      "id": "D55-twoBigDelay-31Inside",
+      "weight": 0.62496
+    },
+    {
+      "id": "D56-threeBigDelay-46Launch",
+      "weight": 0.5852799999999999
+    },
+    {
+      "id": "D57-fourBigDelay-21Tandem",
+      "weight": 0.60512
+    },
+    {
+      "id": "D58-fiveBigDelay-42Edge",
+      "weight": 0.5952
+    },
+    {
+      "id": "D59-sixBigDelay-54Rail",
+      "weight": 0.57536
+    }
+  ],
+  "probs": {
+    "3-6-4": 0.956732441097068,
+    "3-6-2": 0.023191243534226916,
+    "3-4-6": 0.010250464081701547,
+    "3-6-1": 0.009825851287003516
+  },
+  "bets": {
+    "compact": "3-64-4261",
+    "main": [
+      [
+        3,
+        6,
+        4
+      ],
+      [
+        3,
+        6,
+        2
+      ],
+      [
+        3,
+        6,
+        1
+      ],
+      [
+        3,
+        4,
+        2
+      ],
+      [
+        3,
+        4,
+        6
+      ],
+      [
+        3,
+        4,
+        1
+      ]
+    ],
+    "ana": []
+  }
+}
