@@ -78,43 +78,43 @@ function buildEntriesFallback(a) {
 }
 adjusted = { ...adjusted, entries: buildEntriesFallback(adjusted) };
 
-// ---- scenario match（A〜D全部対象。requires は“要求があるなら厳格一致”）
+// ---- scenario match（A〜D全部対象）
+/**
+ * ルール:
+ *  - attackType: 指定があれば必ず一致（データ無ければ不一致）
+ *  - bigDelayLane: 指定があれば必ず一致（データ無ければ不一致）→ Dは検出時のみ通す
+ *  - それ以外（head/inReliability/wind/各種フラグ）は「data側に値がある時だけ」厳格一致。無ければ無視
+ */
 function matchScenario(sc, data) {
   const req = sc?.requires || {};
 
-  // attackType
+  // 必須一致系
   if (req.attackType) {
     if (!data.attackType || !req.attackType.includes(data.attackType)) return false;
   }
+  if (req.bigDelayLane !== undefined) {
+    if (data.bigDelayLane === undefined) return false;
+    if (req.bigDelayLane !== data.bigDelayLane) return false;
+  }
 
-  // head（進入想定ヘッド）
+  // 任意一致系（データがあるときだけ判定）
   if (req.head) {
-    if (!data.head || !req.head.includes(data.head)) return false;
+    if (data.head && !req.head.includes(data.head)) return false;
   }
-
-  // inReliability
   if (req.inReliability) {
-    if (!data.inReliability || req.inReliability !== data.inReliability) return false;
+    if (data.inReliability && req.inReliability !== data.inReliability) return false;
   }
-
-  // wind（方向グループ）
   if (req.wind) {
     const g = data.weather?.windDirectionGroup;
-    if (!g || req.wind !== g) return false;
+    if (g && req.wind !== g) return false;
   }
 
-  // bigDelayLane
-  if (req.bigDelayLane !== undefined) {
-    if (data.bigDelayLane === undefined || req.bigDelayLane !== data.bigDelayLane) return false;
-  }
-
-  // 追加の bool 的フラグ（例: dashAdvantage 等）は「要求が true のときに data 側も true を要求」
-  const boolKeys = ["dashAdvantage","outerNobi","twoCoursePassive","threeCourseAggressive","outerFollow","slitLeader","slitPusher","inAvgST"];
-  for (const k of boolKeys) {
-    if (req[k] !== undefined) {
-      if (data[k] === undefined) return false;
-      if (req[k] !== data[k]) return false;
-    }
+  const optKeys = [
+    "dashAdvantage","outerNobi","twoCoursePassive","threeCourseAggressive",
+    "outerFollow","slitLeader","slitPusher","inAvgST"
+  ];
+  for (const k of optKeys) {
+    if (req[k] !== undefined && data[k] !== undefined && req[k] !== data[k]) return false;
   }
 
   return true;
@@ -125,24 +125,24 @@ const matchedScenarios = scenariosList
   .filter(sc => matchScenario(sc, adjusted))
   .map(sc => ({ ...sc, weight: (sc.baseWeight ?? 1) * (adjusted.venueWeight ?? 1) * (adjusted.upsetWeight ?? 1) }));
 
-// タイプ別内訳ログ
-const byType = { A:0, B:0, C:0, D:0, _:0 };
+// タイプ別マッチ件数ログ
+const typeCount = { A:0, B:0, C:0, D:0 };
 for (const sc of matchedScenarios) {
-  const t = sc.type || "_";
-  byType[t] = (byType[t] || 0) + 1;
+  const t = String(sc.id || "").charAt(0);
+  if (typeCount[t] !== undefined) typeCount[t]++;
 }
-console.log(`[match] A:${byType.A||0} B:${byType.B||0} C:${byType.C||0} D:${byType.D||0} total:${matchedScenarios.length}`);
+console.log(`[match] A:${typeCount.A} B:${typeCount.B} C:${typeCount.C} D:${typeCount.D} total:${matchedScenarios.length}`);
 
-const effectiveScenarios = matchedScenarios.length
-  ? matchedScenarios
-  : scenariosList.map(sc => ({...sc, weight: sc.baseWeight ?? 1}));
-
+const effectiveScenarios = matchedScenarios.length ? matchedScenarios : scenariosList.map(sc => ({
+  ...sc, weight: sc.baseWeight ?? 1
+}));
 console.log(`[predict] matched: ${matchedScenarios.length}, effective(use): ${effectiveScenarios.length}`);
 
 // ---- simulate each scenario -> prob map（分布のまま取得）
 function runSimulate(sc) {
   try {
     const out = simulateRace(adjusted, sc.oneMark);
+    // out は { "a-b-c": prob } の想定。無ければ空オブジェクト。
     return (out && typeof out === "object" && !Array.isArray(out)) ? out : {};
   } catch (e) {
     console.error(`Error: simulateRace failed for scenario: ${sc.id}`, e?.message);
@@ -178,7 +178,7 @@ if (sumAgg > 0) for (const k of Object.keys(aggregated)) aggregated[k] /= sumAgg
 
 console.log(`[DEBUG] aggregated outcomes: ${Object.keys(aggregated).length} (after normalize)`);
 
-// ---- bets
+// ---- bets: 抽出は bets 側に任せる（probs は全出目のまま）
 let betResult;
 try {
   betResult = bets(aggregated, 18);
@@ -248,7 +248,6 @@ lines.push("");
 lines.push("## デバッグ");
 lines.push(`- scenarios used: ${effectiveScenarios.length}`);
 lines.push(`- outcomes: ${Object.keys(aggregated).length}`);
-lines.push(`- matched types: A:${byType.A||0} B:${byType.B||0} C:${byType.C||0} D:${byType.D||0}`);
 fs.writeFileSync(path.join(outDir, "race.md"), lines.join("\n"), "utf-8");
 
 console.log(`[predict] wrote:
