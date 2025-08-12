@@ -1,21 +1,18 @@
 /**
- * 道中展開シミュレーション（最小変更・全差し替え版）
+ * 道中展開シミュレーション（A〜D 全シナリオ対応・最小変更・全差し替え版）
  * 既存互換:
  *   default export simulateRace(adjusted, oneMark) -> { "1-2-3": 0.123, ... }
  *
- * コア:
- *   buildPerfMap(entries, ctx) -> perfMap
- *   simCore(startOrder, perfMap, laps=3, seed=0) -> [{ lane, pos, score }]
- *
- * 変更点（最小）:
- *  - startOrder の "(a|b)" / "a/b" を **毎トライアルでランダム選択**（スリット順を重み付け）
- *  - linkedPairs は「1-2」の並びになったときに **カウントへ重みブースト**（thirdPoolは削らない）
- *  - ロジックは既存の perf ベースの Monte Carlo を踏襲（入出力互換）
+ * 要点:
+ * - oneMark.order / oneMark.startOrder の "(a|b)" / "a/b" を試行ごとに重み付き乱択（スリット順優先）
+ * - linkedPairs は 1着-2着が一致したときカウントにブースト
+ * - A/B/C/D いずれのシナリオでも同じ処理系で Monte Carlo 合成
+ * - 出力は確率マップ（既存 bets ロジックがそのまま使える）
  */
 
 function clamp01(v) { return Math.max(0, Math.min(1, v)); }
 
-// シード付き擬似乱数（xorshift32）
+// ===== シード付き擬似乱数（xorshift32）
 function makePRNG(seed = 1) {
   let x = (seed >>> 0) || 1;
   return () => {
@@ -32,27 +29,26 @@ export function buildPerfMap(entries, ctx = {}) {
     stabilizer = false,
   } = ctx;
 
-  const envTough = clamp01((windSpeed / 8) * 0.5 + (waveHeight / 0.15) * 0.5); // 0..1
+  const envTough = clamp01((windSpeed / 8) * 0.5 + (waveHeight / 0.15) * 0.5);
   const map = {};
 
   for (const e of entries || []) {
     const lane = Number(e.lane ?? e.racecard?.lane);
     if (!Number.isFinite(lane)) continue;
 
-    const exRank = Number(e.exhibition?.exRank ?? e.stats?.exTimeRank?.[0]?.rank ?? 3); // 1良
+    const exRank = Number(e.exhibition?.exRank ?? e.stats?.exTimeRank?.[0]?.rank ?? 3); // 小さいほど良
     const motor2 = Number(e.racecard?.motorTop2 ?? e.racecard?.motor2 ?? e.motor2 ?? 30); // %
     const tilt = parseFloat(String(e.exhibition?.tilt ?? "0").replace("°","")) || 0;
     const natTop3 = Number(e.racecard?.natTop3 ?? 40);
     const courseTop3 = Number(e.stats?.entryCourse?.matrixSelf?.top3Rate ?? 40);
     const realClass = String(e.realClass ?? "B1中位");
 
-    const classFactor = (
+    const classFactor =
       realClass.startsWith("A1") ? 1.00 :
       realClass.startsWith("A2") ? 0.90 :
       realClass.includes("B1上位") ? 0.82 :
       realClass.includes("B1中位") ? 0.75 :
-      realClass.includes("B1下位") ? 0.70 : 0.65
-    );
+      realClass.includes("B1下位") ? 0.70 : 0.65;
 
     let straight =
       0.55 * norm(motor2, 20, 55) +
@@ -79,7 +75,7 @@ export function buildPerfMap(entries, ctx = {}) {
   return map;
 }
 
-/* ================== コア（1本シミュ） ================== */
+/* ================== 1本シミュ（道中） ================== */
 export function simCore(startOrder, perfMap, laps = 3, seed = 0) {
   const rand = makePRNG(seed);
   let positions = (startOrder || []).map(p => ({ lane: p.lane, pos: p.pos, score: 0 }));
@@ -88,7 +84,7 @@ export function simCore(startOrder, perfMap, laps = 3, seed = 0) {
     // ターン区間
     positions = positions.map(p => {
       const perf = perfMap[p.lane] || { turn: 0.5, straight: 0.5, stability: 0.5 };
-      const base = (perf.turn - 0.5) * 0.22;                    // ±0.11
+      const base = (perf.turn - 0.5) * 0.22; // ±0.11
       const noise = (rand() - 0.5) * (0.10 * (1 - perf.stability));
       return { ...p, score: base + noise };
     }).sort((a, b) => b.score - a.score)
@@ -97,7 +93,7 @@ export function simCore(startOrder, perfMap, laps = 3, seed = 0) {
     // 直線区間
     positions = positions.map(p => {
       const perf = perfMap[p.lane] || { turn: 0.5, straight: 0.5, stability: 0.5 };
-      const base = (perf.straight - 0.5) * 0.18;                // ±0.09
+      const base = (perf.straight - 0.5) * 0.18; // ±0.09
       const noise = (rand() - 0.5) * (0.08 * (1 - perf.stability));
       return { ...p, score: p.score + base + noise };
     }).sort((a, b) => b.score - a.score)
@@ -108,7 +104,7 @@ export function simCore(startOrder, perfMap, laps = 3, seed = 0) {
 
 /* ================== oneMark 正規化 & 初期並び生成 ================== */
 
-// "(2|3)" / "2/3" / "2" / ["2","3"] を配列に
+// "(2|3)" / "2/3" / "2" / ["2","3"] → 数配列へ
 function splitToken(tok) {
   if (Array.isArray(tok)) return tok.map(n => Number(n));
   const s = String(tok ?? "").trim();
@@ -119,60 +115,42 @@ function splitToken(tok) {
   return [Number(s)];
 }
 
-// order でも startOrder でもOKにする
 function normalizeOneMark(oneMark) {
   const om = oneMark || {};
   const rawOrder = om.order ?? om.startOrder ?? [];
   const startOrderTokens = Array.isArray(rawOrder) ? rawOrder.map(splitToken) : [];
-
   const linkedPairs = Array.isArray(om.linkedPairs)
     ? om.linkedPairs.map(p => (Array.isArray(p) ? p.map(n => Number(n)) : splitToken(p)))
     : [];
-
   const thirdPool = Array.isArray(om.thirdPool) ? om.thirdPool.map(n => Number(n)) : [];
-
-  return {
-    startOrderTokens, // Array<Array<number>>
-    linkedPairs,      // Array<[number, number]>
-    thirdPool,        // Array<number>
-    thirdBias: om.thirdBias || null
-  };
+  return { startOrderTokens, linkedPairs, thirdPool, thirdBias: om.thirdBias || null };
 }
 
-// スリット順（昇順ST）: adjusted.slitOrder → [lane,...]
+// adjusted.slitOrder（昇順ST）→ [lane,...]
 function getSlitOrderFallback(adjusted) {
   const so = Array.isArray(adjusted?.slitOrder) ? adjusted.slitOrder : [];
-  return so
-    .slice()
-    .sort((a, b) => (a.adjustedST ?? 9) - (b.adjustedST ?? 9))
-    .map(x => Number(x.lane));
+  return so.slice().sort((a,b)=>(a.adjustedST ?? 9)-(b.adjustedST ?? 9)).map(x=>Number(x.lane));
 }
 
-// 重み付きランダム選択（スリット順優先）
+// スリット順優先の重み付き乱択
 function weightedPick(cands, slitPref, used, rand) {
   const pool = cands.filter(n => !used.has(n));
   if (pool.length === 0) return null;
   if (pool.length === 1) return pool[0];
-
-  // スリット順位が良いほど重み↑（末尾にも最低重みを与える）
   const weights = pool.map(n => {
     const idx = slitPref.indexOf(n);
     return (idx >= 0 ? (slitPref.length - idx) : 1) + 1e-6;
   });
-  const sum = weights.reduce((s, w) => s + w, 0);
-  let r = rand() * sum;
-  for (let i = 0; i < pool.length; i++) {
-    r -= weights[i];
-    if (r <= 0) return pool[i];
-  }
-  return pool[pool.length - 1];
+  const sum = weights.reduce((s,w)=>s+w,0);
+  let r = rand()*sum;
+  for (let i=0;i<pool.length;i++){ r-=weights[i]; if (r<=0) return pool[i]; }
+  return pool[pool.length-1];
 }
 
-// トークン配列から {lane,pos} を毎トライアル乱択で生成（重複回避）
+// トークン配列→ {lane,pos}（毎試行ランダム具体化）
 function materializeStartOrderRandom(tokens, adjusted, rand) {
   const used = new Set();
   const slitPref = getSlitOrderFallback(adjusted);
-
   const lanes = [];
   for (const cands of tokens) {
     const pick = weightedPick(cands, slitPref, used, rand);
@@ -180,28 +158,24 @@ function materializeStartOrderRandom(tokens, adjusted, rand) {
     used.add(pick);
     lanes.push(pick);
   }
-
-  // 足りない分はスリット順から未使用を補完
   for (const l of slitPref) {
     if (lanes.length >= 6) break;
-    if (!used.has(l)) {
-      used.add(l);
-      lanes.push(l);
-    }
+    if (!used.has(l)) { used.add(l); lanes.push(l); }
   }
-
-  return lanes.slice(0, 6).map((lane, i) => ({ lane, pos: i + 1 }));
+  return lanes.slice(0,6).map((lane,i)=>({ lane, pos:i+1 }));
 }
 
 /* ================== 既存互換の default ラッパー ================== */
-/**
- * simulateRace(adjusted, oneMark) -> { "1-2-3": prob, ... }
- */
 export default function simulateRaceCompat(adjusted, oneMark) {
   const { startOrderTokens, linkedPairs } = normalizeOneMark(oneMark || {});
 
-  // 2) perfMap 構築
-  const entries = adjusted?.entries || adjusted?.ranking || [];
+  // entries のフォールバック（ranking/slitOrder からでも生成）
+  const entries =
+    (Array.isArray(adjusted?.entries) && adjusted.entries.length) ? adjusted.entries :
+    (Array.isArray(adjusted?.ranking) && adjusted.ranking.length) ? adjusted.ranking.map(r=>({ lane:Number(r.lane)||0, ...r })) :
+    (Array.isArray(adjusted?.slitOrder) && adjusted.slitOrder.length) ? adjusted.slitOrder.map(s=>({ lane:Number(s.lane)||0 })) :
+    Array.from({length:6}, (_,i)=>({ lane:i+1 }));
+
   const weather = adjusted?.weather || {};
   const perfMap = buildPerfMap(entries, {
     windSpeed: weather.windSpeed,
@@ -209,32 +183,31 @@ export default function simulateRaceCompat(adjusted, oneMark) {
     stabilizer: !!weather.stabilizer,
   });
 
-  const TRIALS = 400; // 少しだけ増量（多様性確保）
+  // 試行回数（多様性確保・時間バランス）
+  const TRIALS = 2500;
+
   const counts = new Map();
-
   for (let i = 0; i < TRIALS; i++) {
-    const rand = makePRNG(10007 + i); // 試行ごとにシード変更
+    const rand = makePRNG(10007 + i);
 
-    // 1) oneMark を毎回ランダム具体化（候補群から選択）
+    // oneMark を毎回ランダム具体化
     const startOrder = materializeStartOrderRandom(
-      startOrderTokens.length ? startOrderTokens : [ [1], [2], [3], [4], [5], [6] ],
+      startOrderTokens.length ? startOrderTokens : [ [1],[2],[3],[4],[5],[6] ],
       adjusted,
       rand
     );
 
-    // 2) 道中シミュ
+    // 道中シミュ
     const res = simCore(startOrder, perfMap, 3, 20011 + i);
     const ordered = res.slice().sort((a, b) => a.pos - b.pos);
     const a = ordered[0]?.lane, b = ordered[1]?.lane, c = ordered[2]?.lane;
     if (!a || !b || !c) continue;
 
-    // 3) 連動ペアのブースト（1-2の並びに対して）
+    // linkedPairs ブースト（順序一致のみ）
     let w = 1;
     if (Array.isArray(linkedPairs) && linkedPairs.length) {
       for (const [x, y] of linkedPairs) {
-        if (a === Number(x) && b === Number(y)) { w *= 1.35; break; } // 順序一致
-        // 順不同でやりたいなら以下を有効化:
-        // if (a === Number(y) && b === Number(x)) { w *= 1.2; break; }
+        if (a === Number(x) && b === Number(y)) { w *= 1.35; break; }
       }
     }
 
@@ -242,12 +215,10 @@ export default function simulateRaceCompat(adjusted, oneMark) {
     counts.set(key, (counts.get(key) || 0) + w);
   }
 
-  // 4) 正規化して確率マップへ
+  // 正規化
   const total = [...counts.values()].reduce((s, v) => s + v, 0);
   const probs = {};
-  if (total > 0) {
-    for (const [k, v] of counts.entries()) probs[k] = v / total;
-  }
+  if (total > 0) for (const [k, v] of counts.entries()) probs[k] = v / total;
   return probs;
 }
 
