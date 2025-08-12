@@ -130,3 +130,6 @@ function safeNum(v, def = null) {
   const n = Number(v);
   return Number.isFinite(n) ? n : def;
 }
+
+// 例: function realClass(data){...}
+export default realClass;
