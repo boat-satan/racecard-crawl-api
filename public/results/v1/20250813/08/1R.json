@@ -1,0 +1,138 @@
+{
+  "date": "20250813",
+  "pid": "08",
+  "race": "1R",
+  "source": {
+    "result": "https://www.boatrace.jp/owpc/pc/race/raceresult?rno=1&jcd=08&hd=20250813"
+  },
+  "generatedAt": "2025-08-13T19:50:13.059Z",
+  "order": [
+    {
+      "pos": 1,
+      "lane": 1,
+      "racerId": "5197",
+      "name": "中野 仁照",
+      "time": "1'50\"1"
+    },
+    {
+      "pos": 2,
+      "lane": 4,
+      "racerId": "3981",
+      "name": "今坂 晃広",
+      "time": "1'51\"7"
+    },
+    {
+      "pos": 3,
+      "lane": 6,
+      "racerId": "3730",
+      "name": "塩崎 優司",
+      "time": "1'54\"0"
+    },
+    {
+      "pos": 4,
+      "lane": 5,
+      "racerId": "4142",
+      "name": "平野 和明",
+      "time": "1'55\"2"
+    },
+    {
+      "pos": 5,
+      "lane": 3,
+      "racerId": "3895",
+      "name": "堀本 裕也",
+      "time": ""
+    },
+    {
+      "pos": 6,
+      "lane": 2,
+      "racerId": "3542",
+      "name": "清水 紀克",
+      "time": ""
+    }
+  ],
+  "start": [
+    {
+      "lane": 1,
+      "st": 0.18
+    },
+    {
+      "lane": 2,
+      "st": 0.17
+    },
+    {
+      "lane": 3,
+      "st": 0.38
+    },
+    {
+      "lane": 4,
+      "st": 0.18
+    },
+    {
+      "lane": 5,
+      "st": 0.2
+    },
+    {
+      "lane": 6,
+      "st": 0.18
+    }
+  ],
+  "decision": "逃げ",
+  "weather": {
+    "condition": "晴",
+    "airTemp": 29,
+    "windSpeed": 2,
+    "windDirCode": 13,
+    "waterTemp": 30,
+    "wave": 1
+  },
+  "refunds": [],
+  "payouts": {
+    "trifecta": {
+      "combo": "1-4-6",
+      "amount": 3700,
+      "popularity": 14
+    },
+    "trio": {
+      "combo": "1=4=6",
+      "amount": 1930,
+      "popularity": 8
+    },
+    "exacta": {
+      "combo": "1-4",
+      "amount": 420,
+      "popularity": 3
+    },
+    "quinella": {
+      "combo": "1=4",
+      "amount": 490,
+      "popularity": 3
+    },
+    "wide": [
+      {
+        "combo": "1=4",
+        "amount": 340,
+        "popularity": 4
+      },
+      {
+        "combo": "1=180",
+        "amount": 8,
+        "popularity": null
+      },
+      {
+        "combo": "4=150",
+        "amount": 14,
+        "popularity": null
+      }
+    ],
+    "win": {
+      "combo": "1",
+      "amount": 100
+    },
+    "place": [
+      {
+        "combo": "1",
+        "amount": 100
+      }
+    ]
+  }
+}
