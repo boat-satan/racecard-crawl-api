@@ -79,20 +79,37 @@ function popularityFromCell($cell) {
   const html = await res.text();
   const $ = load(html);
 
-  // --- 着順
-  const $finishTable = $('table:has(th:contains("着"))').first();
+  // --- 着順（tbody単位ではなく tr 単位で抽出。ヘッダで特定し、保険セレクタも用意）
   const order = [];
-  $finishTable.find('tbody').each((_, tb) => {
-    const tds = $(tb).find('td');
-    if (tds.length < 4) return;
-    const pos  = parseInt(clean($(tds[0]).text()), 10);
-    const lane = parseInt(clean($(tds[1]).text()), 10);
-    const $info = $(tds[2]);
-    const idMatch = clean($info.find('span').first().text()).match(/\d{4}/);
+  const pickFinishRows = ($table) =>
+    $table.find('tr')
+      .filter((_, tr) => $(tr).find('td').length >= 4);
+
+  // 1st: ヘッダの組み合わせで厳密に特定
+  let $finishTable = $('table:has(th:contains("レースタイム")):has(th:contains("ボートレーサー"))').first();
+  if ($finishTable.length === 0) {
+    // fallback: 「着」を含む最初のテーブル
+    $finishTable = $('table:has(th:contains("着"))').first();
+  }
+
+  pickFinishRows($finishTable).each((_, tr) => {
+    const $tds = $(tr).find('td');
+    const pos  = parseInt(clean($tds.eq(0).text()), 10);
+    const lane = parseInt(clean($tds.eq(1).text()), 10);
+    const $info = $tds.eq(2);
+
+    const idMatch = clean($info.text()).match(/\b\d{4}\b/);
     const racerId = idMatch ? idMatch[0] : null;
-    const name = clean($info.find('span').last().text()) || clean($info.text()).replace(/\d{4}/, '').trim();
-    const time = timeNormalize($(tds[3]).text());
-    if (Number.isFinite(pos) && Number.isFinite(lane)) order.push({ pos, lane, racerId, name, time });
+
+    const name =
+      clean($info.find('span').last().text()) ||
+      clean($info.text()).replace(/\b\d{4}\b/, '').trim();
+
+    const time = timeNormalize($tds.eq(3).text());
+
+    if (Number.isFinite(pos) && Number.isFinite(lane)) {
+      order.push({ pos, lane, racerId, name, time });
+    }
   });
 
   // --- スタート情報
