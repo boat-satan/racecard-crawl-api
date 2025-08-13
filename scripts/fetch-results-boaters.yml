@@ -1,0 +1,60 @@
+name: Fetch Boaters Results
+
+on:
+  workflow_dispatch:
+    inputs:
+      DATE:
+        description: "YYYYMMDD"
+        required: true
+        type: string
+      PIDS:
+        description: "01..24, comma, or 'all'"
+        required: true
+        default: "all"
+        type: string
+      RACES:
+        description: "1R | 1..12 | 1,3,5 | auto"
+        required: true
+        default: "auto"
+        type: string
+      AFTER_MIN:
+        description: "auto のトリガ(締切+分)"
+        required: false
+        default: "10"
+        type: string
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install deps
+        run: npm i cheerio
+
+      - name: Fetch results
+        env:
+          TARGET_DATE: ${{ inputs.DATE }}
+          TARGET_PIDS: ${{ inputs.PIDS }}
+          TARGET_RACES: ${{ inputs.RACES }}
+          RESULT_AUTO_AFTER_MIN: ${{ inputs.AFTER_MIN }}
+        run: |
+          echo "[info] DATE=$TARGET_DATE PIDS=$TARGET_PIDS RACES=$TARGET_RACES AFTER_MIN=$RESULT_AUTO_AFTER_MIN"
+          node scripts/fetch-results-boaters.js "$TARGET_DATE" "$TARGET_PIDS" "$TARGET_RACES"
+
+      - name: List outputs
+        run: |
+          find public/results/v1/${{ inputs.DATE }} -type f -name "*.json" -printf "%P\n" 2>/dev/null || true
+
+      - name: Commit & push (if changed)
+        if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && echo "no changes" || (git commit -m "results: ${{
+            inputs.DATE
+          }} pids=${{ inputs.PIDS }} races=${{ inputs.RACES }}" && git push)
