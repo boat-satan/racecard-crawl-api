@@ -6,6 +6,9 @@
  * 環境変数:
  *   SKIP_EXISTING=true: 既に出力があればスキップ
  */
+// --- ESM 環境でも require を使えるように（package.json に "type":"module" がある想定）
+import { createRequire } from 'module'; const require = createRequire(import.meta.url);
+
 const fs = require('fs');
 const path = require('path');
 const cheerio = require('cheerio');
