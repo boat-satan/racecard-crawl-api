@@ -1,8 +1,12 @@
-// 出力: public/results/v1/<date>/<pid>/<race>.json
+// 出力:
+//   結果  : public/results/v1/<date>/<pid>/<race>.json
+//   オッズ: public/odds/v1/<date>/<pid>/<race>.json  ← 3連単のみ
 // 使い方:
-//   node scripts/fetch-results-boaters.js <YYYYMMDD> <pid:01..24|01,05|all> <race:1R|1..12|1,3,5|auto>
-//   環境変数: TARGET_DATE / TARGET_PIDS / TARGET_RACES / RESULT_AUTO_AFTER_MIN
-// 依存: cheerio
+//   node scripts/fetch-results-boaters.js <YYYYMMDD> <pid:01..24|01,05|all> <race:1R|1..12|1,3,5|auto> [--skip-existing] [--with-odds]
+// 環境変数:
+//   TARGET_DATE / TARGET_PIDS / TARGET_RACES / RESULT_AUTO_AFTER_MIN
+//   SKIP_EXISTING=1   ... 既存JSONがあれば保存スキップ（results/odds 両方）
+//   WITH_ODDS=1       ... 結果と一緒に3連単オッズも保存
 
 import fs from "node:fs";
 import fsp from "node:fs/promises";
@@ -15,7 +19,7 @@ const __dirname  = path.dirname(__filename);
 
 const log = (...a)=>console.log("[result]", ...a);
 const usageAndExit = () => {
-  console.error("Usage: node scripts/fetch-results-boaters.js <YYYYMMDD> <pid:01..24|01,05|all> <race: 1R|1..12|1,3,5|auto>");
+  console.error("Usage: node scripts/fetch-results-boaters.js <YYYYMMDD> <pid:01..24|01,05|all> <race: 1R|1..12|1,3,5|auto> [--skip-existing] [--with-odds]");
   process.exit(1);
 };
 
@@ -28,6 +32,14 @@ const DATE = (process.env.TARGET_DATE || argvDate || "").replace(/-/g,"");
 let PIDS = (process.env.TARGET_PIDS || argvPid || "").split(",").map(s=>s.trim()).filter(Boolean);
 const RACES_EXPR = process.env.TARGET_RACES || argvRace || "";
 const AUTO_AFTER_MIN = Number(process.env.RESULT_AUTO_AFTER_MIN || 10);
+
+// 既存スキップ & オッズ取得フラグ
+const SKIP_EXISTING =
+  process.argv.includes("--skip-existing") ||
+  /^(1|true|yes)$/i.test(String(process.env.SKIP_EXISTING || ""));
+const WITH_ODDS =
+  process.argv.includes("--with-odds") ||
+  /^(1|true|yes)$/i.test(String(process.env.WITH_ODDS || ""));
 
 if (!DATE || !RACES_EXPR || (!PIDS.length && argvPid!=="all")) usageAndExit();
 if (PIDS.length===1 && PIDS[0]==="all") PIDS = Array.from({length:24},(_,i)=>String(i+1).padStart(2,"0"));
@@ -63,7 +75,6 @@ function toJST(dateYYYYMMDD, hhmm){
   return new Date(`${dateYYYYMMDD.slice(0,4)}-${dateYYYYMMDD.slice(4,6)}-${dateYYYYMMDD.slice(6,8)}T${hhmm}:00+09:00`);
 }
 
-// programs から締切時刻（あれば）
 async function loadRaceDeadlineHHMM(date, pid, raceNo){
   const rels = [
     path.join("public","programs","v2",date,pid,`${raceNo}R.json`),
@@ -98,7 +109,7 @@ async function pickRacesAuto(date, pid){
   const nowMin = Math.floor(Date.now()/60000), out=[];
   for (let r=1;r<=12;r++){
     const hhmm = await loadRaceDeadlineHHMM(date,pid,r); if (!hhmm) continue;
-    const triggerMin = Math.floor((toJST(date,hhmm).getTime()+AUTO_AFTER_MIN*60000)/60000); // 締切＋X分
+    const triggerMin = Math.floor((toJST(date,hhmm).getTime()+AUTO_AFTER_MIN*60000)/60000);
     if (nowMin >= triggerMin) out.push(r);
   }
   return out;
@@ -115,19 +126,23 @@ async function writeJSON(file, data){
   await fsp.writeFile(file, JSON.stringify(data,null,2), "utf8");
 }
 const norm = (s)=>String(s||"").replace(/\s+/g," ").trim();
+function ensureKeep(dir){ try { fs.writeFileSync(path.join(dir, ".keep"), ""); } catch {} }
 
-/* ====== URL (Boaters) ====== */
+/* ====== URL ====== */
 const boatersResultUrl = ({date,pid,raceNo}) => {
   const slug = pidToSlug[pid]; if (!slug) throw new Error(`unknown pid ${pid}`);
   return `https://boaters-boatrace.com/race/${slug}/${yyyy_mm_dd(date)}/${raceNo}R/race-result`;
 };
+const boatersOddsUrl = ({date,pid,raceNo}) => {
+  const slug = pidToSlug[pid]; if (!slug) throw new Error(`unknown pid ${pid}`);
+  return `https://boaters-boatrace.com/race/${slug}/${yyyy_mm_dd(date)}/${raceNo}R/odds`;
+};
 
-/* ====== Parser (Boaters 専用) ====== */
+/* ====== Parser: 結果 ====== */
 function parseBoaters(html){
   const $ = loadHTML(html);
 
   // --- 着順表 ---
-  // ヘッダに「着順 / 枠番 / ボートレーサー」などがある table を探す
   let entries = [];
   $("table").each((_, t)=>{
     const head = $(t).find("th").map((_,th)=>norm($(th).text())).get().join("|");
@@ -136,20 +151,14 @@ function parseBoaters(html){
     const out = [];
     $(t).find("tbody tr").each((__, tr)=>{
       const cells = $(tr).find("th,td").map((___, td)=>norm($(td).text())).get();
-      // 代表的: 着順,枠番,選手名(登録番号),タイム など
       if (cells.length<2) return;
       const finish = Number(cells[0]);
       const lane   = Number(cells[1]);
       if (!Number.isFinite(finish) || !Number.isFinite(lane)) return;
 
-      // 登録番号 4桁
       const numberM = cells.join(" ").match(/\b(\d{4})\b/);
       const number = numberM ? numberM[1] : null;
-
-      // 選手名（漢字/かな含む最長テキストを拾う）
       const name = cells.map(c=>c).find(c=>/[\u3040-\u30FF\u4E00-\u9FFF]/.test(c))||"";
-
-      // レースタイム 1'51"1
       const time = (cells.find(c=>/\d+'\d{2}"\d/.test(c))||null);
 
       out.push({ finish, lane, number, name: name.replace(/\s+/g,""), time });
@@ -159,7 +168,6 @@ function parseBoaters(html){
 
   // --- スタート情報（ST） ---
   let startInfo = [];
-  // Boaters は「スタート情報」テキストの近くに table があることが多い
   let stTable = null;
   $("h2,h3,section,div").each((_, el)=>{
     const t = norm($(el).text());
@@ -172,25 +180,12 @@ function parseBoaters(html){
   if (stTable){
     stTable.find("tbody tr").each((_, tr)=>{
       const cells = $(tr).find("th,td").map((__, td)=>norm($(td).text())).get();
-      // 例: 枠番, ST, （決まり手が同じテーブルにある場合も）
       if (cells.length>=2) {
         const lane = Number(cells[0]);
-        const st   = cells[1].replace(/^([0-9])$/, ".$1"); // ".11" 形式に正規化試み
+        const st   = cells[1].replace(/^([0-9])$/, ".$1");
         if (Number.isFinite(lane) && /^\.\d{2}$/.test(st)) startInfo.push({ lane, ST: st });
       }
     });
-  }
-  if (startInfo.length===0){
-    // フォールバック：本文テキストから lane .XX パターン
-    const body = norm($("body").text());
-    const m = body.match(/スタート情報([^]+?)勝式|スタート情報([^]+?)水面気象情報/);
-    const blob = m ? (m[1]||m[2]||"") : "";
-    const tokens = blob.split(/[\s\/,]+/);
-    for (let i=0;i<tokens.length;i++){
-      const lane = Number(tokens[i]);
-      const st = tokens[i+1];
-      if (Number.isFinite(lane) && /^\.\d{2}$/.test(st)) { startInfo.push({ lane, ST: st }); i++; }
-    }
   }
 
   // --- 決まり手 ---
@@ -201,7 +196,7 @@ function parseBoaters(html){
     if (m){ kimarite = m[1]; return false; }
   });
 
-  // --- 払戻（ページ内の「勝式」テーブル群） ---
+  // --- 払戻 ---
   const payout = [];
   $("table").each((_, t)=>{
     const head = $(t).find("th").map((_,th)=>norm($(th).text())).get().join("|");
@@ -209,13 +204,10 @@ function parseBoaters(html){
     $(t).find("tbody tr").each((__, tr)=>{
       const cells = $(tr).find("th,td").map((___,td)=>norm($(td).text())).get();
       if (cells.length<2) return;
-
-      // 形式: 勝式 / 組番 / 払戻金 / 人気 など
       const kind  = cells.find(c=>/(3連単|3連複|2連単|2連複|拡連複|単勝|複勝)/.test(c)) || null;
       const combo = (cells.find(c=>/^[1-6](?:[-=][1-6]){0,2}$/.test(c)) || cells.find(c=>/[1-6].*[-=].*[1-6]/) || null);
       const yenM  = cells.join(" ").match(/([\d,]+)\s*円?/);
       const popM  = cells.join(" ").match(/人気\s*:?[\s]*([0-9]+)/) || cells.join(" ").match(/(\d+)\s*$/);
-
       if (kind && yenM) {
         payout.push({
           kind: kind.replace(/\s/g,""),
@@ -227,7 +219,7 @@ function parseBoaters(html){
     });
   });
 
-  // --- 水面気象（ざっくりテキスト抽出） ---
+  // --- 水面気象 ---
   const all = norm($("body").text());
   const weather = {};
   const tempM = all.match(/気温\s*([\d.]+)℃/);        if (tempM) weather.temperature = Number(tempM[1]);
@@ -244,15 +236,93 @@ function parseBoaters(html){
   return { entries, startInfo, kimarite, weather, payout };
 }
 
-/* ====== 実行 ====== */
-async function runOne({date,pid,raceNo}){
-  const outPath = path.join(__dirname,"..","public","results","v1",date,pid,`${raceNo}R.json`);
+/* ====== Parser: 3連単オッズ ====== */
+function parseBoatersOdds(html){
+  const $ = loadHTML(html);
+  // 3連単のテーブルまたはセクションを探す
+  // いろんなレイアウトに耐えるため「3連単」「三連単」などの見出し近辺のtableを優先
+  let odds = [];
+
+  // 1) 見出し→近接table
+  let table = null;
+  $("h1,h2,h3,section,div").each((_, el)=>{
+    const t = norm($(el).text());
+    if (/(3連単|三連単)/.test(t)) {
+      const near = $(el).nextAll("table").first();
+      if (near && near.length) { table = near; return false; }
+    }
+  });
+
+  // 2) フォールバック：全table走査しヘッダに「3連単/三連単/組番/オッズ」等があるもの
+  if (!table){
+    $("table").each((_, t)=>{
+      const head = $(t).find("th").map((_,th)=>norm($(th).text())).get().join("|");
+      if (/(3連単|三連単)/.test(head) || /(組番|オッズ)/.test(head)) { table = $(t); return false; }
+    });
+  }
+
+  const pushOdds = (combo, val) => {
+    const c = String(combo).replace(/\s/g,"");
+    const v = Number(String(val).replace(/,/g,""));
+    if (/^[1-6]-[1-6]-[1-6]$/.test(c) && Number.isFinite(v)) odds.push({ combo:c, odds:v });
+  };
+
+  if (table){
+    table.find("tbody tr").each((_, tr)=>{
+      const cells = $(tr).find("th,td").map((__,td)=>norm($(td).text())).get();
+      // よくある: 「1-2-3」「12.3」 などが同じ行
+      const combo = cells.find(c=>/^[1-6]-[1-6]-[1-6]$/.test(c));
+      // オッズ値（小数/整数）
+      const val = cells.find(c=>/^\d+(?:\.\d+)?$/.test(c));
+      if (combo && val) pushOdds(combo, val);
+      else {
+        // 2列ペア型 (combo, odds, combo, odds, ...)
+        for (let i=0;i<cells.length-1;i+=2){
+          if (/^[1-6]-[1-6]-[1-6]$/.test(cells[i]) && /^\d+(?:\.\d+)?$/.test(cells[i+1])) {
+            pushOdds(cells[i], cells[i+1]);
+          }
+        }
+      }
+    });
+  }
+
+  // 3) さらにフォールバック：本文テキストから「1-2-3 12.3」の塊を拾う
+  if (odds.length===0){
+    const body = norm($("body").text());
+    const re = /([1-6]-[1-6]-[1-6])\s+(\d+(?:\.\d+)?)/g;
+    let m; while ((m = re.exec(body))) pushOdds(m[1], m[2]);
+  }
+
+  // 重複除去
+  const map = new Map();
+  for (const o of odds){ if (!map.has(o.combo) || map.get(o.combo).odds !== o.odds) map.set(o.combo, o); }
+  odds = [...map.values()];
+
+  // ソート（安い順=人気順目安）
+  odds.sort((a,b)=>a.odds-b.odds);
+  return odds;
+}
+
+/* ====== 保存: 結果 ====== */
+async function runOneResult({date,pid,raceNo}){
+  const rootDir = path.join(__dirname,"..","public","results","v1");
+  const dayDir  = path.join(rootDir, date);
+  const pidDir  = path.join(dayDir, pid);
+  const outPath = path.join(pidDir, `${raceNo}R.json`);
+
+  if (SKIP_EXISTING && fs.existsSync(outPath)) {
+    log(`skip existing (result): ${path.relative(process.cwd(), outPath)}`);
+    return false;
+  }
+
+  fs.mkdirSync(pidDir, { recursive: true });
+  ensureKeep(rootDir); ensureKeep(dayDir); ensureKeep(pidDir);
+
   const url = boatersResultUrl({date,pid,raceNo});
   log("GET", url);
   const html = await fetchText(url);
 
   const parsed = parseBoaters(html);
-  // 着順が拾えない場合は保存しない
   if (!parsed.entries || parsed.entries.length===0){
     log(`no parsed results -> skip save: ${date}/${pid}/${raceNo}R`);
     return false;
@@ -271,10 +341,47 @@ async function runOne({date,pid,raceNo}){
     payout: parsed.payout || []
   };
   await writeJSON(outPath, payload);
-  log("saved:", path.relative(process.cwd(), outPath));
+  log("saved (result):", path.relative(process.cwd(), outPath));
   return true;
 }
 
+/* ====== 保存: 3連単オッズ ====== */
+async function runOneOdds({date,pid,raceNo}){
+  const rootDir = path.join(__dirname,"..","public","odds","v1");
+  const dayDir  = path.join(rootDir, date);
+  const pidDir  = path.join(dayDir, pid);
+  const outPath = path.join(pidDir, `${raceNo}R.json`);
+
+  if (SKIP_EXISTING && fs.existsSync(outPath)) {
+    log(`skip existing (odds): ${path.relative(process.cwd(), outPath)}`);
+    return false;
+  }
+
+  fs.mkdirSync(pidDir, { recursive: true });
+  ensureKeep(rootDir); ensureKeep(dayDir); ensureKeep(pidDir);
+
+  const url = boatersOddsUrl({date,pid,raceNo});
+  log("GET (odds)", url);
+  const html = await fetchText(url);
+  const trifecta = parseBoatersOdds(html);
+
+  if (!trifecta || trifecta.length===0){
+    log(`no trifecta odds -> skip save: ${date}/${pid}/${raceNo}R`);
+    return false;
+  }
+
+  const payload = {
+    date, pid, race: `${raceNo}R`,
+    source: { odds: url },
+    generatedAt: new Date().toISOString(),
+    trifecta // [{combo:"1-2-3", odds:12.3}, ...]  安い順
+  };
+  await writeJSON(outPath, payload);
+  log("saved (odds):", path.relative(process.cwd(), outPath));
+  return true;
+}
+
+/* ====== メイン ====== */
 async function main(){
   for (const pid of PIDS){
     let raceList;
@@ -286,8 +393,15 @@ async function main(){
       raceList = RACES;
     }
     for (const r of raceList){
-      try { await runOne({date:DATE, pid, raceNo:r}); }
-      catch(e){ console.error(`Failed: date=${DATE} pid=${pid} rno=${r} -> ${e.message}`); }
+      try {
+        await runOneResult({date:DATE, pid, raceNo:r});
+        if (WITH_ODDS) {
+          // オッズは結果の有無に関係なく取る（ページ公開タイミングが異なる可能性あり）
+          await runOneOdds({date:DATE, pid, raceNo:r});
+        }
+      } catch(e){
+        console.error(`Failed: date=${DATE} pid=${pid} rno=${r} -> ${e.message}`);
+      }
     }
   }
 }
