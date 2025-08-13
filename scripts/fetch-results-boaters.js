@@ -1,6 +1,6 @@
 // 出力:
 //   結果  : public/results/v1/<date>/<pid>/<race>.json
-//   オッズ: public/odds/v1/<date>/<pid>/<race>.json  ← 3連単のみ
+//   オッズ: public/odds/v1/<date>/<pid>/<race>.json  ← 3連単のみ（空でも必ず作成）
 // 使い方:
 //   node scripts/fetch-results-boaters.js <YYYYMMDD> <pid:01..24|01,05|all> <race:1R|1..12|1,3,5|auto> [--skip-existing] [--with-odds]
 // 環境変数:
@@ -191,7 +191,7 @@ function parseBoaters(html){
   // --- 決まり手 ---
   let kimarite = null;
   $("*").each((_, el)=>{
-    const t = norm($(el).text());
+    const t = norm($(el).text()));
     const m = t.match(/決まり手\s*[:：]?\s*([^\s]+)/);
     if (m){ kimarite = m[1]; return false; }
   });
@@ -239,11 +239,9 @@ function parseBoaters(html){
 /* ====== Parser: 3連単オッズ ====== */
 function parseBoatersOdds(html){
   const $ = loadHTML(html);
-  // 3連単のテーブルまたはセクションを探す
-  // いろんなレイアウトに耐えるため「3連単」「三連単」などの見出し近辺のtableを優先
   let odds = [];
 
-  // 1) 見出し→近接table
+  // 見出し→近接table
   let table = null;
   $("h1,h2,h3,section,div").each((_, el)=>{
     const t = norm($(el).text());
@@ -253,7 +251,7 @@ function parseBoatersOdds(html){
     }
   });
 
-  // 2) フォールバック：全table走査しヘッダに「3連単/三連単/組番/オッズ」等があるもの
+  // フォールバック：ヘッダ検査
   if (!table){
     $("table").each((_, t)=>{
       const head = $(t).find("th").map((_,th)=>norm($(th).text())).get().join("|");
@@ -270,13 +268,10 @@ function parseBoatersOdds(html){
   if (table){
     table.find("tbody tr").each((_, tr)=>{
       const cells = $(tr).find("th,td").map((__,td)=>norm($(td).text())).get();
-      // よくある: 「1-2-3」「12.3」 などが同じ行
       const combo = cells.find(c=>/^[1-6]-[1-6]-[1-6]$/.test(c));
-      // オッズ値（小数/整数）
-      const val = cells.find(c=>/^\d+(?:\.\d+)?$/.test(c));
+      const val   = cells.find(c=>/^\d+(?:\.\d+)?$/.test(c));
       if (combo && val) pushOdds(combo, val);
       else {
-        // 2列ペア型 (combo, odds, combo, odds, ...)
         for (let i=0;i<cells.length-1;i+=2){
           if (/^[1-6]-[1-6]-[1-6]$/.test(cells[i]) && /^\d+(?:\.\d+)?$/.test(cells[i+1])) {
             pushOdds(cells[i], cells[i+1]);
@@ -286,20 +281,18 @@ function parseBoatersOdds(html){
     });
   }
 
-  // 3) さらにフォールバック：本文テキストから「1-2-3 12.3」の塊を拾う
+  // さらにフォールバック：本文
   if (odds.length===0){
     const body = norm($("body").text());
     const re = /([1-6]-[1-6]-[1-6])\s+(\d+(?:\.\d+)?)/g;
     let m; while ((m = re.exec(body))) pushOdds(m[1], m[2]);
   }
 
-  // 重複除去
+  // 重複除去 & ソート
   const map = new Map();
   for (const o of odds){ if (!map.has(o.combo) || map.get(o.combo).odds !== o.odds) map.set(o.combo, o); }
-  odds = [...map.values()];
+  odds = [...map.values()].sort((a,b)=>a.odds-b.odds);
 
-  // ソート（安い順=人気順目安）
-  odds.sort((a,b)=>a.odds-b.odds);
   return odds;
 }
 
@@ -345,7 +338,7 @@ async function runOneResult({date,pid,raceNo}){
   return true;
 }
 
-/* ====== 保存: 3連単オッズ ====== */
+/* ====== 保存: 3連単オッズ（空でも必ず作成） ====== */
 async function runOneOdds({date,pid,raceNo}){
   const rootDir = path.join(__dirname,"..","public","odds","v1");
   const dayDir  = path.join(rootDir, date);
@@ -360,24 +353,25 @@ async function runOneOdds({date,pid,raceNo}){
   fs.mkdirSync(pidDir, { recursive: true });
   ensureKeep(rootDir); ensureKeep(dayDir); ensureKeep(pidDir);
 
-  const url = boatersOddsUrl({date,pid,raceNo});
-  log("GET (odds)", url);
-  const html = await fetchText(url);
-  const trifecta = parseBoatersOdds(html);
-
-  if (!trifecta || trifecta.length===0){
-    log(`no trifecta odds -> skip save: ${date}/${pid}/${raceNo}R`);
-    return false;
+  let trifecta = [];
+  try {
+    const url = boatersOddsUrl({date,pid,raceNo});
+    log("GET (odds)", url);
+    const html = await fetchText(url);
+    trifecta = parseBoatersOdds(html) || [];
+  } catch (e) {
+    // 取得失敗でも空で作る
+    log(`odds fetch failed -> save empty: ${date}/${pid}/${raceNo}R (${e.message})`);
+    trifecta = [];
   }
 
   const payload = {
     date, pid, race: `${raceNo}R`,
-    source: { odds: url },
     generatedAt: new Date().toISOString(),
-    trifecta // [{combo:"1-2-3", odds:12.3}, ...]  安い順
+    trifecta // 常に存在（空配列の可能性あり）
   };
   await writeJSON(outPath, payload);
-  log("saved (odds):", path.relative(process.cwd(), outPath));
+  log(`saved (odds): ${path.relative(process.cwd(), outPath)} (count=${trifecta.length})`);
   return true;
 }
 
@@ -396,7 +390,6 @@ async function main(){
       try {
         await runOneResult({date:DATE, pid, raceNo:r});
         if (WITH_ODDS) {
-          // オッズは結果の有無に関係なく取る（ページ公開タイミングが異なる可能性あり）
           await runOneOdds({date:DATE, pid, raceNo:r});
         }
       } catch(e){
