@@ -42,7 +42,7 @@ function timeNormalize(t) {
   const s = clean(t)
     .replace(/['’]\s*(\d{2})\s*(\d)/, (_,$1,$2)=>`'${$1}"${$2}`)
     .replace(/(\d)undefined(\d)/g, '$1"$2');
-  return s.includes('"') ? s : s.replace(/(\d)$/, '"$1`);
+    return s.includes('"') ? s : s.replace(/(\d)$/, '"$1');
 }
 function numberArrayFromCell($cell) {
   const raw = clean($cell.text());
