@@ -2,6 +2,16 @@
 // 使い方:
 //   node scripts/fetch-results-direct.js <YYYYMMDD> <pid:01..24|01,05|all> <race:1R|1..12|1,3,5|auto>
 //   環境変数: TARGET_DATE / TARGET_PIDS / TARGET_RACES / RESULT_AUTO_AFTER_MIN
+//
+// 変更点（完全差し替え）:
+// - 公式 owpc ではなく Boaters (https://boaters-boatrace.com) から取得
+// - URL 例: https://boaters-boatrace.com/race/kiryu/2025-08-12/1R/race-result
+// - 払戻金も同一ページから抽出（Boatersは結果ページ内に払戻表が併記される想定）
+//
+// 備考:
+// - 場コード(pid)→スラッグの対応は下の PID_TO_SLUG を必要に応じて調整してください
+// - HTML構造差異に強い「見出しテキスト駆動＋フォールバック」パーサで実装
+
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
@@ -28,12 +38,25 @@ const RACES_EXPR = process.env.TARGET_RACES || argvRace || "";
 const AUTO_AFTER_MIN = Number(process.env.RESULT_AUTO_AFTER_MIN || 10);
 
 if (!DATE || !RACES_EXPR || (!PIDS.length && argvPid!=="all")) usageAndExit();
-if (PIDS.length===1 && PIDS[0]==="all") PIDS = Array.from({length:24},(_,i)=>String(i+1).padStart(2,"0"));
 
+// ---------- pid -> venue slug（要確認・調整可） ----------
+const PID_TO_SLUG = {
+  "01":"kiryu",     "02":"toda",      "03":"edogawa",  "04":"heiwajima",
+  "05":"tamagawa",  "06":"hamanako",  "07":"gamagori", "08":"tokoname",
+  "09":"tsu",       "10":"mikuni",    "11":"biwako",   "12":"suminoe",
+  "13":"amagasaki", "14":"ashiya",    "15":"naruto",   "16":"marugame",
+  "17":"kojima",    "18":"miyajima",  "19":"tokuyama", "20":"shimonoseki",
+  "21":"wakamatsu", "22":"kokura",    "23":"karatsu",  "24":"omiya" // ★必要なら修正
+};
+
+if (PIDS.length===1 && PIDS[0]==="all") PIDS = Object.keys(PID_TO_SLUG);
+
+// ---------- RACES 解析 ----------
 const normRaceToken = (tok)=> parseInt(String(tok).replace(/[^0-9]/g,""),10);
 function expandRaces(expr){
   if (!expr) return [];
   if (String(expr).toLowerCase()==="auto") return ["auto"];
+  if (String(expr).toLowerCase()==="all")  return Array.from({length:12},(_,i)=>i+1);
   const parts = String(expr).split(",").map(s=>s.trim()).filter(Boolean);
   const out = new Set();
   for (const p of parts){
@@ -50,7 +73,7 @@ function toJST(dateYYYYMMDD, hhmm){
   return new Date(`${dateYYYYMMDD.slice(0,4)}-${dateYYYYMMDD.slice(4,6)}-${dateYYYYMMDD.slice(6,8)}T${hhmm}:00+09:00`);
 }
 
-// programs から締切時刻をゆるく拾う（あれば）
+// programs から締切時刻（近似）を拾う（auto用）
 async function loadRaceDeadlineHHMM(date, pid, raceNo){
   const rels = [
     path.join("public","programs","v2",date,pid,`${raceNo}R.json`),
@@ -85,7 +108,7 @@ async function pickRacesAuto(date, pid){
   const nowMin = Math.floor(Date.now()/60000), out=[];
   for (let r=1;r<=12;r++){
     const hhmm = await loadRaceDeadlineHHMM(date,pid,r); if (!hhmm) continue;
-    const triggerMin = Math.floor((toJST(date,hhmm).getTime()+AUTO_AFTER_MIN*60000)/60000); // 「締切＋X分」後をトリガ
+    const triggerMin = Math.floor((toJST(date,hhmm).getTime()+AUTO_AFTER_MIN*60000)/60000); // 締切＋X分後
     if (nowMin >= triggerMin) out.push(r);
   }
   return out;
@@ -93,154 +116,136 @@ async function pickRacesAuto(date, pid){
 
 // ---------- Fetchers ----------
 async function fetchText(url){
-  const res = await fetch(url, { headers: { "user-agent":"Mozilla/5.0", "accept-language":"ja,en;q=0.8" }});
+  const res = await fetch(url, {
+    headers: {
+      "user-agent":"Mozilla/5.0",
+      "accept-language":"ja,en;q=0.8",
+      "cache-control":"no-cache"
+    }
+  });
   if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
   return await res.text();
 }
-const resultUrl = ({date,pid,raceNo}) => `https://www.boatrace.jp/owpc/pc/race/result?hd=${date}&jcd=${pid}&rno=${raceNo}`;
-const payUrl    = ({date,pid,raceNo}) => `https://www.boatrace.jp/owpc/pc/race/pay?hd=${date}&jcd=${pid}&rno=${raceNo}`;
+function toBoatersDate(dateYYYYMMDD){
+  return `${dateYYYYMMDD.slice(0,4)}-${dateYYYYMMDD.slice(4,6)}-${dateYYYYMMDD.slice(6,8)}`;
+}
+function buildBoatersUrl({date,pid,raceNo}){
+  const slug = PID_TO_SLUG[String(pid).padStart(2,"0")];
+  if (!slug) throw new Error(`unknown pid slug: ${pid}`);
+  const d = toBoatersDate(date);
+  const r = `${raceNo}R`;
+  return `https://boaters-boatrace.com/race/${slug}/${d}/${r}/race-result`;
+}
 
-// ---------- Parsers（クラス名に依存しない、見出しテキスト駆動） ----------
-
-// ユーティリティ: 行テキスト→連続空白を1つへ
+// ---------- Parsers（見出しテキスト駆動＋フォールバック） ----------
 const norm = (s)=>String(s||"").replace(/\s+/g," ").trim();
 
-// 1) 結果ページ（着順表・スタート情報・気象・決まり手）
-function parseResult(html){
+function parseBoatersResult(html){
   const $ = loadHTML(html);
-  const pageText = $("body").text();
+  const bodyText = norm($("body").text());
 
-  // 着順テーブル: 見出しに「着」「枠」「ボートレーサー」が並ぶ table を探す
+  // 着順テーブル（「着順」や「結果」ブロック）
   let entries = [];
-  $("table,div,section").each((_, box)=>{
-    const txt = norm($(box).text());
-    if (!/着/.test(txt) || !/枠/.test(txt) || !/ボートレーサー/.test(txt)) return;
-    // 行候補
-    const rows = $(box).find("tr").length ? $(box).find("tr") : $(box).children("div");
+  $("section,div,table").each((_, box)=>{
+    const t = norm($(box).text());
+    if (!/(着順|結果)/.test(t)) return;
+    // trベースで抽出
+    const rows = $(box).find("tr");
     const out = [];
     rows.each((i, tr)=>{
-      const cells = $(tr).find("th,td,div").toArray().map(el=>norm($(el).text())).filter(Boolean);
-      // だいたい: [着, 枠, 選手名(と登録番号), タイム]
-      if (cells.length>=3 && /^[1-6]$/.test(cells[0]) && /^[1-6]$/.test(cells[1])) {
-        const finish = Number(cells[0]);
-        const lane   = Number(cells[1]);
-        // 登録番号4桁が含まれることが多い
-        const mNo = cells.find(t=>/\d{4}/.test(t))?.match(/(\d{4})/);
-        const number = mNo ? mNo[1] : null;
-        // 名前は全角空白を潰して抽出
-        const nameCell = cells.slice(2).find(t=>/[\u3040-\u30FF\u4E00-\u9FFF]/.test(t)) || "";
-        // レースタイムは 1'51"1 の形
-        const timeCell = cells.find(t=>/\d+'\d{2}"\d/.test(t)) || null;
-
-        out.push({ finish, lane, number, name: nameCell.replace(/\s+/g,""), time: timeCell });
+      const cells = $(tr).find("th,td,div,span").toArray().map(el=>norm($(el).text())).filter(Boolean);
+      // 想定: [着順, 枠(艇番), 選手名(登録番号含むことあり), タイム ...]
+      if (cells.length>=3) {
+        const fin = Number(cells[0]);
+        const lane = Number(cells[1]);
+        if (Number.isFinite(fin) && fin>=1 && fin<=6 && Number.isFinite(lane) && lane>=1 && lane<=6){
+          const mNo = cells.join(" ").match(/\b(\d{4})\b/);
+          const number = mNo ? mNo[1] : null;
+          const nameCell = cells.slice(2).find(s=>/[\u3040-\u30FF\u4E00-\u9FFF]/.test(s)) || "";
+          const timeCell = cells.find(s=>/\d+'\d{2}"\d/.test(s)) || null;
+          out.push({ finish: fin, lane, number, name: nameCell.replace(/\s+/g,""), time: timeCell });
+        }
       }
     });
     if (out.length) entries = out;
   });
 
-  // スタート情報（行に「.11」「.03 まくり」等）
+  // スタート情報（「スタート」見出し）
   const startInfo = [];
-  // まず、見出し「スタート情報」を含む塊を探す
   let startBox = null;
   $("section,div,table").each((_, el)=>{
     const t = norm($(el).text());
-    if (/スタート情報/.test(t)) { startBox = $(el); return false; }
+    if (/スタート/.test(t)) { startBox = $(el); return false; }
   });
-  if (startBox) {
-    const lines = norm(startBox.text()).split(/\s+/);
-    // 例: "1 .11 2 .15 3 .17 4 .03 まくり 6 .04 5 .05"
-    for (let i=0;i<lines.length;i++){
-      const lane = Number(lines[i]);
-      const st = lines[i+1];
-      if (Number.isFinite(lane) && /^\.\d{2}$/.test(st)) {
-        // 次のトークンが決まり手っぽい場合（ひとまず無視。決まり手は別で拾う）
-        startInfo.push({ lane, ST: st });
-        i++;
-      }
+  if (startBox){
+    const tokens = norm(startBox.text()).split(/\s+/);
+    for (let i=0;i<tokens.length;i++){
+      const lane = Number(tokens[i]);
+      const st = tokens[i+1];
+      if (Number.isFinite(lane) && /^\.\d{2}$/.test(st)){ startInfo.push({ lane, ST: st }); i++; }
     }
   } else {
-    // フォールバック: body テキストから抽出
-    const m = norm(pageText).match(/スタート情報([^\n]+)/);
+    // フォールバック
+    const m = bodyText.match(/スタート[^\d]*(.*)$/);
     if (m){
-      const tokens = m[1].trim().split(/\s+/);
+      const tokens = m[1].split(/\s+/);
       for (let i=0;i<tokens.length;i++){
         const lane = Number(tokens[i]);
         const st = tokens[i+1];
-        if (Number.isFinite(lane) && /^\.\d{2}$/.test(st)) { startInfo.push({ lane, ST: st }); i++; }
+        if (Number.isFinite(lane) && /^\.\d{2}$/.test(st)){ startInfo.push({ lane, ST: st }); i++; }
       }
     }
   }
 
-  // 決まり手
+  // 決まり手（「決まり手」）
   let kimarite = null;
   $("*").each((_, el)=>{
     const t = norm($(el).text());
-    if (/決まり手/.test(t)) {
-      const mm = t.match(/決まり手\s*([^\s]+)/);
-      if (mm) { kimarite = mm[1]; return false; }
-    }
+    const m = t.match(/決まり手[:：]?\s*([^\s]+)/);
+    if (m){ kimarite = m[1]; return false; }
   });
-  if (!kimarite) {
-    const m = norm(pageText).match(/決まり手\s*([^\s]+)/);
+  if (!kimarite){
+    const m = bodyText.match(/決まり手[:：]?\s*([^\s]+)/);
     if (m) kimarite = m[1];
   }
 
-  // 水面気象情報
-  const weather = {};
-  const all = norm(pageText);
-  const tempM = all.match(/気温\s*([\d.]+)℃/);        if (tempM) weather.temperature = Number(tempM[1]);
-  const windM = all.match(/風速\s*([\d.]+)m/);         if (windM) weather.windSpeed = Number(windM[1]);
-  const waterM = all.match(/水温\s*([\d.]+)℃/);        if (waterM) weather.waterTemperature = Number(waterM[1]);
-  const waveM = all.match(/波高\s*([\d.]+)cm|波高\s*([\d.]+)m/);
-  if (waveM) {
-    const cm = waveM[1], m = waveM[2];
-    weather.waveHeight = cm ? Number(cm)/100 : Number(m);
-  }
-  const weatherWord = (all.match(/(晴|曇|雨|雪)/) || [])[1] || null;
-  if (weatherWord) weather.weather = weatherWord;
-
-  return { entries, startInfo, kimarite, weather };
-}
-
-// 2) 払戻ページ（式別ごとに組番・金額・人気）
-function parsePay(html){
-  const $ = loadHTML(html);
-  const pays = [];
-  // 各テーブル/ブロックを走査して「勝式」「組番」「払戻金」「人気」らしき行を抽出
-  $("table,div,section").each((_, box)=>{
-    const txt = norm($(box).text());
-    if (!/勝式/.test(txt) && !/3連単|3連複|2連単|2連複|拡連複|単勝|複勝/.test(txt)) return;
-
-    // 行を拾う
+  // 払戻（ページ内に「払戻」や「払戻金」セクションがあるはず）
+  const payouts = [];
+  $("section,div,table").each((_, box)=>{
+    const t = norm($(box).text());
+    if (!/(払戻|払戻金)/.test(t)) return;
     $(box).find("tr").each((_, tr)=>{
-      const cells = $(tr).find("th,td,div").toArray().map(el=>norm($(el).text()));
+      const cells = $(tr).find("th,td,div,span").toArray().map(el=>norm($(el).text())).filter(Boolean);
+      if (cells.length<2) return;
       const line = cells.join(" ");
-      // 例: "3連単 4-6-2 ¥1,960 8"
       const kindM = line.match(/(3連単|3連複|2連単|2連複|拡連複|単勝|複勝)/);
-      const yenM  = line.match(/¥?([\d,]+)\b/);
-      const popM  = line.match(/\b(\d+)\s*$/); // 行末の数字を人気とみなす（安全性のため後段でフィルタ）
-      if (kindM && yenM) {
-        // 組番抽出（=や-や空白を許容）
-        let comb = null;
-        const after = line.slice(line.indexOf(kindM[1]) + kindM[1].length).trim();
-        const combM = after.match(/([1-6][=-][1-6](?:[=-][1-6])?|[1-6])+/);
-        if (combM) comb = combM[0].replace(/=/g,"=").replace(/-/g,"-");
-        const amount = Number(yenM[1].replace(/,/g,""));
-        const popularity = popM ? Number(popM[1]) : null;
-        pays.push({ kind: kindM[1], combo: comb, amount, popularity });
+      if (!kindM) return;
+      const kind = kindM[1];
+      const yenM  = line.match(/¥\s*([\d,]+)/) || line.match(/([\d,]+)\s*円/);
+      const popM  = line.match(/(\d+)\s*人気/);
+      // 組番（= と - と 空白を許容）
+      const after = line.slice(line.indexOf(kind)+kind.length).trim();
+      const combM = after.match(/([1-6](?:[-＝= ][1-6]){0,2})/);
+      const combo = combM ? combM[1].replace(/\s+/g,"").replace(/＝/g,"=") : null;
+      const amount = yenM ? Number(yenM[1].replace(/,/g,"")) : null;
+      const popularity = popM ? Number(popM[1]) : null;
+      if (kind && combo && amount!=null){
+        payouts.push({ kind, combo, amount, popularity });
       }
     });
   });
 
-  // フォールバック（ページ全体テキストから）
-  if (pays.length===0){
-    const t = norm($("body").text());
-    const re = /(3連単|3連複|2連単|2連複|拡連複|単勝|複勝)\s+([1-6= -]+)\s+¥?([\d,]+)\s+(\d+)/g;
-    let m; while ((m = re.exec(t))) {
-      pays.push({ kind: m[1], combo: norm(m[2]).replace(/\s+/g,""), amount: Number(m[3].replace(/,/g,"")), popularity: Number(m[4]) });
-    }
-  }
-  return pays;
+  // 水面気象（ページ下部にあれば拾う）
+  const weather = {};
+  const tempM = bodyText.match(/気温\s*([\d.]+)℃/);        if (tempM) weather.temperature = Number(tempM[1]);
+  const windM = bodyText.match(/風速\s*([\d.]+)m/);         if (windM) weather.windSpeed = Number(windM[1]);
+  const waterM = bodyText.match(/水温\s*([\d.]+)℃/);        if (waterM) weather.waterTemperature = Number(waterM[1]);
+  const waveM = bodyText.match(/波高\s*([\d.]+)cm/) || bodyText.match(/波高\s*([\d.]+)m/);
+  if (waveM) weather.waveHeight = /cm/.test(waveM[0]) ? Number(waveM[1])/100 : Number(waveM[1]);
+  const weatherWord = (bodyText.match(/(晴|曇|雨|雪)/) || [])[1] || null;
+  if (weatherWord) weather.weather = weatherWord;
+
+  return { entries, startInfo, kimarite, weather, payouts };
 }
 
 // ---------- I/O ----------
@@ -250,38 +255,41 @@ async function writeJSON(file, data){
   await fsp.writeFile(file, JSON.stringify(data,null,2), "utf8");
 }
 
-// ---------- Main ----------
+// ---------- Main unit ----------
 async function runOne({date,pid,raceNo}){
   const outPath = path.join(__dirname,"..","public","results","v1",date,pid,`${raceNo}R.json`);
+  const url = buildBoatersUrl({date,pid,raceNo});
 
-  const urlR = resultUrl({date,pid,raceNo});
-  const urlP = payUrl({date,pid,raceNo});
-  log("GET", urlR);
-  const htmlR = await fetchText(urlR);
-  log("GET", urlP);
-  const htmlP = await fetchText(urlP);
+  log("GET", url);
+  const html = await fetchText(url);
 
-  const parsedR = parseResult(htmlR);
-  const parsedP = parsePay(htmlP);
+  const parsed = parseBoatersResult(html);
 
-  // 「結果」がゼロ件なら保存しない（開始前など）
-  if (!parsedR.entries || parsedR.entries.length===0){
+  // 結果ゼロなら保存しない（未確定等）
+  if (!parsed.entries || parsed.entries.length===0){
     log(`no parsed results -> skip save: ${date}/${pid}/${raceNo}R`);
     return false;
   }
 
   const payload = {
     date, pid, race: `${raceNo}R`,
-    source: { result: urlR, pay: urlP },
+    source: { result: url },
     generatedAt: new Date().toISOString(),
-    result: parsedR,
-    payout: parsedP
+    result: {
+      entries: parsed.entries,
+      startInfo: parsed.startInfo,
+      kimarite: parsed.kimarite,
+      weather: parsed.weather
+    },
+    payout: parsed.payouts || []
   };
+
   await writeJSON(outPath, payload);
   log("saved:", path.relative(process.cwd(), outPath));
   return true;
 }
 
+// ---------- Main ----------
 async function main(){
   for (const pid of PIDS){
     let raceList;
