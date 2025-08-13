@@ -112,7 +112,7 @@ jobs:
               sleep 0.6
 
               echo "[run][result] ${DATE} pid=${pid} race=${r}"
-              if SKIP_EXISTING=$SKIP_EXISTING node scripts/fetch-result-official.js "$DATE" "$pid" "$r"; then
+              if SKIP_EXISTING=$SKIP_EXISTING node scripts/fetch-result-official.cjs "$DATE" "$pid" "$r"; then
                 ok_res=$((ok_res+1))
               else
                 ng_res=$((ng_res+1))
