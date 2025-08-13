@@ -12,8 +12,11 @@ import { load } from 'cheerio';
 
 // -------- utils
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-
 const z2 = n => String(n).padStart(2, '0');
+
+const toHalfDigits = (s='') =>
+  String(s).replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0));
+
 function normalizePid(pid) {
   const m = String(pid).match(/\d+/);
   return m ? z2(parseInt(m[0], 10)) : String(pid);
@@ -39,14 +42,14 @@ function timeNormalize(t) {
   const s = clean(t)
     .replace(/['’]\s*(\d{2})\s*(\d)/, (_,$1,$2)=>`'${$1}"${$2}`)
     .replace(/(\d)undefined(\d)/g, '$1"$2');
-  return s.includes('"') ? s : s.replace(/(\d)$/, '"$1');
+  return s.includes('"') ? s : s.replace(/(\d)$/, '"$1`);
 }
 function numberArrayFromCell($cell) {
   const raw = clean($cell.text());
-  return raw.split(/[^0-9]+/).filter(Boolean).map(n => String(parseInt(n,10)));
+  return toHalfDigits(raw).split(/[^0-9]+/).filter(Boolean).map(n => String(parseInt(n,10)));
 }
 function popularityFromCell($cell) {
-  const n = parseInt(clean($cell.text()), 10);
+  const n = parseInt(toHalfDigits(clean($cell.text())), 10);
   return Number.isFinite(n) ? n : null;
 }
 
@@ -79,31 +82,26 @@ function popularityFromCell($cell) {
   const html = await res.text();
   const $ = load(html);
 
-  // --- 着順（tbody単位ではなく tr 単位で抽出。ヘッダで特定し、保険セレクタも用意）
+  // --- 着順（全角数字対応）
   const order = [];
-  const pickFinishRows = ($table) =>
-    $table.find('tr')
-      .filter((_, tr) => $(tr).find('td').length >= 4);
-
-  // 1st: ヘッダの組み合わせで厳密に特定
   let $finishTable = $('table:has(th:contains("レースタイム")):has(th:contains("ボートレーサー"))').first();
-  if ($finishTable.length === 0) {
-    // fallback: 「着」を含む最初のテーブル
-    $finishTable = $('table:has(th:contains("着"))').first();
-  }
+  if ($finishTable.length === 0) $finishTable = $('table:has(th:contains("着"))').first();
 
-  pickFinishRows($finishTable).each((_, tr) => {
+  $finishTable.find('tr').each((_, tr) => {
     const $tds = $(tr).find('td');
-    const pos  = parseInt(clean($tds.eq(0).text()), 10);
-    const lane = parseInt(clean($tds.eq(1).text()), 10);
-    const $info = $tds.eq(2);
+    if ($tds.length < 4) return;
 
-    const idMatch = clean($info.text()).match(/\b\d{4}\b/);
+    const pos  = parseInt(toHalfDigits(clean($tds.eq(0).text())), 10);
+    const lane = parseInt(toHalfDigits(clean($tds.eq(1).text())), 10);
+
+    const $info = $tds.eq(2);
+    const infoText = toHalfDigits(clean($info.text()));
+    const idMatch = infoText.match(/\b\d{4}\b/);
     const racerId = idMatch ? idMatch[0] : null;
 
     const name =
       clean($info.find('span').last().text()) ||
-      clean($info.text()).replace(/\b\d{4}\b/, '').trim();
+      infoText.replace(/\b\d{4}\b/, '').trim();
 
     const time = timeNormalize($tds.eq(3).text());
 
@@ -117,7 +115,7 @@ function popularityFromCell($cell) {
   let startRemark = null;
   $('table:has(th:contains("スタート情報"))').first()
     .find('.table1_boatImage1').each((_, el) => {
-      const lane = parseInt(clean($(el).find('.table1_boatImage1Number').text()), 10);
+      const lane = parseInt(toHalfDigits(clean($(el).find('.table1_boatImage1Number').text())), 10);
       const t = clean($(el).find('.table1_boatImage1TimeInner').text());
       const m = t.match(/([\-+.0-9]+)/);
       const st = m ? parseFloat(m[1]) : null;
