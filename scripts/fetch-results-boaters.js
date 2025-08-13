@@ -1,6 +1,7 @@
+// scripts/fetch-results-boaters.js
 // 出力:
 //   結果  : public/results/v1/<date>/<pid>/<race>.json
-//   オッズ: public/odds/v1/<date>/<pid>/<race>.json  ← 3連単のみ（空でも必ず作成）
+//   オッズ: public/odds/v1/<date>/<pid>/<race>.json  ← 3連単のみ
 // 使い方:
 //   node scripts/fetch-results-boaters.js <YYYYMMDD> <pid:01..24|01,05|all> <race:1R|1..12|1,3,5|auto> [--skip-existing] [--with-odds]
 // 環境変数:
@@ -75,6 +76,7 @@ function toJST(dateYYYYMMDD, hhmm){
   return new Date(`${dateYYYYMMDD.slice(0,4)}-${dateYYYYMMDD.slice(4,6)}-${dateYYYYMMDD.slice(6,8)}T${hhmm}:00+09:00`);
 }
 
+// programs から締切時刻（あれば）
 async function loadRaceDeadlineHHMM(date, pid, raceNo){
   const rels = [
     path.join("public","programs","v2",date,pid,`${raceNo}R.json`),
@@ -191,7 +193,7 @@ function parseBoaters(html){
   // --- 決まり手 ---
   let kimarite = null;
   $("*").each((_, el)=>{
-    const t = norm($(el).text()));
+    const t = norm($(el).text());
     const m = t.match(/決まり手\s*[:：]?\s*([^\s]+)/);
     if (m){ kimarite = m[1]; return false; }
   });
@@ -241,7 +243,7 @@ function parseBoatersOdds(html){
   const $ = loadHTML(html);
   let odds = [];
 
-  // 見出し→近接table
+  // 1) 見出し近接table
   let table = null;
   $("h1,h2,h3,section,div").each((_, el)=>{
     const t = norm($(el).text());
@@ -251,7 +253,7 @@ function parseBoatersOdds(html){
     }
   });
 
-  // フォールバック：ヘッダ検査
+  // 2) フォールバック：全table走査
   if (!table){
     $("table").each((_, t)=>{
       const head = $(t).find("th").map((_,th)=>norm($(th).text())).get().join("|");
@@ -281,18 +283,17 @@ function parseBoatersOdds(html){
     });
   }
 
-  // さらにフォールバック：本文
+  // 3) 本文フォールバック
   if (odds.length===0){
     const body = norm($("body").text());
     const re = /([1-6]-[1-6]-[1-6])\s+(\d+(?:\.\d+)?)/g;
     let m; while ((m = re.exec(body))) pushOdds(m[1], m[2]);
   }
 
-  // 重複除去 & ソート
+  // 重複除去＆安い順
   const map = new Map();
   for (const o of odds){ if (!map.has(o.combo) || map.get(o.combo).odds !== o.odds) map.set(o.combo, o); }
   odds = [...map.values()].sort((a,b)=>a.odds-b.odds);
-
   return odds;
 }
 
@@ -338,7 +339,7 @@ async function runOneResult({date,pid,raceNo}){
   return true;
 }
 
-/* ====== 保存: 3連単オッズ（空でも必ず作成） ====== */
+/* ====== 保存: 3連単オッズ ====== */
 async function runOneOdds({date,pid,raceNo}){
   const rootDir = path.join(__dirname,"..","public","odds","v1");
   const dayDir  = path.join(rootDir, date);
@@ -353,25 +354,24 @@ async function runOneOdds({date,pid,raceNo}){
   fs.mkdirSync(pidDir, { recursive: true });
   ensureKeep(rootDir); ensureKeep(dayDir); ensureKeep(pidDir);
 
-  let trifecta = [];
-  try {
-    const url = boatersOddsUrl({date,pid,raceNo});
-    log("GET (odds)", url);
-    const html = await fetchText(url);
-    trifecta = parseBoatersOdds(html) || [];
-  } catch (e) {
-    // 取得失敗でも空で作る
-    log(`odds fetch failed -> save empty: ${date}/${pid}/${raceNo}R (${e.message})`);
-    trifecta = [];
+  const url = boatersOddsUrl({date,pid,raceNo});
+  log("GET (odds)", url);
+  const html = await fetchText(url);
+  const trifecta = parseBoatersOdds(html);
+
+  if (!trifecta || trifecta.length===0){
+    log(`no trifecta odds -> skip save: ${date}/${pid}/${raceNo}R`);
+    return false;
   }
 
   const payload = {
     date, pid, race: `${raceNo}R`,
+    source: { odds: url },
     generatedAt: new Date().toISOString(),
-    trifecta // 常に存在（空配列の可能性あり）
+    trifecta // [{combo:"1-2-3", odds:12.3}, ...]  安い順
   };
   await writeJSON(outPath, payload);
-  log(`saved (odds): ${path.relative(process.cwd(), outPath)} (count=${trifecta.length})`);
+  log("saved (odds):", path.relative(process.cwd(), outPath));
   return true;
 }
 
