@@ -1,0 +1,126 @@
+{
+  "date": "20250812",
+  "pid": "08",
+  "race": "4R",
+  "source": {
+    "result": "https://www.boatrace.jp/owpc/pc/race/raceresult?rno=4&jcd=08&hd=20250812"
+  },
+  "generatedAt": "2025-08-13T15:12:04.286Z",
+  "order": [
+    {
+      "pos": 1,
+      "lane": 4,
+      "racerId": "4910",
+      "name": "中村 泰平",
+      "time": "1'50\"3"
+    },
+    {
+      "pos": 2,
+      "lane": 2,
+      "racerId": "4943",
+      "name": "八木 治樹",
+      "time": "1'52\"7"
+    },
+    {
+      "pos": 3,
+      "lane": 6,
+      "racerId": "3934",
+      "name": "鋤柄 貴俊",
+      "time": "1'53\"9"
+    },
+    {
+      "pos": 4,
+      "lane": 5,
+      "racerId": "4509",
+      "name": "平見 真彦",
+      "time": "1'54\"4"
+    },
+    {
+      "pos": 5,
+      "lane": 1,
+      "racerId": "3981",
+      "name": "今坂 晃広",
+      "time": ""
+    }
+  ],
+  "start": [
+    {
+      "lane": 1,
+      "st": 0.23
+    },
+    {
+      "lane": 2,
+      "st": 0.1
+    },
+    {
+      "lane": 3,
+      "st": 0.15
+    },
+    {
+      "lane": 4,
+      "st": 0.14
+    },
+    {
+      "lane": 5,
+      "st": 0.15
+    },
+    {
+      "lane": 6,
+      "st": 0.18
+    }
+  ],
+  "decision": "まくり",
+  "weather": {
+    "condition": "曇り",
+    "airTemp": 30,
+    "windSpeed": 1,
+    "windDirCode": 9,
+    "waterTemp": 30,
+    "wave": 0
+  },
+  "refunds": [],
+  "payouts": {
+    "trifecta": {
+      "combo": "4-2-6",
+      "amount": 19560,
+      "popularity": 60
+    },
+    "trio": {
+      "combo": "2=4=6",
+      "amount": 8330,
+      "popularity": 17
+    },
+    "exacta": {
+      "combo": "4-2",
+      "amount": 3440,
+      "popularity": 13
+    },
+    "quinella": {
+      "combo": "2=4",
+      "amount": 1510,
+      "popularity": 9
+    },
+    "wide": [
+      {
+        "combo": "2=4",
+        "amount": 690,
+        "popularity": 10
+      },
+      {
+        "combo": "1=70",
+        "amount": 14,
+        "popularity": null
+      }
+    ],
+    "win": {
+      "combo": "4",
+      "amount": 280
+    },
+    "place": [
+      {
+        "combo": "4",
+        "amount": 230
+      }
+    ]
+  }
+}
