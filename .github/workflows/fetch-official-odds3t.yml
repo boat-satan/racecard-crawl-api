@@ -30,10 +30,10 @@ on:
 jobs:
   fetch-odds:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 60
     steps:
       - name: Checkout
-      - uses: actions/checkout@v4
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -53,45 +53,39 @@ jobs:
           IN_PIDS: ${{ inputs.PIDS }}
           IN_RACES: ${{ inputs.RACES }}
           SKIP_EXISTING: ${{ inputs.SKIP_EXISTING }}
+        shell: bash
         run: |
-          set -e
+          set -euo pipefail
           echo "[info] DATE=$DATE PIDS=$IN_PIDS RACES=$IN_RACES SKIP_EXISTING=$SKIP_EXISTING"
 
           # ---- expand PIDS
-          if [ "$IN_PIDS" = "all" ] || [ -z "$IN_PIDS" ]; then
+          if [[ "$IN_PIDS" == "all" || -z "$IN_PIDS" ]]; then
             PIDS=$(seq -w 1 24)
           else
             PIDS=""
             IFS=',' read -ra ARR <<< "$IN_PIDS"
             for x in "${ARR[@]}"; do
-              # 先頭ゼロの有無に関わらず2桁化
-              n=$(printf "%d" "$x" 2>/dev/null || true)
-              if [ -z "$n" ]; then n="$x"; fi
+              # 先頭ゼロを安全に除去（08/09 対策）
+              n="$(echo "$x" | sed -E 's/^0*([0-9]+)$/\1/')"
+              [[ -z "$n" ]] && n="$x"
               PIDS="$PIDS $(printf "%02d" "$n")"
             done
           fi
 
           # ---- expand RACES
-          if [ "$IN_RACES" = "1..12" ] || [ "$IN_RACES" = "all" ] || [ -z "$IN_RACES" ]; then
+          if [[ "$IN_RACES" == "1..12" || "$IN_RACES" == "all" || -z "$IN_RACES" ]]; then
             RACES=$(seq 1 12)
+          elif echo "$IN_RACES" | grep -Eq '^[0-9]+[.][.][0-9]+$'; then
+            a=$(echo "$IN_RACES" | sed -E 's/^([0-9]+)[.][.]([0-9]+)$/\1/')
+            b=$(echo "$IN_RACES" | sed -E 's/^([0-9]+)[.][.]([0-9]+)$/\2/')
+            if (( a <= b )); then RACES=$(seq "$a" "$b"); else RACES=$(seq "$b" "$a"); fi
           else
-            # "a..b" または CSV
-            if echo "$IN_RACES" | grep -Eq '^[0-9]+[.][.][0-9]+$'; then
-              a=$(echo "$IN_RACES" | sed -E 's/^([0-9]+)[.][.]([0-9]+)$/\1/')
-              b=$(echo "$IN_RACES" | sed -E 's/^([0-9]+)[.][.]([0-9]+)$/\2/')
-              if [ "$a" -le "$b" ]; then
-                RACES=$(seq "$a" "$b")
-              else
-                RACES=$(seq "$b" "$a")
-              fi
-            else
-              RACES=""
-              IFS=',' read -ra ARR <<< "$IN_RACES"
-              for r in "${ARR[@]}"; do
-                rnum=$(printf "%d" "$r" 2>/dev/null || true)
-                if [ -n "$rnum" ]; then RACES="$RACES $rnum"; fi
-              done
-            fi
+            RACES=""
+            IFS=',' read -ra ARR <<< "$IN_RACES"
+            for r in "${ARR[@]}"; do
+              rnum="$(echo "$r" | sed -E 's/^0*([0-9]+)$/\1/')"
+              [[ -n "$rnum" ]] && RACES="$RACES $rnum"
+            done
           fi
 
           echo "[info] expand -> PIDS: $PIDS"
@@ -128,7 +122,6 @@ jobs:
             echo "no changes"
           else
             git commit -m "odds3t: ${{ inputs.DATE }} pids=${{ inputs.PIDS }} races=${{ inputs.RACES }}"
-            # 衝突を避けてから push
             git pull --rebase
             git push
           fi
