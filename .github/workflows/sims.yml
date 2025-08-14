@@ -66,11 +66,16 @@ jobs:
             --limit "${{ github.event.inputs.limit }}" \
             --predict-only
 
-      # ★ 追加：Discord に買い目通知（predict時）
+      # ★ 変更：Discord に「コンパクト表記の買い目」＋ CSV を送信
       - name: Notify Discord (predict)
         if: ${{ github.event.inputs.mode == 'predict' }}
         env:
           WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DATES:   ${{ github.event.inputs.dates }}
+          PIDS:    ${{ github.event.inputs.pids }}
+          RACES:   ${{ github.event.inputs.races }}
+          SIMS:    ${{ github.event.inputs.sims }}
+          TOPN:    ${{ github.event.inputs.topn }}
         run: |
           set -e
           if [ -z "$WEBHOOK" ]; then
@@ -81,23 +86,116 @@ jobs:
             echo "No predictions_summary.csv. Skip notify."
             exit 0
           fi
-          TITLE="SimS v1 Predict"
-          META="dates=${{ github.event.inputs.dates }} | pid='${{ github.event.inputs.pids }}' | races='${{ github.event.inputs.races }}' | sims=${{ github.event.inputs.sims }} | topN=${{ github.event.inputs.topn }}"
-          # 本文（Discordの2000文字制限回避のためヘッダ＋先頭数行だけ本文、CSVは添付）
-          HEAD=$(head -n 15 ./predict/predictions_summary.csv | sed 's/"/\\"/g')
-          CONTENT="**${TITLE}**\n${META}\n\`\`\`csv\n${HEAD}\n...\n\`\`\`"
-          # 本文メッセージ
+
+          python - << 'PY' > ./predict/discord_message.txt
+import csv, itertools
+from collections import defaultdict
+
+def parse_ticket(s):  # "1-2-3" -> (1,2,3)
+    return tuple(int(x) for x in s.split("-"))
+
+def compact_lines(tickets):
+    """
+    tickets: list[(a,b,c)]
+    まとめ方の優先順:
+      1) a-b 固定で c を束ねる  => a-b-[c1,c2,...]
+      2) a-c 固定で b を束ねる  => a-[b1,b2,...]-c
+      3) b-c 固定で a を束ねる  => [a1,a2,...]-b-c
+      4) 残りは a-b-c のまま
+    """
+    remain = set(tickets)
+    out = []
+
+    # 1) a-b -> cs
+    key = defaultdict(list)
+    for a,b,c in list(remain):
+        key[(a,b)].append(c)
+    for (a,b), cs in list(key.items()):
+        cs = sorted(set(cs))
+        if len(cs) >= 2:
+            for c in cs: remain.discard((a,b,c))
+            out.append(f"{a}-{b}-[{','.join(map(str,cs))}]")
+
+    # 2) a-c -> bs
+    key = defaultdict(list)
+    for a,b,c in list(remain):
+        key[(a,c)].append(b)
+    for (a,c), bs in list(key.items()):
+        bs = sorted(set(bs))
+        if len(bs) >= 2:
+            for b in bs: remain.discard((a,b,c))
+            out.append(f"{a}-[{','.join(map(str,bs))}]-{c}")
+
+    # 3) b-c -> as
+    key = defaultdict(list)
+    for a,b,c in list(remain):
+        key[(b,c)].append(a)
+    for (b,c), als in list(key.items()):
+        als = sorted(set(als))
+        if len(als) >= 2:
+            for a in als: remain.discard((a,b,c))
+            out.append(f"[{','.join(map(str,als))}]-{b}-{c}")
+
+    # 4) 残り
+    for a,b,c in sorted(remain):
+        out.append(f"{a}-{b}-{c}")
+    return out
+
+# CSV 読み込み
+rows=[]
+with open("./predict/predictions_summary.csv", newline="", encoding="utf-8") as f:
+    rdr=csv.DictReader(f)
+    rows=list(rdr)
+
+rows.sort(key=lambda r:(r["date"], r["pid"], r["race"], int(r["rank"])))
+
+LIMIT = 1800  # 本文長の安全上限
+body=[]
+used=0
+
+for (date,pid,race), grp in itertools.groupby(rows, key=lambda r:(r["date"],r["pid"],r["race"])):
+    g=list(grp)
+    tickets=[parse_ticket(r["ticket"]) for r in g]
+    comp=compact_lines(tickets)
+
+    header=f"[{date} #{pid} {race}]"
+    body.append(header); used += len(header)+1
+
+    line=""
+    for part in comp:
+        add = (", " if line else "") + part
+        if len(line)+len(add) > 120:
+            body.append("  " + line); used += len(line)+3
+            line = part
+        else:
+            line += add
+    if line:
+        body.append("  " + line); used += len(line)+3
+
+    if used > LIMIT:
+        body.append("...（本文は省略、CSVを参照）")
+        break
+
+title = "SimS v1 Predict — Compact TOPN"
+meta  = f"dates={ '${{ env.DATES }}' } | pid='{ '${{ env.PIDS }}' }' | races='{ '${{ env.RACES }}' }' | sims={ '${{ env.SIMS }}' } | topN={ '${{ env.TOPN }}' }"
+content = "**"+title+"**\n"+meta+"\n```text\n" + "\n".join(body) + "\n```"
+content = content.replace("\\","\\\\").replace('"','\\"')
+print(content)
+PY
+
+          CONTENT="$(cat ./predict/discord_message.txt)"
+          # 本文
           curl -sS -H "Content-Type: application/json" \
                -X POST \
                -d "{\"content\":\"${CONTENT}\"}" \
                "$WEBHOOK" || true
-          # フルCSVを添付（file1）
+          # CSV添付
           curl -sS -X POST \
                -F "payload_json={\"content\":\"predictions_summary.csv を添付します\"}" \
                -F "file1=@./predict/predictions_summary.csv" \
                "$WEBHOOK" || true
 
-      # ★ 既存：predict をリポジトリにコミット & プッシュ
+      # 既存：predict をリポジトリにコミット & プッシュ
       - name: Commit predict folder to repo
         if: ${{ github.event.inputs.mode == 'predict' }}
         run: |
