@@ -37,7 +37,6 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # 0) 展示クロール（全場まとめて）
   crawl:
     runs-on: ubuntu-latest
     outputs:
@@ -49,7 +48,6 @@ jobs:
         with: { node-version: 20 }
       - name: Install deps
         run: npm ci || npm i --no-audit --no-fund
-
       - name: Resolve inputs (DATE / PIDS)
         id: resolve
         shell: bash
@@ -64,12 +62,10 @@ jobs:
           echo "Resolved: DATE=$DATE PIDS=$PIDS"
           echo "DATE=$DATE" >> "$GITHUB_OUTPUT"
           echo "PIDS=$PIDS" >> "$GITHUB_OUTPUT"
-
       - name: Run direct exhibition crawler (AUTO_T15)
         shell: bash
         run: |
           node scripts/fetch-exhibition-direct.js "${{ steps.resolve.outputs.DATE }}" "${{ steps.resolve.outputs.PIDS }}" auto --skip-existing
-
       - name: Commit & push exhibitions
         shell: bash
         run: |
@@ -84,7 +80,6 @@ jobs:
             echo "No changes."
           fi
 
-  # 1) 統合（program+exhibition+stats が揃ってるものだけ）
   integrate:
     needs: crawl
     runs-on: ubuntu-latest
@@ -96,18 +91,15 @@ jobs:
         with: { fetch-depth: 0 }
       - name: Pull latest after crawl
         run: git pull --rebase
-
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
       - name: Install deps
         run: npm ci || npm i --no-audit --no-fund
-
       - name: Echo inputs for next jobs
         id: echo
         run: |
           echo "DATE=${{ needs.crawl.outputs.date }}" >> "$GITHUB_OUTPUT"
           echo "PIDS=${{ needs.crawl.outputs.pids }}" >> "$GITHUB_OUTPUT"
-
       - name: Integrate all (program+exhibition+stats ready)
         shell: bash
         run: |
@@ -117,20 +109,17 @@ jobs:
           STATS_DIR="public/stats/v2/racers"
           VENUES="$(echo "${{ needs.crawl.outputs.pids }}" | tr ',' ' ')"
           RACES=$(seq 1 12 | sed 's/$/R/')
-
           for PID in $VENUES; do
             for RACE in $RACES; do
               PROG="public/programs/v2/$DATE/$PID/$RACE.json"
               EXH="public/exhibition/v1/$DATE/$PID/$RACE.json"
               OUT="public/integrated/v1/$DATE/$PID/$RACE.json"
-
               if [ -f "$OUT" ]; then
                 echo "[$PID $RACE] already integrated, skip"; continue
               fi
               if [ ! -f "$PROG" ] || [ ! -f "$EXH" ]; then
                 echo "[$PID $RACE] missing program or exhibition, skip"; continue
               fi
-
               node -e "
                 const fs=require('fs');
                 const progPath='$PROG';
@@ -148,12 +137,10 @@ jobs:
                 } catch(err) { ok=false; }
                 process.exit(ok?0:2);
               " || { echo "[$PID $RACE] missing stats, skip"; continue; }
-
               echo "[$PID $RACE] integrating..."
               node scripts/integrate-once.mjs --date "$DATE" --pid "$PID" --race "$RACE"
             done
           done
-
       - name: Commit & push integrated
         shell: bash
         run: |
@@ -169,7 +156,6 @@ jobs:
             echo "No changes."
           fi
 
-  # 2) 予測（integrated から PIDS/RACES を自動抽出 → Runner を predict-only で実行）
   predict:
     needs: integrate
     runs-on: ubuntu-latest
@@ -180,7 +166,6 @@ jobs:
         with: { fetch-depth: 0, persist-credentials: true }
       - name: Pull latest after integrate
         run: git pull --rebase
-
       - name: Build PIDS/RACES from integrated (overridable)
         id: build
         shell: bash
@@ -190,8 +175,6 @@ jobs:
           DATE="${{ needs.integrate.outputs.date }}"
           INPUT_PIDS="${{ github.event.inputs.pids }}"
           INPUT_RACES="${{ github.event.inputs.races }}"
-
-          # PIDS
           if [ -n "$INPUT_PIDS" ]; then
             PIDS="$INPUT_PIDS"
           else
@@ -204,8 +187,6 @@ jobs:
               fi
             done
           fi
-
-          # RACES
           if [ -n "$INPUT_RACES" ]; then
             RACES="$INPUT_RACES"
           else
@@ -219,23 +200,18 @@ jobs:
             done
             RACES="$RSET"
           fi
-
           echo "DATES=$DATE"  >> "$GITHUB_OUTPUT"
           echo "PIDS=$PIDS"   >> "$GITHUB_OUTPUT"
           echo "RACES=$RACES" >> "$GITHUB_OUTPUT"
           echo "Resolved predict scope: DATE=$DATE PIDS=$PIDS RACES=$RACES"
-
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
-
       - name: Install python deps
         run: pip install numpy pandas
-
       - name: Clean output dirs
         run: |
           rm -rf ./predict ./out
           mkdir -p ./predict ./out
-
       - name: Predict (TOPN, same engine as eval)
         run: >
           python sims_batch_eval_SimS_v1.py
@@ -247,7 +223,6 @@ jobs:
           --races "${{ steps.build.outputs.RACES }}"
           --limit "${{ github.event.inputs.limit }}"
           --predict-only
-
       - name: Build Discord message (compact tickets)
         env:
           TOPN:  "${{ github.event.inputs.topn }}"
@@ -256,7 +231,6 @@ jobs:
           PIDS:  "${{ steps.build.outputs.PIDS }}"
           RACES: "${{ steps.build.outputs.RACES }}"
         run: python scripts/build_discord_message.py
-
       - name: Notify Discord (predict)
         env:
           WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
@@ -265,8 +239,6 @@ jobs:
           [ ! -s "./predict/discord_message.txt" ] && echo "No message" && exit 0;
           JSON_PAYLOAD=$(python -c "import json,io;print(json.dumps({'content': io.open('./predict/discord_message.txt','r',encoding='utf-8').read()}))");
           echo "$JSON_PAYLOAD" | curl -sS -H "Content-Type: application/json" -X POST -d @- "$WEBHOOK" || true;
-          [ -s "./predict/predictions_summary.csv" ] && curl -sS -X POST -F 'payload_json={"content":"predictions_summary.csv を添付します"}' -F "file1=@./predict/predictions_summary.csv" "$WEBHOOK" || true
-
       - name: Commit predict folder to repo
         run: |
           if [ -z "$(ls -A ./predict)" ]; then
@@ -278,7 +250,6 @@ jobs:
           git add -A predict
           git commit -m "chore(predict): ${{ steps.build.outputs.DATES }} ${{ steps.build.outputs.PIDS }} ${{ steps.build.outputs.RACES }} (topN=${{ github.event.inputs.topn }}, sims=${{ github.event.inputs.sims }})" || echo "No changes to commit"
           git push
-
       - name: Upload predict artifact
         uses: actions/upload-artifact@v4
         with:
