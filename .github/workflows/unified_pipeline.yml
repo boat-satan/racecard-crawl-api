@@ -28,12 +28,6 @@ on:
         description: "先頭からNレースだけ処理（0=全件）"
         required: false
         default: "0"
-      force:
-        description: "時間帯外でも 1 で展示を強制実行"
-        required: false
-        default: "0"
-  schedule:
-    - cron: "20 5 * * *"  # UTC（JST 14:20）
 
 permissions:
   contents: write
@@ -49,7 +43,6 @@ jobs:
     outputs:
       date: ${{ steps.resolve.outputs.DATE }}
       pids: ${{ steps.resolve.outputs.PIDS }}
-      in_window: ${{ steps.win.outputs.in_window }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -57,25 +50,14 @@ jobs:
       - name: Install deps
         run: npm ci || npm i --no-audit --no-fund
 
-      - name: Compute JST window
-        id: win
-        shell: bash
-        run: |
-          HM=$((10#$(TZ=Asia/Tokyo date +'%H%M')))
-          DEF_DATE=$(TZ=Asia/Tokyo date +'%Y%m%d')
-          IN_WINDOW=false
-          if [ $HM -ge 730 ] && [ $HM -le 2200 ]; then IN_WINDOW=true; fi
-          echo "in_window=$IN_WINDOW" >> "$GITHUB_OUTPUT"
-          echo "def_date=$DEF_DATE"   >> "$GITHUB_OUTPUT"
-          echo "JST_NOW=$(TZ=Asia/Tokyo date +'%Y-%m-%d %H:%M:%S')"
-
       - name: Resolve inputs (DATE / PIDS)
         id: resolve
-        if: ${{ inputs.force == '1' || steps.win.outputs.in_window == 'true' }}
         shell: bash
         run: |
           DATE="${{ inputs.date }}"
-          if [ -z "$DATE" ]; then DATE="${{ steps.win.outputs.def_date }}"; fi
+          if [ -z "$DATE" ]; then
+            DATE=$(TZ=Asia/Tokyo date +'%Y%m%d')
+          fi
           if [ -z "${{ inputs.pids }}" ]; then
             PIDS="01,02,03,04,05,06,07,08,09,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24"
           else
@@ -86,36 +68,27 @@ jobs:
           echo "PIDS=$PIDS" >> "$GITHUB_OUTPUT"
 
       - name: Run direct exhibition crawler (AUTO_T15)
-        if: ${{ inputs.force == '1' || steps.win.outputs.in_window == 'true' }}
         shell: bash
         run: |
           node scripts/fetch-exhibition-direct.js "${{ steps.resolve.outputs.DATE }}" "${{ steps.resolve.outputs.PIDS }}" auto --skip-existing
 
       - name: Commit & push exhibitions
-        if: ${{ inputs.force == '1' || steps.win.outputs.in_window == 'true' }}
         shell: bash
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           if ! git diff --cached --quiet; then
-            git commit -m "unified: exhibition ${{
-              steps.resolve.outputs.DATE }} ${{
-              steps.resolve.outputs.PIDS }} [skip ci]"
+            git commit -m "unified: exhibition ${{ steps.resolve.outputs.DATE }} ${{ steps.resolve.outputs.PIDS }} [skip ci]"
             git pull --rebase
             git push
           else
             echo "No changes."
           fi
 
-      - name: Skip (out of window)
-        if: ${{ inputs.force != '1' && steps.win.outputs.in_window != 'true' }}
-        run: echo "Out of window (JST 07:30–22:00 以外) — skipped crawl."
-
-  # 1) 統合（展示と出走表が揃ったものだけ既存ロジックで実行）
+  # 1) 統合
   integrate:
     needs: crawl
-    if: ${{ needs.crawl.outputs.in_window == 'true' || inputs.force == '1' }}
     runs-on: ubuntu-latest
     outputs:
       date:   ${{ steps.echo.outputs.DATE }}
@@ -144,12 +117,8 @@ jobs:
           DATE="${{ needs.crawl.outputs.date }}"
           STATS_DIR="public/stats/v2/racers"
 
-          if [ -z "${{ needs.crawl.outputs.pids }}" ]; then
-            VENUES=$(seq -w 1 24)
-          else
-            IFS=',' read -ra VEN_ARR <<< "${{ needs.crawl.outputs.pids }}"
-            VENUES="${VEN_ARR[@]}"
-          fi
+          IFS=',' read -ra VEN_ARR <<< "${{ needs.crawl.outputs.pids }}"
+          VENUES="${VEN_ARR[@]}"
           RACES=$(seq 1 12 | sed 's/$/R/')
 
           for PID in $VENUES; do
@@ -202,121 +171,3 @@ jobs:
           else
             echo "No changes."
           fi
-
-  # 2) 予測対象（PIDS/RACES）を integrated から抽出 → Runner を predict-only で1発実行
-  predict:
-    needs: integrate
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0, persist-credentials: true }
-      - name: Pull latest after integrate
-        run: git pull --rebase
-
-      - name: Build PIDS/RACES from integrated (overridable)
-        id: build
-        shell: bash
-        run: |
-          set -euo pipefail
-          DATE="${{ needs.integrate.outputs.date }}"
-          INPUT_PIDS="${{ github.event.inputs.pids }}"
-          INPUT_RACES="${{ github.event.inputs.races }}"
-
-          # PIDS
-          if [ -n "$INPUT_PIDS" ]; then
-            PIDS="$INPUT_PIDS"
-          else
-            PIDS=""
-            for d in public/integrated/v1/$DATE/*; do
-              [ -d "$d" ] || continue
-              P=$(basename "$d")
-              if ls "$d"/*.json >/dev/null 2>&1; then
-                PIDS="${PIDS:+$PIDS,}$P"
-              fi
-            done
-          fi
-
-          # RACES
-          if [ -n "$INPUT_RACES" ]; then
-            RACES="$INPUT_RACES"
-          else
-            # 全PIDを横断して存在するRACE名を集約（1R,2R,...12R）
-            RSET=""
-            IFS=',' read -ra PARR <<< "$PIDS"
-            for P in "${PARR[@]}"; do
-              for f in public/integrated/v1/$DATE/$P/*.json 2>/dev/null; do
-                [ -e "$f" ] || continue
-                R=$(basename "$f" .json)
-                case ",$RSET," in *",$R,"*) : ;; *) RSET="${RSET:+$RSET,}$R" ;; esac
-              done
-            done
-            RACES="$RSET"
-          fi
-
-          echo "DATES=$DATE"   >> "$GITHUB_OUTPUT"
-          echo "PIDS=$PIDS"    >> "$GITHUB_OUTPUT"
-          echo "RACES=$RACES"  >> "$GITHUB_OUTPUT"
-          echo "Resolved predict scope: DATE=$DATE PIDS=$PIDS RACES=$RACES"
-
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
-
-      - name: Install python deps
-        run: pip install numpy pandas
-
-      - name: Clean output dirs
-        run: |
-          rm -rf ./predict ./out
-          mkdir -p ./predict ./out
-
-      - name: Predict (TOPN, same engine as eval)
-        run: >
-          python sims_batch_eval_SimS_v1.py
-          --base ./public
-          --dates "${{ steps.build.outputs.DATES }}"
-          --sims  "${{ github.event.inputs.sims }}"
-          --topn  "${{ github.event.inputs.topn }}"
-          --pids  "${{ steps.build.outputs.PIDS }}"
-          --races "${{ steps.build.outputs.RACES }}"
-          --limit "${{ github.event.inputs.limit }}"
-          --predict-only
-
-      - name: Build Discord message (compact tickets)
-        env:
-          TOPN:  "${{ github.event.inputs.topn }}"
-          SIMS:  "${{ github.event.inputs.sims }}"
-          DATES: "${{ steps.build.outputs.DATES }}"
-          PIDS:  "${{ steps.build.outputs.PIDS }}"
-          RACES: "${{ steps.build.outputs.RACES }}"
-        run: python scripts/build_discord_message.py
-
-      - name: Notify Discord (predict)
-        env:
-          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: >
-          [ -z "$WEBHOOK" ] && echo "No webhook" && exit 0;
-          [ ! -s "./predict/discord_message.txt" ] && echo "No message" && exit 0;
-          JSON_PAYLOAD=$(python -c "import json,io;print(json.dumps({'content': io.open('./predict/discord_message.txt','r',encoding='utf-8').read()}))");
-          echo "$JSON_PAYLOAD" | curl -sS -H "Content-Type: application/json" -X POST -d @- "$WEBHOOK" || true;
-          [ -s "./predict/predictions_summary.csv" ] && curl -sS -X POST -F 'payload_json={"content":"predictions_summary.csv を添付します"}' -F "file1=@./predict/predictions_summary.csv" "$WEBHOOK" || true
-
-      - name: Commit predict folder to repo
-        run: |
-          if [ -z "$(ls -A ./predict)" ]; then
-            echo "predict/ is empty. Nothing to commit."
-            exit 0
-          fi
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A predict
-          git commit -m "chore(predict): ${{ steps.build.outputs.DATES }} ${{ steps.build.outputs.PIDS }} ${{ steps.build.outputs.RACES }} (topN=${{ github.event.inputs.topn }}, sims=${{ github.event.inputs.sims }})" || echo "No changes to commit"
-          git push
-
-      - name: Upload predict artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: sims_outputs
-          path: ./predict
-          if-no-files-found: error
