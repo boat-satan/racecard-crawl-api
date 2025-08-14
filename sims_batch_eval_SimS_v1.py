@@ -271,17 +271,23 @@ def simulate_one(integrated_json: dict, sims: int = 1200):
     kim_probs = {k: v/total for k, v in kimarite.items()}
     return tri_probs, kim_probs
 
-# ========== データ収集 ==========
+# ========== データ収集（v1 フォールバック対応） ==========
 def collect_files(base_dir: str, kind: str, dates: set):
-    root = os.path.join(base_dir, kind, "v1")
+    # まず .../<kind>/v1 を探し、無ければ .../<kind> を使う（odds対策）
+    root_v1 = os.path.join(base_dir, kind, "v1")
+    root    = root_v1 if os.path.isdir(root_v1) else os.path.join(base_dir, kind)
     out = []
-    for d in dates:
+    # dates 指定なければ root 直下の全日付ディレクトリを列挙
+    date_dirs = list(dates) if dates else [
+        d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d))
+    ]
+    for d in date_dirs:
         dir_d = os.path.join(root, d)
-        if not os.path.isdir(dir_d): 
+        if not os.path.isdir(dir_d):
             continue
         for pid in os.listdir(dir_d):
             dir_pid = os.path.join(dir_d, pid)
-            if not os.path.isdir(dir_pid): 
+            if not os.path.isdir(dir_pid):
                 continue
             for fname in os.listdir(dir_pid):
                 if fname.endswith(".json"):
@@ -308,7 +314,6 @@ def actual_trifecta_combo(result_json: dict):
     order = result_json.get("order")
     if isinstance(order, list) and len(order) >= 3:
         def lane_of(x):
-            # lane / course / number のいずれか
             return str(x.get("lane") or x.get("course") or x.get("F") or x.get("number"))
         try:
             f = lane_of(order[0]); s = lane_of(order[1]); t = lane_of(order[2])
@@ -319,7 +324,7 @@ def actual_trifecta_combo(result_json: dict):
 
 # ========== 評価（1レース） ==========
 def evaluate_one(int_path: str, odds_path: str, res_path: str, sims: int, topn: int, unit: int):
-    with open(int_path, "r") as f:
+    with open(int_path, "r", encoding="utf-8") as f:
         d_int = json.load(f)
     tri_probs, _ = simulate_one(d_int, sims=sims)
 
@@ -328,14 +333,14 @@ def evaluate_one(int_path: str, odds_path: str, res_path: str, sims: int, topn: 
     top_keys = ['-'.join(map(str, k)) for k, _ in top]
 
     # オッズ
-    with open(odds_path, "r") as f:
+    with open(odds_path, "r", encoding="utf-8") as f:
         d_odds = json.load(f)
     omap = odds_map(d_odds)
     bets = [c for c in top_keys if c in omap]
     stake = unit * len(bets)
 
     # 結果
-    with open(res_path, "r") as f:
+    with open(res_path, "r", encoding="utf-8") as f:
         d_res = json.load(f)
     hit_combo = actual_trifecta_combo(d_res)
     payout = int(round(omap.get(hit_combo, 0.0) * unit)) if hit_combo in bets else 0
@@ -352,13 +357,58 @@ def main():
     ap.add_argument("--unit", type=int, default=100, help="1点あたりの賭け金（円）")
     ap.add_argument("--limit", type=int, default=0, help="先頭からNレースだけ評価（0なら全件）")
     ap.add_argument("--outdir", default="./SimS_v1.0_eval", help="出力先ディレクトリ")
+
+    # ★追加：predict専用モードとフィルタ
+    ap.add_argument("--predict-only", action="store_true",
+                    help="確率→TOPN出目だけを出力（ROI集計はしない）")
+    ap.add_argument("--predout", default="./out",
+                    help="--predict-only 時の出力先ディレクトリ")
+    ap.add_argument("--pids", default="", help="カンマ区切りの場コードフィルタ")
+    ap.add_argument("--races", default="", help="カンマ区切りのレース名フィルタ(例 1R,2R)")
+
     args = ap.parse_args()
 
     dates = set([d.strip() for d in args.dates.split(",") if d.strip()]) if args.dates else set()
+    pids_filter  = set([p.strip() for p in args.pids.split(",") if p.strip()])
+    races_filter = set([r.strip() for r in args.races.split(",") if r.strip()])
 
+    # ---- predict-only: 同一ロジックでTOPN出目だけ出す ----
+    if args.predict_only:
+        int_idx = collect_files(args.base, "integrated", dates) if dates else \
+                  collect_files(args.base, "integrated", set(os.listdir(os.path.join(args.base, "integrated", "v1"))))
+        keys = sorted(int_idx.keys())
+        if pids_filter:
+            keys = [k for k in keys if k[1] in pids_filter]
+        if races_filter:
+            keys = [k for k in keys if k[2] in races_filter]
+
+        os.makedirs(args.predout, exist_ok=True)
+        rows = []
+        for (date, pid, race) in keys[:(args.limit or len(keys))]:
+            with open(int_idx[(date,pid,race)], "r", encoding="utf-8") as f:
+                d_int = json.load(f)
+            tri_probs, _ = simulate_one(d_int, sims=args.sims)
+            top = sorted(tri_probs.items(), key=lambda kv: kv[1], reverse=True)[:args.topn]
+            top_list = [{"ticket": "-".join(map(str, k)), "prob": round(v, 6)} for k, v in top]
+
+            # レースごとJSON
+            with open(os.path.join(args.predout, f"pred_{date}_{pid}_{race}.json"), "w", encoding="utf-8") as f:
+                json.dump({"date":date,"pid":pid,"race":race,"topN":top_list,"engine":"SimS ver1.0"},
+                          f, ensure_ascii=False, indent=2)
+            # サマリCSV用
+            for i, t in enumerate(top_list, 1):
+                rows.append({"date":date,"pid":pid,"race":race,"rank":i,"ticket":t["ticket"],"prob":t["prob"]})
+
+        if rows:
+            pd.DataFrame(rows).to_csv(os.path.join(args.predout, "predictions_summary.csv"),
+                                      index=False, encoding="utf-8")
+        print("predict-only done")
+        return
+
+    # ---- eval（従来どおり） ----
     # ファイル収集
     int_idx  = collect_files(args.base, "integrated", dates) if dates else collect_files(args.base, "integrated", set(os.listdir(os.path.join(args.base, "integrated", "v1"))))
-    odds_idx = collect_files(args.base, "odds",       dates) if dates else collect_files(args.base, "odds",       set(os.listdir(os.path.join(args.base, "odds", "v1"))))
+    odds_idx = collect_files(args.base, "odds",       dates) if dates else collect_files(args.base, "odds",       set(os.listdir(os.path.join(args.base, "odds"))))
     res_idx  = collect_files(args.base, "results",    dates) if dates else collect_files(args.base, "results",    set(os.listdir(os.path.join(args.base, "results", "v1"))))
 
     # 共通キー
