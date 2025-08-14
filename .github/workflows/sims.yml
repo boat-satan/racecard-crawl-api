@@ -32,18 +32,21 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
+    # ← これを追加：push するための権限
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: true   # Actions トークンで push 可
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install deps
-        run: |
-          python -m pip install --upgrade pip
-          pip install numpy pandas
+        run: pip install numpy pandas
 
       - name: Clean output dirs
         run: |
@@ -64,21 +67,30 @@ jobs:
             --limit "${{ github.event.inputs.limit }}" \
             --predict-only
 
-      - name: Show predict outputs
+      # ★ 追加：predict をリポジトリにコミット & プッシュ
+      - name: Commit predict folder to repo
         if: ${{ github.event.inputs.mode == 'predict' }}
         run: |
-          echo "=== tree ./predict ==="
-          ls -lahR ./predict || true
-          echo "=== head predictions_summary.csv (if exists) ==="
-          [ -f ./predict/predictions_summary.csv ] && head -n 20 ./predict/predictions_summary.csv || echo "no predictions_summary.csv"
-          echo "=== _EMPTY.txt (if exists) ==="
-          [ -f ./predict/_EMPTY.txt ] && cat ./predict/_EMPTY.txt || echo "no _EMPTY.txt"
+          set -e
+          if [ -z "$(ls -A ./predict)" ]; then
+            echo "predict/ is empty. Nothing to commit."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # 既存ファイルはそのまま上書きコミット
+          git add -A predict
+          git commit -m "chore(predict): ${{
+            github.event.inputs.dates }} ${{
+            github.event.inputs.pids }} ${{
+            github.event.inputs.races }} (topN=${{ github.event.inputs.topn }}, sims=${{ github.event.inputs.sims }})" || echo "No changes to commit"
+          git push
 
       - name: Upload predict artifact
         if: ${{ github.event.inputs.mode == 'predict' }}
         uses: actions/upload-artifact@v4
         with:
-          name: sims_outputs_predict_${{ github.event.inputs.dates }}
+          name: sims_outputs
           path: ./predict
           if-no-files-found: error
 
@@ -95,20 +107,10 @@ jobs:
             --limit "${{ github.event.inputs.limit }}" \
             --outdir ./out
 
-      - name: Show eval outputs
-        if: ${{ github.event.inputs.mode == 'eval' }}
-        run: |
-          echo "=== tree ./out ==="
-          ls -lahR ./out || true
-          echo "=== overall.json (if exists) ==="
-          [ -f ./out/overall.json ] && cat ./out/overall.json || echo "no overall.json"
-          echo "=== head per_race_results.csv (if exists) ==="
-          [ -f ./out/per_race_results.csv ] && head -n 20 ./out/per_race_results.csv || echo "no per_race_results.csv"
-
       - name: Upload eval artifact
         if: ${{ github.event.inputs.mode == 'eval' }}
         uses: actions/upload-artifact@v4
         with:
-          name: sims_outputs_eval_${{ github.event.inputs.dates }}
+          name: sims_outputs
           path: ./out
           if-no-files-found: error
