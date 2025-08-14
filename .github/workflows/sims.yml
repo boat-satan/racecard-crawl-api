@@ -32,14 +32,13 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
-    # リポジトリに predict/ を push するための権限
     permissions:
-      contents: write
+      contents: write   # predict フォルダを push するため
 
     steps:
       - uses: actions/checkout@v4
         with:
-          persist-credentials: true   # Actions トークンで push 可
+          persist-credentials: true
 
       - uses: actions/setup-python@v5
         with:
@@ -67,12 +66,7 @@ jobs:
             --limit "${{ github.event.inputs.limit }}" \
             --predict-only
 
-      # === 追加: Discord 通知（predict時のみ） =========================
-      # ・predictions_summary.csv から各レースの買い目(上位N=18)を抽出
-      # ・「1-2-3, 1-2-5, 1-2-6」などは「1-2-3/5/6」にコンパクト化
-      # ・2000文字制限に収まらない場合は分割して複数メッセージ送信
-      # ・Webhook URL はリポジトリのシークレット DISCORD_WEBHOOK_URL に設定
-      # =================================================================
+      # ---- Discord 送信用の本文を生成（18点は 1-2-3/5 形式で圧縮） ----
       - name: Build Discord message (compact tickets)
         if: ${{ github.event.inputs.mode == 'predict' }}
         env:
@@ -88,24 +82,18 @@ jobs:
             exit 0
           fi
 
-          python - <<'PY'
-import os, csv, textwrap, json
-from collections import defaultdict, OrderedDict
+          cat > build_discord_message.py <<'EOF'
+import os, csv
+from collections import defaultdict
 
 csv_path = "./predict/predictions_summary.csv"
 topn  = int(os.environ.get("TOPN", "18"))
-sims  = os.environ.get("SIMS", "?")
-dates = os.environ.get("DATES","")
-pids  = os.environ.get("PIDS","")
-races = os.environ.get("RACES","")
 
-# 読み込み：date,pid,race,rank,ticket,prob
 rows = []
 with open(csv_path, newline="", encoding="utf-8") as f:
     for r in csv.DictReader(f):
         rows.append(r)
 
-# レース単位にまとめ、rank<=TOPN の ticket を集める
 by_race = defaultdict(list)
 for r in rows:
     if int(r.get("rank", 9999)) <= topn:
@@ -113,11 +101,8 @@ for r in rows:
         by_race[key].append(r["ticket"])
 
 def compact_tickets(tickets):
-    """
-    簡易コンパクト化：
-      1) 先頭2つが同じものは 1-2-3/5/6 形式にまとめる
-      2) 上記以外はそのまま
-    """
+    """同一F-SでTの重複を圧縮（例: 1-2-3,1-2-5 -> 1-2-3/5）"""
+    from collections import defaultdict
     buckets = defaultdict(list)
     keep = []
     for t in tickets:
@@ -126,11 +111,9 @@ def compact_tickets(tickets):
             buckets[(parts[0], parts[1])].append(parts[2])
         else:
             keep.append(t)
-
     out = []
     for (a,b), tails in buckets.items():
-        # 1-2-3 のような単体のみなら通常表記、複数なら 1-2-3/5/6
-        tails = sorted(set(tails), key=lambda x: int(x) if x.isdigit() else x)
+        tails = sorted(set(tails))
         if len(tails) == 1:
             out.append(f"{a}-{b}-{tails[0]}")
         else:
@@ -138,43 +121,18 @@ def compact_tickets(tickets):
     out.extend(keep)
     return out
 
-lines = []
-header = f"**SimS v1 Predict**  dates={dates}  pid='{pids}'  races='{races}'  sims={sims}  topN={topn}"
-lines.append(header)
-
+lines = [f"**SimS v1 Predict**  dates={os.environ.get('DATES')}  pid='{os.environ.get('PIDS')}'  races='{os.environ.get('RACES')}'  sims={os.environ.get('SIMS')}  topN={topn}"]
 for (d,p,r), tickets in sorted(by_race.items()):
     comp = compact_tickets(tickets)
-    body = "、".join(comp)  # 全角カンマで見やすく
-    lines.append(f"[{d} {p} {r}]  {body}")
+    lines.append(f"[{d} {p} {r}]  " + "、".join(comp))
 
-# 2000文字制限に合わせて分割
-joined = "\n".join(lines)
-chunks = []
-buf = ""
-for line in joined.split("\n"):
-    if len(buf) + len(line) + 1 > 1800:  # 余裕を見て 1800
-        chunks.append(buf)
-        buf = line
-    else:
-        buf = (buf + "\n" + line) if buf else line
-if buf:
-    chunks.append(buf)
-
-# 出力ファイル（ワークフロー後段で送信・記録用）
-os.makedirs("./predict", exist_ok=True)
 with open("./predict/discord_message.txt", "w", encoding="utf-8") as f:
-    for i, c in enumerate(chunks, 1):
-        if len(chunks) > 1:
-            f.write(f"(part {i}/{len(chunks)})\n")
-        f.write(c.strip() + "\n\n")
+    f.write("\n".join(lines))
+EOF
 
-# ついでにコンパクト表だけのテキストも落としておく
-with open("./predict/predictions_compact.txt", "w", encoding="utf-8") as f:
-    for (d,p,r), tickets in sorted(by_race.items()):
-        comp = compact_tickets(tickets)
-        f.write(f"{d} {p} {r} : " + "、".join(comp) + "\n")
-PY
+          python build_discord_message.py
 
+      # ---- Discord に本文 + CSV を通知 ----
       - name: Notify Discord (predict)
         if: ${{ github.event.inputs.mode == 'predict' }}
         env:
@@ -190,33 +148,24 @@ PY
             exit 0
           fi
 
-          # 本文（複数パートの場合は順次送信）
-          while IFS= read -r block || [ -n "$block" ]; do
-            # 空行でメッセージ区切り
-            if [ -z "$block" ]; then
-              continue
-            fi
-            # JSON のためのエスケープ
-            esc=$(printf "%s" "$block" | python - <<'PY'
-import sys, json
-print(json.dumps({"c": sys.stdin.read()})["c"])
+          # 本文（JSONエスケープは Python に任せる）
+          JSON_PAYLOAD=$(python - <<'PY'
+import json,sys
+s=open("./predict/discord_message.txt","r",encoding="utf-8").read()
+print(json.dumps({"content": s}))
 PY
 )
-            curl -sS -H "Content-Type: application/json" \
-                 -X POST \
-                 -d "{\"content\": ${esc}}" \
-                 "$WEBHOOK" >/dev/null 2>&1 || true
-          done < <(awk '1; /^$/{print ""}' ./predict/discord_message.txt)
+          echo "$JSON_PAYLOAD" | curl -sS -H "Content-Type: application/json" -X POST -d @- "$WEBHOOK" || true
 
-          # 参考用に CSV も添付
+          # CSV を添付
           if [ -s "./predict/predictions_summary.csv" ]; then
             curl -sS -X POST \
-                 -F "payload_json={\"content\":\"predictions_summary.csv を添付します\"}" \
-                 -F "file1=@./predict/predictions_summary.csv" \
-                 "$WEBHOOK" >/dev/null 2>&1 || true
+              -F 'payload_json={"content":"predictions_summary.csv を添付します"}' \
+              -F "file1=@./predict/predictions_summary.csv" \
+              "$WEBHOOK" || true
           fi
 
-      # 既存：predict をリポジトリにコミット & プッシュ
+      # ---- predict をリポジトリにコミット & プッシュ ----
       - name: Commit predict folder to repo
         if: ${{ github.event.inputs.mode == 'predict' }}
         run: |
