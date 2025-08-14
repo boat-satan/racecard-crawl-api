@@ -36,6 +36,7 @@ jobs:
           python-version: "3.11"
       - name: Install deps
         run: pip install numpy pandas
+
       - name: Predict (TOPN)
         if: ${{ github.event.inputs.mode == 'predict' }}
         run: |
@@ -46,6 +47,7 @@ jobs:
             --races "${{ github.event.inputs.races }}" \
             --sims  "${{ github.event.inputs.sims }}" \
             --topn  "${{ github.event.inputs.topn }}"
+
       - name: Eval (ROI)
         if: ${{ github.event.inputs.mode == 'eval' }}
         run: |
@@ -54,7 +56,9 @@ jobs:
             --dates "${{ github.event.inputs.dates }}" \
             --sims  "${{ github.event.inputs.sims }}" \
             --topn  "${{ github.event.inputs.topn }}" \
-            --unit  "${{ github.event.inputs.unit }}"
+            --unit  "${{ github.event.inputs.unit }}" \
+            --outdir ./out
+
       - uses: actions/upload-artifact@v4
         with:
           name: sims_outputs
