@@ -32,14 +32,13 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
-    # ← これを追加：push するための権限
     permissions:
       contents: write
 
     steps:
       - uses: actions/checkout@v4
         with:
-          persist-credentials: true   # Actions トークンで push 可
+          persist-credentials: true
 
       - uses: actions/setup-python@v5
         with:
@@ -67,7 +66,38 @@ jobs:
             --limit "${{ github.event.inputs.limit }}" \
             --predict-only
 
-      # ★ 追加：predict をリポジトリにコミット & プッシュ
+      # ★ 追加：Discord に買い目通知（predict時）
+      - name: Notify Discord (predict)
+        if: ${{ github.event.inputs.mode == 'predict' }}
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          set -e
+          if [ -z "$WEBHOOK" ]; then
+            echo "DISCORD_WEBHOOK_URL is not set. Skip notify."
+            exit 0
+          fi
+          if [ ! -s "./predict/predictions_summary.csv" ]; then
+            echo "No predictions_summary.csv. Skip notify."
+            exit 0
+          fi
+          TITLE="SimS v1 Predict"
+          META="dates=${{ github.event.inputs.dates }} | pid='${{ github.event.inputs.pids }}' | races='${{ github.event.inputs.races }}' | sims=${{ github.event.inputs.sims }} | topN=${{ github.event.inputs.topn }}"
+          # 本文（Discordの2000文字制限回避のためヘッダ＋先頭数行だけ本文、CSVは添付）
+          HEAD=$(head -n 15 ./predict/predictions_summary.csv | sed 's/"/\\"/g')
+          CONTENT="**${TITLE}**\n${META}\n\`\`\`csv\n${HEAD}\n...\n\`\`\`"
+          # 本文メッセージ
+          curl -sS -H "Content-Type: application/json" \
+               -X POST \
+               -d "{\"content\":\"${CONTENT}\"}" \
+               "$WEBHOOK" || true
+          # フルCSVを添付（file1）
+          curl -sS -X POST \
+               -F "payload_json={\"content\":\"predictions_summary.csv を添付します\"}" \
+               -F "file1=@./predict/predictions_summary.csv" \
+               "$WEBHOOK" || true
+
+      # ★ 既存：predict をリポジトリにコミット & プッシュ
       - name: Commit predict folder to repo
         if: ${{ github.event.inputs.mode == 'predict' }}
         run: |
@@ -78,12 +108,8 @@ jobs:
           fi
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # 既存ファイルはそのまま上書きコミット
           git add -A predict
-          git commit -m "chore(predict): ${{
-            github.event.inputs.dates }} ${{
-            github.event.inputs.pids }} ${{
-            github.event.inputs.races }} (topN=${{ github.event.inputs.topn }}, sims=${{ github.event.inputs.sims }})" || echo "No changes to commit"
+          git commit -m "chore(predict): ${{ github.event.inputs.dates }} ${{ github.event.inputs.pids }} ${{ github.event.inputs.races }} (topN=${{ github.event.inputs.topn }}, sims=${{ github.event.inputs.sims }})" || echo "No changes to commit"
           git push
 
       - name: Upload predict artifact
