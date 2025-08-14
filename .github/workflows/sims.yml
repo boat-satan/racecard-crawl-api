@@ -77,12 +77,8 @@ jobs:
           RACES: ${{ github.event.inputs.races }}
         run: |
           set -e
-          if [ ! -s "./predict/predictions_summary.csv" ]; then
-            echo "No predictions_summary.csv -> skip building message."
-            exit 0
-          fi
-
-          cat > build_discord_message.py <<'PY'
+          [ -s "./predict/predictions_summary.csv" ] || exit 0
+          python - <<'PY'
 import os, csv
 from collections import defaultdict
 
@@ -96,14 +92,15 @@ with open(csv_path, newline="", encoding="utf-8") as f:
 
 by_race = defaultdict(list)
 for r in rows:
-    if int(r.get("rank", 9999)) <= topn:
-        key = (r["date"], r["pid"], r["race"])
-        by_race[key].append(r["ticket"])
+    try:
+        if int(r.get("rank", 9999)) <= topn:
+            by_race[(r["date"], r["pid"], r["race"])].append(r["ticket"])
+    except Exception:
+        pass
 
 def compact_tickets(tickets):
-    """同一 F-S で T を圧縮（1-2-3,1-2-5 -> 1-2-3/5）。形式外はそのまま保持。"""
-    buckets = defaultdict(list)
-    keep = []
+    """同一F-SでTを圧縮（1-2-3,1-2-5 -> 1-2-3/5）。形式外は素通し。"""
+    buckets = defaultdict(list); keep = []
     for t in tickets:
         parts = t.split("-")
         if len(parts) == 3:
@@ -111,31 +108,25 @@ def compact_tickets(tickets):
         else:
             keep.append(t)
     out = []
-    for (a, b), tails in buckets.items():
+    for (a,b), tails in buckets.items():
         tails = sorted(set(tails))
-        if len(tails) == 1:
-            out.append(f"{a}-{b}-{tails[0]}")
-        else:
-            out.append(f"{a}-{b}-" + "/".join(tails))
+        out.append(f"{a}-{b}-" + (tails[0] if len(tails)==1 else "/".join(tails)))
     out.extend(keep)
     return out
 
-# ← ここで f-string の中に関数呼び出しを入れない（事前に変数へ）
-dates = os.environ.get("DATES")
-pids = os.environ.get("PIDS")
-races = os.environ.get("RACES")
-sims = os.environ.get("SIMS")
+# 文字列を先に取り出して f-string で関数呼び出しを埋めない
+dates = os.environ.get("DATES"); pids = os.environ.get("PIDS")
+races = os.environ.get("RACES"); sims = os.environ.get("SIMS")
 
 lines = [f"**SimS v1 Predict**  dates={dates}  pid='{pids}'  races='{races}'  sims={sims}  topN={topn}"]
-for (d, p, r), tickets in sorted(by_race.items()):
+for (d,p,r), tickets in sorted(by_race.items()):
     comp = compact_tickets(tickets)
     lines.append(f"[{d} {p} {r}]  " + "、".join(comp))
 
 with open("./predict/discord_message.txt", "w", encoding="utf-8") as f:
     f.write("\n".join(lines))
+print("built ./predict/discord_message.txt")
 PY
-
-          python build_discord_message.py
 
       # ---- Discord に本文 + CSV を通知 ----
       - name: Notify Discord (predict)
@@ -144,23 +135,19 @@ PY
           WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           set -e
-          if [ -z "$WEBHOOK" ]; then
-            echo "DISCORD_WEBHOOK_URL is not set. Skip notify."
-            exit 0
-          fi
-          if [ ! -s "./predict/discord_message.txt" ]; then
-            echo "No discord_message.txt. Skip notify."
-            exit 0
-          fi
+          [ -n "$WEBHOOK" ] || { echo "DISCORD_WEBHOOK_URL not set"; exit 0; }
+          [ -s "./predict/discord_message.txt" ] || exit 0
 
+          # 本文（JSON は Python に任せて安全にエスケープ）
           JSON_PAYLOAD=$(python - <<'PY'
-import json, sys
+import json
 s = open("./predict/discord_message.txt","r",encoding="utf-8").read()
 print(json.dumps({"content": s}))
 PY
 )
           echo "$JSON_PAYLOAD" | curl -sS -H "Content-Type: application/json" -X POST -d @- "$WEBHOOK" || true
 
+          # CSV を添付（存在する場合のみ）
           if [ -s "./predict/predictions_summary.csv" ]; then
             curl -sS -X POST \
               -F 'payload_json={"content":"predictions_summary.csv を添付します"}' \
