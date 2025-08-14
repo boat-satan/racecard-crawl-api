@@ -4,32 +4,49 @@ on:
   workflow_dispatch:
     inputs:
       date:
-        description: "YYYYMMDD（空なら全日付スキャン）"
+        description: "YYYYMMDD（空なら programs/v2 配下の全日付をビルド）"
         required: false
   schedule:
-    - cron: "00 22 * * *"  # JST 07:00 相当（UTC22:00）
+    - cron: "00 22 * * *"  # JST 07:00（UTC 22:00）に日次実行
+
+# 重要：botに書き込み権限を付与
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # GITHUB_TOKEN を push に使う（必須）
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
       - name: Build by date or scan all under programs/v2
         run: |
           python -m pip install -U pip
-          # 依存なし（標準lib）だが将来の拡張のためpipは更新だけ
+          # 依存は標準ライブラリのみ（将来の拡張に備えてpipだけ更新）
           if [ -z "${{ github.event.inputs.date }}" ]; then
             python scripts/schedules_build_all.py
           else
             python scripts/schedules_build.py --date "${{ github.event.inputs.date }}"
           fi
+
       - name: Commit & push
         run: |
-          git config user.name "bot"
-          git config user.email "bot@example.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add public/schedules/v1/
-          git commit -m "schedules_v1 build" || echo "no changes"
-          git push
+          # 差分なしでも失敗しない
+          git commit -m "schedules_v1 build" || echo "no changes to commit"
+          # 変更があるときだけ push（エラー時もジョブを落とさない）
+          if [ -n "$(git log -1 --pretty=%B | grep schedules_v1)" ]; then
+            git push origin HEAD:${GITHUB_REF_NAME} || git push
+          fi
