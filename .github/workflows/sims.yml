@@ -148,14 +148,18 @@ EOF
             exit 0
           fi
 
-          # 本文（JSONエスケープは Python に任せる）
-          JSON_PAYLOAD=$(python - <<'PY'
-import json,sys
+          # 本文を JSON にしてファイルへ（サブシェル代入は使わない）
+          python - <<'PY' > ./predict/payload.json
+import json
 s=open("./predict/discord_message.txt","r",encoding="utf-8").read()
 print(json.dumps({"content": s}))
 PY
-)
-          echo "$JSON_PAYLOAD" | curl -sS -H "Content-Type: application/json" -X POST -d @- "$WEBHOOK" || true
+
+          # 本文送信
+          curl -sS -H "Content-Type: application/json" \
+               -X POST \
+               --data-binary @./predict/payload.json \
+               "$WEBHOOK" || true
 
           # CSV を添付
           if [ -s "./predict/predictions_summary.csv" ]; then
