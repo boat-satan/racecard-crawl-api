@@ -33,7 +33,7 @@ jobs:
   run:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # predict フォルダを push するため
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -78,7 +78,8 @@ jobs:
         run: |
           set -e
           [ -s "./predict/predictions_summary.csv" ] || exit 0
-          python - <<'PY'
+
+          cat <<'PY' > build_discord_message.py
 import os, csv
 from collections import defaultdict
 
@@ -114,7 +115,6 @@ def compact_tickets(tickets):
     out.extend(keep)
     return out
 
-# 文字列を先に取り出して f-string で関数呼び出しを埋めない
 dates = os.environ.get("DATES"); pids = os.environ.get("PIDS")
 races = os.environ.get("RACES"); sims = os.environ.get("SIMS")
 
@@ -128,6 +128,8 @@ with open("./predict/discord_message.txt", "w", encoding="utf-8") as f:
 print("built ./predict/discord_message.txt")
 PY
 
+          python build_discord_message.py
+
       # ---- Discord に本文 + CSV を通知 ----
       - name: Notify Discord (predict)
         if: ${{ github.event.inputs.mode == 'predict' }}
@@ -138,16 +140,15 @@ PY
           [ -n "$WEBHOOK" ] || { echo "DISCORD_WEBHOOK_URL not set"; exit 0; }
           [ -s "./predict/discord_message.txt" ] || exit 0
 
-          # 本文（JSON は Python に任せて安全にエスケープ）
-          JSON_PAYLOAD=$(python - <<'PY'
-import json
+          cat <<'PY' > make_payload.py
+import json, sys
 s = open("./predict/discord_message.txt","r",encoding="utf-8").read()
-print(json.dumps({"content": s}))
+sys.stdout.write(json.dumps({"content": s}))
 PY
-)
+
+          JSON_PAYLOAD=$(python make_payload.py)
           echo "$JSON_PAYLOAD" | curl -sS -H "Content-Type: application/json" -X POST -d @- "$WEBHOOK" || true
 
-          # CSV を添付（存在する場合のみ）
           if [ -s "./predict/predictions_summary.csv" ]; then
             curl -sS -X POST \
               -F 'payload_json={"content":"predictions_summary.csv を添付します"}' \
