@@ -41,9 +41,7 @@ def _group_topn(rows, topn):
     return by_race
 
 def _compact_tickets(tickets):
-    # 1) 1着=2着（a=b-…）
-    # 2) 2着=3着（a-b=c）
-    # 3) 3着束（a-b-XYZ）
+    # 入力: ["a-b-c", ...]
     triples = []
     for t in tickets:
         p = t.split("-")
@@ -55,7 +53,7 @@ def _compact_tickets(tickets):
     used = set()
     out  = []
 
-    # (1) F/S 可換
+    # (1) F/S 可換: a=b-XYZ
     fs_to_cs = defaultdict(set)
     for a,b,c in triples:
         fs_to_cs[(a,b)].add(c)
@@ -72,7 +70,7 @@ def _compact_tickets(tickets):
                 used.add((a,b,c)); used.add((b,a,c))
             paired.add((a,b)); paired.add((b,a))
 
-    # (2) S/T 可換
+    # (2) S/T 可換: a-b=c
     remaining = [x for x in triples if x not in used]
     exist = set(remaining)
     seen = set()
@@ -85,7 +83,7 @@ def _compact_tickets(tickets):
             used.add((a,s,t)); used.add((a,t,s))
             seen.add((a,s,t)); seen.add((a,t,s))
 
-    # (3) 3着束
+    # (3) 3着束: a-b-XYZ
     remaining2 = [x for x in triples if x not in used]
     by_ab = defaultdict(set)
     passthrough = []
@@ -95,45 +93,68 @@ def _compact_tickets(tickets):
         else:
             passthrough.append("-".join([a,b,c]).strip("-"))
     for (a,b), cs in by_ab.items():
-        tails = "".join(str(x) for x in sorted(cs))
-        out.append(f"{a}-{b}-{tails}")
+        if len(cs) >= 2:
+            tails = "".join(str(x) for x in sorted(cs))
+            out.append(f"{a}-{b}-{tails}")
+            for c in cs:
+                used.add((str(a), str(b), str(c)))
 
+    # (4) 2着束: a-BC-c（新規）
+    remaining3 = [x for x in triples if x not in used]
+    by_ac = defaultdict(set)
+    passthrough2 = []
+    for a,b,c in remaining3:
+        if a and b and c:
+            by_ac[(int(a), int(c))].add(int(b))
+        else:
+            passthrough2.append("-".join([a,b,c]).strip("-"))
+    for (a,c), bs in by_ac.items():
+        if len(bs) >= 2:
+            mids = "".join(str(x) for x in sorted(bs))
+            out.append(f"{a}-{mids}-{c}")
+            for b in bs:
+                used.add((str(a), str(b), str(c)))
+
+    # (5) 残りは素通し（順序維持で重複除去）
+    remaining4 = [ "-".join(t).strip("-") for t in triples if t not in used ]
     out.extend(passthrough)
-    # 順序維持のまま重複排除
+    out.extend(passthrough2)
+    out.extend(remaining4)
+
+    # 順序維持の重複排除
     return list(dict.fromkeys(out))
 
 def _sort_compacted(bets):
-    """1着→2着 昇順。a=b-XYZ / a-b=c / a-b-XYZ を正しくキー化。"""
+    """a=b-XYZ / a-b=c / a-b-XYZ / a-BC-c を整列（a昇順→b(最小)昇順→型→後尾）"""
+    def _min_digits(s):
+        try:
+            return min(int(ch) for ch in s if ch.isdigit())
+        except Exception:
+            return 999
+
     def key(s):
         try:
             parts = s.split("-")
 
-            # 2パーツの場合は a=b-XYZ か a-b=c のどちらか
+            # 2パーツ: "a=b-XYZ" or "a-b=c"
             if len(parts) == 2:
-                if "=" in parts[0]:
-                    # a=b-XYZ
+                if "=" in parts[0]:  # a=b-XYZ
                     a1, b1 = parts[0].split("=", 1)
                     return (min(int(a1), int(b1)), max(int(a1), int(b1)), 0, parts[1])
-                if "=" in parts[1]:
-                    # a-b=c
-                    a = int(parts[0])
-                    s2, t2 = parts[1].split("=", 1)
+                if "=" in parts[1]:  # a-b=c
+                    a = int(parts[0]); s2, t2 = parts[1].split("=", 1)
                     s2i, t2i = int(s2), int(t2)
                     return (a, min(s2i, t2i), 1, f"{max(s2i, t2i)}")
 
-            # a=b-…（ハイフンが複数でも先頭が a=b ならここ）
-            if "=" in parts[0]:
-                a1, b1 = parts[0].split("=", 1)
-                return (min(int(a1), int(b1)), max(int(a1), int(b1)), 0, "-".join(parts[1:]))
-
-            # a-b-XYZ
-            if len(parts) >= 3:
-                a, b = int(parts[0]), int(parts[1])
-                return (a, b, 2, "-".join(parts[2:]))
-
-            return (999, 999, 9, s)
+            # 3パーツ以上（a-b-XYZ / a-BC-c）
+            a = int(parts[0])
+            mid = parts[1] if len(parts) >= 2 else "999"
+            mid_key = _min_digits(mid)
+            tail = "-".join(parts[2:]) if len(parts) >= 3 else ""
+            return (a, mid_key, 2, tail or "")
         except Exception:
             return (999, 999, 9, s)
+
     return sorted(bets, key=key)
 
 def main():
