@@ -19,7 +19,7 @@ on:
       sims:
         description: "試行回数（predict）"
         required: false
-        default: "1200"
+        default: "10000"
       topn:
         description: "上位N（predict）"
         required: false
