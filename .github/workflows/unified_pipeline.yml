@@ -1,0 +1,104 @@
+# .github/workflows/unified_pipeline.yml
+name: Unified Sims (②→③→④)
+
+on:
+  workflow_dispatch:
+    inputs:
+      dates: { description: "YYYYMMDD(,区切り) 空ならJSTの今日", default: "" }
+      pids:  { description: "場コード(,区切り)",  default: "" }
+      races: { description: "R番号(,区切り)",     default: "" }
+      sims:  { description: "試行回数(④へ)",     default: "10000" }
+      topn:  { description: "上位N(④へ)",        default: "18" }
+      force: { description: "再取得/再計算",      default: "false" }
+  schedule:
+    - cron: "20 5 * * *"   # 任意（UTC）。JST 14:20 相当
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.mk.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: npm ci
+
+      # ⬇️ datesが空ならJSTの今日(YYYYMMDD)を自動セット
+      - name: Set default date if empty (JST)
+        id: setdate
+        run: |
+          if [ -z "${{ github.event.inputs.dates }}" ]; then
+            TODAY_JST=$(TZ=Asia/Tokyo date +%Y%m%d)
+            echo "dates=$TODAY_JST" >> $GITHUB_OUTPUT
+          else
+            echo "dates=${{ github.event.inputs.dates }}" >> $GITHUB_OUTPUT
+          fi
+
+      - id: mk
+        run: |
+          node scripts/ci/make-matrix.js \
+            --dates "${{ steps.setdate.outputs.dates }}" \
+            --pids  "${{ github.event.inputs.pids || '' }}" \
+            --races "${{ github.event.inputs.races || '' }}" \
+            --from-racecard-tree
+          # stdoutに {"include":[{date,pid,race},...]} を出す実装
+
+  run:
+    needs: plan
+    if: ${{ needs.plan.outputs.matrix != '' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # 必要なら max-parallel を調整
+      # max-parallel: 6
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }   # 後続のpullを効かせる
+
+      # ② 展示（既存WFを“呼ぶだけ”）
+      # ※ リポ/ブランチは実環境に合わせて変更（例: boat-satan/racecard-crawl-api@main）
+      - name: Exhibition (call 02)
+        uses: boat-satan/racecard-crawl-api/.github/workflows/02_exhibition.yml@main
+        with:
+          date:  ${{ matrix.date }}
+          pid:   ${{ matrix.pid }}
+          race:  ${{ matrix.race }}
+          force: ${{ github.event.inputs.force }}
+        secrets: inherit
+
+      # ②がrepoにcommit/pushする前提なら、ここで最新をpullして反映
+      - name: Pull latest after 02
+        run: git pull --rebase
+
+      # ③ 統合（既存WFを“呼ぶだけ”）
+      - name: Integrate (call 03)
+        uses: boat-satan/racecard-crawl-api/.github/workflows/03_integrate.yml@main
+        with:
+          date:  ${{ matrix.date }}
+          pid:   ${{ matrix.pid }}
+          race:  ${{ matrix.race }}
+        secrets: inherit
+
+      - name: Pull latest after 03
+        run: git pull --rebase
+
+      # ④ 予測（既存WFを“呼ぶだけ”）
+      - name: Predict (call 04)
+        uses: boat-satan/racecard-crawl-api/.github/workflows/04_predict.yml@main
+        with:
+          date:  ${{ matrix.date }}
+          pid:   ${{ matrix.pid }}
+          race:  ${{ matrix.race }}
+          sims:  ${{ github.event.inputs.sims }}
+          topn:  ${{ github.event.inputs.topn }}
+        secrets: inherit
+
+      - name: Done
+        run: echo "✅ ${{ matrix.date }}/${{ matrix.pid }}/${{ matrix.race }} 完了"
