@@ -6,14 +6,8 @@
 #  - CSV/JSON に保存
 # 使い方例：
 #   python sims_batch_eval_SimS_v1.py --base ./public --dates 20250810,20250811,20250812 --sims 1200 --topn 18 --unit 100
-#
-# ★変更点（最小差分の全差し替え）★
-#   - predict-only で ./predict に出力（以前どおり）
-#   - さらに eval 実行時でも、同じエンジンで ./predict に TOPN 予測を必ず出力
-#     （毎回 ./predict をクリーン＆上書きOK。Artifacts の「No files were found」を防止）
-#   - 既存の引数・出力（./SimS_v1.0_eval 配下の per_race/overall 等）はそのまま
 
-import os, json, math, argparse, shutil
+import os, json, math, argparse, csv, shutil
 from collections import Counter
 import numpy as np
 import pandas as pd
@@ -95,7 +89,6 @@ def s_base_from_nat(rc: dict) -> float:
           + 0.2 * ((n3 - 70.0) / 20.0))
 
 def wind_adjustments(env: dict):
-    """風補正（今回は env=中立想定だが式は残す）"""
     d = (env.get("wind") or {}).get("dir", "cross")
     m = float((env.get("wind") or {}).get("mps", 0.0))
     sign = 1 if d=="tail" else -1 if d=="head" else 0
@@ -283,7 +276,6 @@ def collect_files(base_dir: str, kind: str, dates: set):
     root_v1 = os.path.join(base_dir, kind, "v1")
     root    = root_v1 if os.path.isdir(root_v1) else os.path.join(base_dir, kind)
     out = []
-    # dates 指定なければ root 直下の全日付ディレクトリを列挙
     date_dirs = list(dates) if dates else [
         d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d))
     ]
@@ -297,13 +289,12 @@ def collect_files(base_dir: str, kind: str, dates: set):
                 continue
             for fname in os.listdir(dir_pid):
                 if fname.endswith(".json"):
-                    race = fname[:-5]  # drop .json
+                    race = fname[:-5]
                     out.append(((d, pid, race), os.path.join(dir_pid, fname)))
     return dict(out)
 
 # ========== オッズ/結果のパース ==========
 def odds_map(odds_json: dict) -> dict:
-    """三連単オッズを { '1-2-3': decimal_odds, ... } で返す"""
     out = {}
     for item in odds_json.get("trifecta", []):
         combo = item.get("combo") or f'{item.get("F")}-{item.get("S")}-{item.get("T")}'
@@ -312,15 +303,12 @@ def odds_map(odds_json: dict) -> dict:
     return out
 
 def actual_trifecta_combo(result_json: dict):
-    """確定三連単の '1-2-3' 形式を返す（フォールバック含む）"""
     trif = (result_json.get("payouts") or {}).get("trifecta")
     if isinstance(trif, dict) and "combo" in trif:
         return trif["combo"]
-    # フォールバック：order 先頭3つ
     order = result_json.get("order")
     if isinstance(order, list) and len(order) >= 3:
         def lane_of(x):
-            # lane / course / number のいずれか
             return str(x.get("lane") or x.get("course") or x.get("F") or x.get("number"))
         try:
             f = lane_of(order[0]); s = lane_of(order[1]); t = lane_of(order[2])
@@ -335,39 +323,29 @@ def evaluate_one(int_path: str, odds_path: str, res_path: str, sims: int, topn: 
         d_int = json.load(f)
     tri_probs, _ = simulate_one(d_int, sims=sims)
 
-    # TOPN
     top = sorted(tri_probs.items(), key=lambda kv: kv[1], reverse=True)[:topn]
     top_keys = ['-'.join(map(str, k)) for k, _ in top]
 
-    # オッズ
     with open(odds_path, "r", encoding="utf-8") as f:
         d_odds = json.load(f)
     omap = odds_map(d_odds)
     bets = [c for c in top_keys if c in omap]
     stake = unit * len(bets)
 
-    # 結果
     with open(res_path, "r", encoding="utf-8") as f:
         d_res = json.load(f)
     hit_combo = actual_trifecta_combo(d_res)
     payout = int(round(omap.get(hit_combo, 0.0) * unit)) if hit_combo in bets else 0
 
-    return stake, payout, (1 if payout > 0 else 0), bets, hit_combo, tri_probs  # ★tri_probs を返す
-
-# ========== 予測書き出し（共通ユーティリティ） ==========
-def write_predict(pred_dir: str, date: str, pid: str, race: str, tri_probs: dict, topn: int):
-    """レース別 JSON と summary 行を返す。"""
-    top = sorted(tri_probs.items(), key=lambda kv: kv[1], reverse=True)[:topn]
-    top_list = [{"ticket": "-".join(map(str, k)), "prob": round(v, 6)} for k, v in top]
-    # レースごとのJSON（predict直下にフラット保存）
-    with open(os.path.join(pred_dir, f"pred_{date}_{pid}_{race}.json"), "w", encoding="utf-8") as f:
-        json.dump({"date":date,"pid":pid,"race":race,"topN":top_list,"engine":"SimS ver1.0"},
-                  f, ensure_ascii=False, indent=2)
-    rows = [{"date":date,"pid":pid,"race":race,"rank":i+1,"ticket":t["ticket"],"prob":t["prob"]}
-            for i, t in enumerate(top_list)]
-    return rows
+    return stake, payout, (1 if payout > 0 else 0), bets, hit_combo
 
 # ========== メイン ==========
+def _norm_race(r: str) -> str:
+    r = (r or "").strip().upper()
+    if not r:
+        return ""
+    return r if r.endswith("R") else f"{r}R"
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="./public", help="public ディレクトリのパス")
@@ -382,15 +360,15 @@ def main():
     ap.add_argument("--predout", default="./predict", help="(無視されます)")
 
     ap.add_argument("--pids", default="", help="場コードフィルタ（カンマ区切り）")
-    ap.add_argument("--races", default="", help="レース名フィルタ（例 1R,2R）")
+    ap.add_argument("--races", default="", help="レース名フィルタ（例 1R,2R もしくは 1,2）")
 
     args = ap.parse_args()
 
     dates = set([d.strip() for d in args.dates.split(",") if d.strip()]) if args.dates else set()
     pids_filter  = set([p.strip() for p in args.pids.split(",") if p.strip()])
-    races_filter = set([r.strip() for r in args.races.split(",") if r.strip()])
+    races_filter = set([_norm_race(r) for r in args.races.split(",") if r.strip()])
 
-    # ---- predict-only: ./predict に上書き保存（固定） ----
+    # ---- predict-only: ./predict に上書き保存（出走表のみで対象決定） ----
     if args.predict_only:
         int_idx = collect_files(args.base, "integrated", dates) if dates else \
                   collect_files(args.base, "integrated", set(os.listdir(os.path.join(args.base, "integrated", "v1"))))
@@ -405,20 +383,41 @@ def main():
             shutil.rmtree(pred_dir)
         os.makedirs(pred_dir, exist_ok=True)
 
-        rows_all = []
-        for (date, pid, race) in keys[:(args.limit or len(keys))]:
+        print(f"[predict] candidates after filters: {len(keys)}")
+        if keys[:3]:
+            print("[predict] sample:", keys[:3])
+
+        if not keys:
+            with open(os.path.join(pred_dir, "_EMPTY.txt"), "w", encoding="utf-8") as f:
+                f.write("No races matched. Check dates/pids/races. Note: '12' is normalized to '12R'.\n")
+            pd.DataFrame([], columns=["date","pid","race","rank","ticket","prob"])\
+              .to_csv(os.path.join(pred_dir, "predictions_summary.csv"), index=False, encoding="utf-8")
+            print("predict-only done -> ./predict (NO MATCHES)")
+            return
+
+        rows = []
+        limit_n = args.limit or len(keys)
+        for (date, pid, race) in keys[:limit_n]:
             with open(int_idx[(date,pid,race)], "r", encoding="utf-8") as f:
                 d_int = json.load(f)
             tri_probs, _ = simulate_one(d_int, sims=args.sims)
-            rows_all.extend(write_predict(pred_dir, date, pid, race, tri_probs, args.topn))
+            top = sorted(tri_probs.items(), key=lambda kv: kv[1], reverse=True)[:args.topn]
+            top_list = [{"ticket": "-".join(map(str, k)), "prob": round(v, 6)} for k, v in top]
 
-        # 空でも必ず summary を出す
-        pd.DataFrame(rows_all).to_csv(os.path.join(pred_dir, "predictions_summary.csv"),
-                                      index=False, encoding="utf-8")
+            # レースごとJSON（predict直下にフラット保存）
+            with open(os.path.join(pred_dir, f"pred_{date}_{pid}_{race}.json"), "w", encoding="utf-8") as f:
+                json.dump({"date":date,"pid":pid,"race":race,"topN":top_list,"engine":"SimS ver1.0"},
+                          f, ensure_ascii=False, indent=2)
+
+            for i, t in enumerate(top_list, 1):
+                rows.append({"date":date,"pid":pid,"race":race,"rank":i,"ticket":t["ticket"],"prob":t["prob"]})
+
+        pd.DataFrame(rows).to_csv(os.path.join(pred_dir, "predictions_summary.csv"),
+                                  index=False, encoding="utf-8")
         print("predict-only done -> ./predict")
         return
 
-    # ---- eval（従来どおり）＋ 予測の同時出力（./predict） ----
+    # ---- eval（従来：integrated+odds+results が揃ったレースのみ） ----
     int_idx  = collect_files(args.base, "integrated", dates) if dates else \
                collect_files(args.base, "integrated", set(os.listdir(os.path.join(args.base, "integrated", "v1"))))
     odds_idx = collect_files(args.base, "odds", dates) if dates else \
@@ -426,7 +425,9 @@ def main():
     res_idx  = collect_files(args.base, "results", dates) if dates else \
                collect_files(args.base, "results", set(os.listdir(os.path.join(args.base, "results", "v1"))))
 
-    keys = sorted(set(int_idx.keys()) & set(odds_idx.keys()) & set(res_idx.keys()))
+    # 共通キー（evalは3者一致のみ）
+    keys_all = set(int_idx.keys()) & set(odds_idx.keys()) & set(res_idx.keys())
+    keys = sorted(keys_all)
     if pids_filter:
         keys = [k for k in keys if k[1] in pids_filter]
     if races_filter:
@@ -434,12 +435,7 @@ def main():
     if args.limit and args.limit > 0:
         keys = keys[:args.limit]
 
-    # 予測出力先（eval時でも必ず生成＆上書き）
-    pred_dir = "./predict"
-    if os.path.exists(pred_dir):
-        shutil.rmtree(pred_dir)
-    os.makedirs(pred_dir, exist_ok=True)
-    pred_rows_all = []
+    print(f"[eval] races to evaluate: {len(keys)}")
 
     per_rows = []
     total_stake = 0
@@ -447,7 +443,7 @@ def main():
     total_hit = 0
 
     for (date, pid, race) in keys:
-        stake, payout, hit, bets, hit_combo, tri_probs = evaluate_one(
+        stake, payout, hit, bets, hit_combo = evaluate_one(
             int_idx[(date,pid,race)],
             odds_idx[(date,pid,race)],
             res_idx[(date,pid,race)],
@@ -463,14 +459,6 @@ def main():
             "hit": hit, "hit_combo": hit_combo
         })
 
-        # ★eval 中でも TOPN 予測を ./predict に書き出し
-        pred_rows_all.extend(write_predict(pred_dir, date, pid, race, tri_probs, args.topn))
-
-    # 予測 summary（空でも生成）
-    pd.DataFrame(pred_rows_all).to_csv(os.path.join(pred_dir, "predictions_summary.csv"),
-                                       index=False, encoding="utf-8")
-
-    # 集計
     df = pd.DataFrame(per_rows)
     overall = {
         "engine": "SimS ver1.0",
@@ -492,7 +480,6 @@ def main():
                      .reset_index())
         by_date["roi"] = (by_date["payout_total"] - by_date["stake_total"]) / by_date["stake_total"]
 
-    # 保存
     os.makedirs(args.outdir, exist_ok=True)
     df.to_csv(os.path.join(args.outdir, "per_race_results.csv"), index=False)
     if by_date is not None:
@@ -500,13 +487,11 @@ def main():
     with open(os.path.join(args.outdir, "overall.json"), "w", encoding="utf-8") as f:
         json.dump(overall, f, ensure_ascii=False, indent=2)
 
-    # 画面出力
     print("=== OVERALL (SimS ver1.0) ===")
     print(json.dumps(overall, ensure_ascii=False, indent=2))
     if by_date is not None:
         print("\n=== BY DATE ===")
         print(by_date.to_string(index=False))
-    print("\n[predict outputs] -> ./predict")  # 明示
 
 if __name__ == "__main__":
     main()
