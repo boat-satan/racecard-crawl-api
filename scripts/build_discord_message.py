@@ -1,6 +1,6 @@
 # scripts/build_discord_message.py
-# predict/predictions_summary.csv から買い目TOPNを1-2-3/5形式に圧縮して
-# predict/discord_message.txt を作るだけのスクリプト
+# predict/predictions_summary.csv から TOPN を 1-2-3/5 形式で圧縮し
+# predict/discord_message.txt を生成
 
 import os, csv
 from collections import defaultdict
@@ -15,7 +15,6 @@ races = os.environ.get("RACES", "")
 sims  = os.environ.get("SIMS", "")
 
 if not os.path.exists(CSV_PATH) or os.path.getsize(CSV_PATH) == 0:
-    # 予防的に空ファイルでも置いておく
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
     with open(OUT_PATH, "w", encoding="utf-8") as f:
         f.write("No predictions.\n")
@@ -35,9 +34,7 @@ for r in rows:
         pass
 
 def compact_tickets(tickets):
-    """同一F-SでTを圧縮（1-2-3,1-2-5 -> 1-2-3/5）。形式外は素通し。"""
-    buckets = defaultdict(list)
-    keep = []
+    buckets = defaultdict(list); keep = []
     for t in tickets:
         parts = t.split("-")
         if len(parts) == 3:
@@ -47,14 +44,13 @@ def compact_tickets(tickets):
     out = []
     for (a,b), tails in buckets.items():
         tails = sorted(set(tails))
-        out.append(f"{a}-{b}-" + (tails[0] if len(tails) == 1 else "/".join(tails)))
+        out.append(f"{a}-{b}-" + (tails[0] if len(tails)==1 else "/".join(tails)))
     out.extend(keep)
     return out
 
 lines = [f"**SimS v1 Predict**  dates={dates}  pid='{pids}'  races='{races}'  sims={sims}  topN={topn}"]
 for (d,p,r), tickets in sorted(by_race.items()):
-    comp = compact_tickets(tickets)
-    lines.append(f"[{d} {p} {r}]  " + "、".join(comp))
+    lines.append(f"[{d} {p} {r}]  " + "、".join(compact_tickets(tickets)))
 
 os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
 with open(OUT_PATH, "w", encoding="utf-8") as f:
