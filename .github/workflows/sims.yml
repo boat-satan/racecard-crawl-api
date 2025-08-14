@@ -76,79 +76,27 @@ jobs:
           PIDS:  ${{ github.event.inputs.pids }}
           RACES: ${{ github.event.inputs.races }}
         run: |
-          set -e
-          [ -s "./predict/predictions_summary.csv" ] || exit 0
+          python scripts/build_discord_message.py
 
-          # バックスラッシュ heredoc（変数展開/置換一切無効）
-          cat <<\PY > build_discord_message.py
-import os, csv
-from collections import defaultdict
-
-csv_path = "./predict/predictions_summary.csv"
-topn = int(os.environ.get("TOPN", "18"))
-
-rows = []
-with open(csv_path, newline="", encoding="utf-8") as f:
-    for r in csv.DictReader(f):
-        rows.append(r)
-
-by_race = defaultdict(list)
-for r in rows:
-    try:
-        if int(r.get("rank", 9999)) <= topn:
-            by_race[(r["date"], r["pid"], r["race"])].append(r["ticket"])
-    except Exception:
-        pass
-
-def compact_tickets(tickets):
-    """同一F-SでTを圧縮（1-2-3,1-2-5 -> 1-2-3/5）。形式外は素通し。"""
-    buckets = defaultdict(list); keep = []
-    for t in tickets:
-        parts = t.split("-")
-        if len(parts) == 3:
-            buckets[(parts[0], parts[1])].append(parts[2])
-        else:
-            keep.append(t)
-    out = []
-    for (a,b), tails in buckets.items():
-        tails = sorted(set(tails))
-        out.append(f"{a}-{b}-" + (tails[0] if len(tails)==1 else "/".join(tails)))
-    out.extend(keep)
-    return out
-
-dates = os.environ.get("DATES"); pids = os.environ.get("PIDS")
-races = os.environ.get("RACES"); sims = os.environ.get("SIMS")
-
-lines = [f"**SimS v1 Predict**  dates={dates}  pid='{pids}'  races='{races}'  sims={sims}  topN={topn}"]
-for (d,p,r), tickets in sorted(by_race.items()):
-    comp = compact_tickets(tickets)
-    lines.append(f"[{d} {p} {r}]  " + "、".join(comp))
-
-with open("./predict/discord_message.txt", "w", encoding="utf-8") as f:
-    f.write("\n".join(lines))
-print("built ./predict/discord_message.txt")
-PY
-
-          python build_discord_message.py
-
-      # ---- Discord に本文 + CSV を通知 ----
+      # ---- Discord に本文 + CSV を通知（heredoc不使用） ----
       - name: Notify Discord (predict)
         if: ${{ github.event.inputs.mode == 'predict' }}
         env:
           WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
-          set -e
-          [ -n "$WEBHOOK" ] || { echo "DISCORD_WEBHOOK_URL not set"; exit 0; }
-          [ -s "./predict/discord_message.txt" ] || exit 0
-
-          cat <<\PY > make_payload.py
-import json, sys
-s = open("./predict/discord_message.txt","r",encoding="utf-8").read()
-sys.stdout.write(json.dumps({"content": s}))
-PY
-          JSON_PAYLOAD=$(python make_payload.py)
+          if [ -z "$WEBHOOK" ]; then
+            echo "DISCORD_WEBHOOK_URL is not set. Skip notify."
+            exit 0
+          fi
+          if [ ! -s "./predict/discord_message.txt" ]; then
+            echo "No discord_message.txt. Skip notify."
+            exit 0
+          fi
+          # 本文をJSON化（Pythonワンライナーのみ・heredoc無し）
+          JSON_PAYLOAD=$(python -c "import json,io;print(json.dumps({'content': io.open('./predict/discord_message.txt','r',encoding='utf-8').read()}))")
           echo "$JSON_PAYLOAD" | curl -sS -H "Content-Type: application/json" -X POST -d @- "$WEBHOOK" || true
 
+          # CSV 添付
           if [ -s "./predict/predictions_summary.csv" ]; then
             curl -sS -X POST \
               -F 'payload_json={"content":"predictions_summary.csv を添付します"}' \
@@ -160,7 +108,6 @@ PY
       - name: Commit predict folder to repo
         if: ${{ github.event.inputs.mode == 'predict' }}
         run: |
-          set -e
           if [ -z "$(ls -A ./predict)" ]; then
             echo "predict/ is empty. Nothing to commit."
             exit 0
