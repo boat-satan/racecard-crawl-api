@@ -1,4 +1,4 @@
-name: SimS v1 Runner
+name: SimS v1 Runner (unified)
 
 on:
   workflow_dispatch:
@@ -17,37 +17,47 @@ on:
         description: "レース(空=全レース)"
         default: ""
       sims:
-        description: "試行回数(predict用)"
+        description: "試行回数（predict/eval共通）"
         default: "1200"
       topn:
-        description: "上位N(predict/eval共通)"
+        description: "上位N（predict/eval共通）"
         default: "18"
       unit:
-        description: "均等購入額(eval用)"
+        description: "均等購入額（eval用）"
         default: "100"
+      limit:
+        description: "先頭からNレースだけ処理（0なら全件）"
+        default: "0"
 
 jobs:
   run:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
       - name: Install deps
         run: pip install numpy pandas
 
-      - name: Predict (TOPN)
+      # ---- predict: 同一エンジンでTOPNだけを出力（出目まで完全一致） ----
+      - name: Predict (TOPN, same engine as eval)
         if: ${{ github.event.inputs.mode == 'predict' }}
         run: |
-          python sims_predict_v1.py \
+          python sims_batch_eval_SimS_v1.py \
             --base ./public \
             --dates "${{ github.event.inputs.dates }}" \
+            --sims  "${{ github.event.inputs.sims }}" \
+            --topn  "${{ github.event.inputs.topn }}" \
             --pids  "${{ github.event.inputs.pids }}" \
             --races "${{ github.event.inputs.races }}" \
-            --sims  "${{ github.event.inputs.sims }}" \
-            --topn  "${{ github.event.inputs.topn }}"
+            --limit "${{ github.event.inputs.limit }}" \
+            --predict-only \
+            --predout ./out
 
+      # ---- eval: ROI集計（Artifacts収集のため out/ に出力） ----
       - name: Eval (ROI)
         if: ${{ github.event.inputs.mode == 'eval' }}
         run: |
@@ -57,12 +67,13 @@ jobs:
             --sims  "${{ github.event.inputs.sims }}" \
             --topn  "${{ github.event.inputs.topn }}" \
             --unit  "${{ github.event.inputs.unit }}" \
+            --limit "${{ github.event.inputs.limit }}" \
             --outdir ./out
 
       - uses: actions/upload-artifact@v4
         with:
-          name: sims_outputs
-          path: |
-            out/**
-            *.csv
-            *.json
+            name: sims_outputs
+            path: |
+              out/**
+              *.csv
+              *.json
