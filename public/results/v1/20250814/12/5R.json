@@ -1,0 +1,124 @@
+{
+  "date": "20250814",
+  "pid": "12",
+  "race": "5R",
+  "source": {
+    "result": "https://www.boatrace.jp/owpc/pc/race/raceresult?rno=5&jcd=12&hd=20250814"
+  },
+  "generatedAt": "2025-08-14T12:29:53.537Z",
+  "order": [
+    {
+      "pos": 1,
+      "lane": 6,
+      "racerId": "4384",
+      "name": "鶴本 崇文",
+      "time": "2'04\"8"
+    },
+    {
+      "pos": 2,
+      "lane": 2,
+      "racerId": "5036",
+      "name": "福田 翔吾",
+      "time": "2'11\"4"
+    },
+    {
+      "pos": 3,
+      "lane": 3,
+      "racerId": "5235",
+      "name": "岩田 凌",
+      "time": "2'16\"0"
+    },
+    {
+      "pos": 4,
+      "lane": 5,
+      "racerId": "4904",
+      "name": "松本 一毅",
+      "time": "2'18\"3"
+    }
+  ],
+  "start": [
+    {
+      "lane": 1,
+      "st": 0.17
+    },
+    {
+      "lane": 2,
+      "st": 0.2
+    },
+    {
+      "lane": 3,
+      "st": 0.17
+    },
+    {
+      "lane": 4,
+      "st": 0.09
+    },
+    {
+      "lane": 5,
+      "st": 0.24
+    },
+    {
+      "lane": 6,
+      "st": 0.12
+    }
+  ],
+  "decision": "まくり差し",
+  "weather": {
+    "condition": "晴",
+    "airTemp": 32,
+    "windSpeed": 0,
+    "windDirCode": 17,
+    "waterTemp": 30,
+    "wave": 1
+  },
+  "refunds": [],
+  "payouts": {
+    "trifecta": {
+      "combo": "6-2-3",
+      "amount": 244160,
+      "popularity": 117
+    },
+    "trio": {
+      "combo": "2=3=6",
+      "amount": 15670,
+      "popularity": 17
+    },
+    "exacta": {
+      "combo": "6-2",
+      "amount": 27200,
+      "popularity": 24
+    },
+    "quinella": {
+      "combo": "2=6",
+      "amount": 14380,
+      "popularity": 14
+    },
+    "wide": [
+      {
+        "combo": "2=6",
+        "amount": 470,
+        "popularity": 6
+      },
+      {
+        "combo": "2=460",
+        "amount": 14,
+        "popularity": null
+      },
+      {
+        "combo": "1=660",
+        "amount": 12,
+        "popularity": null
+      }
+    ],
+    "win": {
+      "combo": "6",
+      "amount": 820
+    },
+    "place": [
+      {
+        "combo": "6",
+        "amount": 150
+      }
+    ]
+  }
+}
