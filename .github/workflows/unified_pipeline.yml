@@ -55,9 +55,7 @@ jobs:
         shell: bash
         run: |
           DATE="${{ inputs.date }}"
-          if [ -z "$DATE" ]; then
-            DATE=$(TZ=Asia/Tokyo date +'%Y%m%d')
-          fi
+          if [ -z "$DATE" ]; then DATE=$(TZ=Asia/Tokyo date +'%Y%m%d'); fi
           if [ -z "${{ inputs.pids }}" ]; then
             PIDS="01,02,03,04,05,06,07,08,09,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24"
           else
@@ -86,13 +84,13 @@ jobs:
             echo "No changes."
           fi
 
-  # 1) 統合
+  # 1) 統合（program+exhibition+stats が揃ってるものだけ）
   integrate:
     needs: crawl
     runs-on: ubuntu-latest
     outputs:
-      date:   ${{ steps.echo.outputs.DATE }}
-      pids:   ${{ steps.echo.outputs.PIDS }}
+      date: ${{ steps.echo.outputs.DATE }}
+      pids: ${{ steps.echo.outputs.PIDS }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -114,11 +112,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          shopt -s nullglob
           DATE="${{ needs.crawl.outputs.date }}"
           STATS_DIR="public/stats/v2/racers"
-
-          IFS=',' read -ra VEN_ARR <<< "${{ needs.crawl.outputs.pids }}"
-          VENUES="${VEN_ARR[@]}"
+          VENUES="$(echo "${{ needs.crawl.outputs.pids }}" | tr ',' ' ')"
           RACES=$(seq 1 12 | sed 's/$/R/')
 
           for PID in $VENUES; do
@@ -171,3 +168,120 @@ jobs:
           else
             echo "No changes."
           fi
+
+  # 2) 予測（integrated から PIDS/RACES を自動抽出 → Runner を predict-only で実行）
+  predict:
+    needs: integrate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0, persist-credentials: true }
+      - name: Pull latest after integrate
+        run: git pull --rebase
+
+      - name: Build PIDS/RACES from integrated (overridable)
+        id: build
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          DATE="${{ needs.integrate.outputs.date }}"
+          INPUT_PIDS="${{ github.event.inputs.pids }}"
+          INPUT_RACES="${{ github.event.inputs.races }}"
+
+          # PIDS
+          if [ -n "$INPUT_PIDS" ]; then
+            PIDS="$INPUT_PIDS"
+          else
+            PIDS=""
+            for d in public/integrated/v1/$DATE/*; do
+              [ -d "$d" ] || continue
+              if ls "$d"/*.json >/dev/null 2>&1; then
+                P="$(basename "$d")"
+                PIDS="${PIDS:+$PIDS,}$P"
+              fi
+            done
+          fi
+
+          # RACES
+          if [ -n "$INPUT_RACES" ]; then
+            RACES="$INPUT_RACES"
+          else
+            RSET=""
+            for P in $(echo "$PIDS" | tr ',' ' '); do
+              for f in public/integrated/v1/$DATE/$P/*.json; do
+                [ -e "$f" ] || continue
+                R="$(basename "$f" .json)"
+                case ",$RSET," in *",$R,"*) : ;; *) RSET="${RSET:+$RSET,}$R" ;; esac
+              done
+            done
+            RACES="$RSET"
+          fi
+
+          echo "DATES=$DATE"  >> "$GITHUB_OUTPUT"
+          echo "PIDS=$PIDS"   >> "$GITHUB_OUTPUT"
+          echo "RACES=$RACES" >> "$GITHUB_OUTPUT"
+          echo "Resolved predict scope: DATE=$DATE PIDS=$PIDS RACES=$RACES"
+
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+
+      - name: Install python deps
+        run: pip install numpy pandas
+
+      - name: Clean output dirs
+        run: |
+          rm -rf ./predict ./out
+          mkdir -p ./predict ./out
+
+      - name: Predict (TOPN, same engine as eval)
+        run: >
+          python sims_batch_eval_SimS_v1.py
+          --base ./public
+          --dates "${{ steps.build.outputs.DATES }}"
+          --sims  "${{ github.event.inputs.sims }}"
+          --topn  "${{ github.event.inputs.topn }}"
+          --pids  "${{ steps.build.outputs.PIDS }}"
+          --races "${{ steps.build.outputs.RACES }}"
+          --limit "${{ github.event.inputs.limit }}"
+          --predict-only
+
+      - name: Build Discord message (compact tickets)
+        env:
+          TOPN:  "${{ github.event.inputs.topn }}"
+          SIMS:  "${{ github.event.inputs.sims }}"
+          DATES: "${{ steps.build.outputs.DATES }}"
+          PIDS:  "${{ steps.build.outputs.PIDS }}"
+          RACES: "${{ steps.build.outputs.RACES }}"
+        run: python scripts/build_discord_message.py
+
+      - name: Notify Discord (predict)
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: >
+          [ -z "$WEBHOOK" ] && echo "No webhook" && exit 0;
+          [ ! -s "./predict/discord_message.txt" ] && echo "No message" && exit 0;
+          JSON_PAYLOAD=$(python -c "import json,io;print(json.dumps({'content': io.open('./predict/discord_message.txt','r',encoding='utf-8').read()}))");
+          echo "$JSON_PAYLOAD" | curl -sS -H "Content-Type: application/json" -X POST -d @- "$WEBHOOK" || true;
+          [ -s "./predict/predictions_summary.csv" ] && curl -sS -X POST -F 'payload_json={"content":"predictions_summary.csv を添付します"}' -F "file1=@./predict/predictions_summary.csv" "$WEBHOOK" || true
+
+      - name: Commit predict folder to repo
+        run: |
+          if [ -z "$(ls -A ./predict)" ]; then
+            echo "predict/ is empty. Nothing to commit."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A predict
+          git commit -m "chore(predict): ${{ steps.build.outputs.DATES }} ${{ steps.build.outputs.PIDS }} ${{ steps.build.outputs.RACES }} (topN=${{ github.event.inputs.topn }}, sims=${{ github.event.inputs.sims }})" || echo "No changes to commit"
+          git push
+
+      - name: Upload predict artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sims_outputs
+          path: ./predict
+          if-no-files-found: error
