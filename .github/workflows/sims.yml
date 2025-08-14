@@ -33,7 +33,7 @@ jobs:
   run:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write   # predict を push するため
 
     steps:
       - uses: actions/checkout@v4
@@ -52,7 +52,7 @@ jobs:
           rm -rf ./predict ./out
           mkdir -p ./predict ./out
 
-      # ---- predict ----
+      # ---- predict: TOPNのみを ./predict に出力（毎回上書き） ----
       - name: Predict (TOPN, same engine as eval)
         if: ${{ github.event.inputs.mode == 'predict' }}
         run: |
@@ -66,7 +66,7 @@ jobs:
             --limit "${{ github.event.inputs.limit }}" \
             --predict-only
 
-      # ---- Discord本文作成 ----
+      # ---- Discord 送信用の本文を生成（18点は 1-2-3/5 形式で圧縮） ----
       - name: Build Discord message (compact tickets)
         if: ${{ github.event.inputs.mode == 'predict' }}
         env:
@@ -83,55 +83,55 @@ jobs:
           fi
 
           cat > build_discord_message.py <<'EOF'
-          import os, csv
-          from collections import defaultdict
+import os, csv
+from collections import defaultdict
 
-          csv_path = "./predict/predictions_summary.csv"
-          topn  = int(os.environ.get("TOPN", "18"))
+csv_path = "./predict/predictions_summary.csv"
+topn  = int(os.environ.get("TOPN", "18"))
 
-          rows = []
-          with open(csv_path, newline="", encoding="utf-8") as f:
-              for r in csv.DictReader(f):
-                  rows.append(r)
+rows = []
+with open(csv_path, newline="", encoding="utf-8") as f:
+    for r in csv.DictReader(f):
+        rows.append(r)
 
-          by_race = defaultdict(list)
-          for r in rows:
-              if int(r.get("rank", 9999)) <= topn:
-                  key = (r["date"], r["pid"], r["race"])
-                  by_race[key].append(r["ticket"])
+by_race = defaultdict(list)
+for r in rows:
+    if int(r.get("rank", 9999)) <= topn:
+        key = (r["date"], r["pid"], r["race"])
+        by_race[key].append(r["ticket"])
 
-          def compact_tickets(tickets):
-              from collections import defaultdict
-              buckets = defaultdict(list)
-              keep = []
-              for t in tickets:
-                  parts = t.split("-")
-                  if len(parts) == 3:
-                      buckets[(parts[0], parts[1])].append(parts[2])
-                  else:
-                      keep.append(t)
-              out = []
-              for (a,b), tails in buckets.items():
-                  tails = sorted(set(tails))
-                  if len(tails) == 1:
-                      out.append(f"{a}-{b}-{tails[0]}")
-                  else:
-                      out.append(f"{a}-{b}-" + "/".join(tails))
-              out.extend(keep)
-              return out
+def compact_tickets(tickets):
+    from collections import defaultdict
+    buckets = defaultdict(list)
+    keep = []
+    for t in tickets:
+        parts = t.split("-")
+        if len(parts) == 3:
+            buckets[(parts[0], parts[1])].append(parts[2])
+        else:
+            keep.append(t)
+    out = []
+    for (a,b), tails in buckets.items():
+        tails = sorted(set(tails))
+        if len(tails) == 1:
+            out.append(f"{a}-{b}-{tails[0]}")
+        else:
+            out.append(f"{a}-{b}-" + "/".join(tails))
+    out.extend(keep)
+    return out
 
-          lines = [f"**SimS v1 Predict**  dates={os.environ.get('DATES')}  pid='{os.environ.get('PIDS')}'  races='{os.environ.get('RACES')}'  sims={os.environ.get('SIMS')}  topN={topn}"]
-          for (d,p,r), tickets in sorted(by_race.items()):
-              comp = compact_tickets(tickets)
-              lines.append(f"[{d} {p} {r}]  " + "、".join(comp))
+lines = [f"**SimS v1 Predict**  dates={os.environ.get('DATES')}  pid='{os.environ.get('PIDS')}'  races='{os.environ.get('RACES')}'  sims={os.environ.get('SIMS')}  topN={topn}"]
+for (d,p,r), tickets in sorted(by_race.items()):
+    comp = compact_tickets(tickets)
+    lines.append(f"[{d} {p} {r}]  " + "、".join(comp))
 
-          with open("./predict/discord_message.txt", "w", encoding="utf-8") as f:
-              f.write("\n".join(lines))
-          EOF
+with open("./predict/discord_message.txt", "w", encoding="utf-8") as f:
+    f.write("\n".join(lines))
+EOF
 
           python build_discord_message.py
 
-      # ---- Discord送信 ----
+      # ---- Discord に本文 + CSV を通知 ----
       - name: Notify Discord (predict)
         if: ${{ github.event.inputs.mode == 'predict' }}
         env:
@@ -147,6 +147,7 @@ jobs:
             exit 0
           fi
 
+          # 本文（JSON は Python で作成）
           JSON_PAYLOAD=$(python - <<'PY'
 import json
 s=open("./predict/discord_message.txt","r",encoding="utf-8").read()
@@ -155,6 +156,7 @@ PY
 )
           echo "$JSON_PAYLOAD" | curl -sS -H "Content-Type: application/json" -X POST -d @- "$WEBHOOK" || true
 
+          # CSV を添付
           if [ -s "./predict/predictions_summary.csv" ]; then
             curl -sS -X POST \
               -F 'payload_json={"content":"predictions_summary.csv を添付します"}' \
@@ -162,7 +164,7 @@ PY
               "$WEBHOOK" || true
           fi
 
-      # ---- predict成果をpush ----
+      # ---- predict をリポジトリにコミット & プッシュ ----
       - name: Commit predict folder to repo
         if: ${{ github.event.inputs.mode == 'predict' }}
         run: |
@@ -185,7 +187,7 @@ PY
           path: ./predict
           if-no-files-found: error
 
-      # ---- eval ----
+      # ---- eval: ROI集計を ./out に出力 ----
       - name: Eval (ROI)
         if: ${{ github.event.inputs.mode == 'eval' }}
         run: |
