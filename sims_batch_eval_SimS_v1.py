@@ -7,7 +7,7 @@
 # 使い方例：
 #   python sims_batch_eval_SimS_v1.py --base ./public --dates 20250810,20250811,20250812 --sims 1200 --topn 18 --unit 100
 
-import os, json, math, argparse, csv
+import os, json, math, argparse, csv, shutil
 from collections import defaultdict, Counter
 import numpy as np
 import pandas as pd
@@ -358,9 +358,10 @@ def main():
     ap.add_argument("--limit", type=int, default=0, help="先頭からNレースだけ評価（0なら全件）")
     ap.add_argument("--outdir", default="./SimS_v1.0_eval", help="出力先ディレクトリ")
 
-    # ★ predict専用モードとフィルタ（predictは ./predict にフラット出力・常に上書き）
+    # ★ predict専用モード（保存先は ./predict に固定・毎回上書き）
     ap.add_argument("--predict-only", action="store_true",
                     help="確率→TOPN出目だけを出力（ROI集計はしない）")
+    # predout は残すがデフォルトは ./predict に変更
     ap.add_argument("--predout", default="./predict",
                     help="--predict-only 時の出力先（デフォルト=./predict にフラット保存・上書き）")
     ap.add_argument("--pids", default="", help="カンマ区切りの場コードフィルタ")
@@ -372,7 +373,7 @@ def main():
     pids_filter  = set([p.strip() for p in args.pids.split(",") if p.strip()])
     races_filter = set([r.strip() for r in args.races.split(",") if r.strip()])
 
-    # ---- predict-only: 同一ロジックでTOPN出目だけ出す（./predict に上書き保存）----
+    # ---- predict-only: ./predict に上書き保存 ----
     if args.predict_only:
         int_idx = collect_files(args.base, "integrated", dates) if dates else \
                   collect_files(args.base, "integrated", set(os.listdir(os.path.join(args.base, "integrated", "v1"))))
@@ -382,7 +383,12 @@ def main():
         if races_filter:
             keys = [k for k in keys if k[2] in races_filter]
 
-        os.makedirs(args.predout, exist_ok=True)  # 既存OK
+        # 出力先を毎回クリーンに（上書きOK）
+        pred_dir = args.predout or "./predict"
+        if os.path.exists(pred_dir):
+            shutil.rmtree(pred_dir)
+        os.makedirs(pred_dir, exist_ok=True)
+
         rows = []
         for (date, pid, race) in keys[:(args.limit or len(keys))]:
             with open(int_idx[(date,pid,race)], "r", encoding="utf-8") as f:
@@ -391,8 +397,8 @@ def main():
             top = sorted(tri_probs.items(), key=lambda kv: kv[1], reverse=True)[:args.topn]
             top_list = [{"ticket": "-".join(map(str, k)), "prob": round(v, 6)} for k, v in top]
 
-            # レースごとJSON（predict直下にフラット保存・常に上書き）
-            with open(os.path.join(args.predout, f"pred_{date}_{pid}_{race}.json"), "w", encoding="utf-8") as f:
+            # レースごとJSON（predict直下にフラット保存）
+            with open(os.path.join(pred_dir, f"pred_{date}_{pid}_{race}.json"), "w", encoding="utf-8") as f:
                 json.dump({"date":date,"pid":pid,"race":race,"topN":top_list,"engine":"SimS ver1.0"},
                           f, ensure_ascii=False, indent=2)
 
@@ -400,10 +406,10 @@ def main():
             for i, t in enumerate(top_list, 1):
                 rows.append({"date":date,"pid":pid,"race":race,"rank":i,"ticket":t["ticket"],"prob":t["prob"]})
 
-        # サマリCSVも predict 直下に上書き保存
-        pd.DataFrame(rows).to_csv(os.path.join(args.predout, "predictions_summary.csv"),
+        # サマリCSV（predict直下に上書き）
+        pd.DataFrame(rows).to_csv(os.path.join(pred_dir, "predictions_summary.csv"),
                                   index=False, encoding="utf-8")
-        print(f"predict-only done -> {args.predout}")
+        print(f"predict-only done -> {pred_dir}")
         return
 
     # ---- eval（従来どおり） ----
