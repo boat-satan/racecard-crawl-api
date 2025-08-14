@@ -79,7 +79,8 @@ jobs:
           set -e
           [ -s "./predict/predictions_summary.csv" ] || exit 0
 
-          cat <<'PY' > build_discord_message.py
+          # バックスラッシュ heredoc（変数展開/置換一切無効）
+          cat <<\PY > build_discord_message.py
 import os, csv
 from collections import defaultdict
 
@@ -140,12 +141,11 @@ PY
           [ -n "$WEBHOOK" ] || { echo "DISCORD_WEBHOOK_URL not set"; exit 0; }
           [ -s "./predict/discord_message.txt" ] || exit 0
 
-          cat <<'PY' > make_payload.py
+          cat <<\PY > make_payload.py
 import json, sys
 s = open("./predict/discord_message.txt","r",encoding="utf-8").read()
 sys.stdout.write(json.dumps({"content": s}))
 PY
-
           JSON_PAYLOAD=$(python make_payload.py)
           echo "$JSON_PAYLOAD" | curl -sS -H "Content-Type: application/json" -X POST -d @- "$WEBHOOK" || true
 
