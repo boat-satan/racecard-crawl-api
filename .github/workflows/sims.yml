@@ -1,0 +1,64 @@
+name: SimS v1 Runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: predict or eval
+        required: true
+        default: predict
+      dates:
+        description: "YYYYMMDDをカンマ区切り"
+        required: true
+      pids:
+        description: "場コード(空=全場)"
+        default: ""
+      races:
+        description: "レース(空=全レース)"
+        default: ""
+      sims:
+        description: "試行回数(predict用)"
+        default: "1200"
+      topn:
+        description: "上位N(predict/eval共通)"
+        default: "18"
+      unit:
+        description: "均等購入額(eval用)"
+        default: "100"
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install numpy pandas
+      - name: Predict (TOPN)
+        if: ${{ github.event.inputs.mode == 'predict' }}
+        run: |
+          python sims_predict_v1.py \
+            --base ./public \
+            --dates "${{ github.event.inputs.dates }}" \
+            --pids  "${{ github.event.inputs.pids }}" \
+            --races "${{ github.event.inputs.races }}" \
+            --sims  "${{ github.event.inputs.sims }}" \
+            --topn  "${{ github.event.inputs.topn }}"
+      - name: Eval (ROI)
+        if: ${{ github.event.inputs.mode == 'eval' }}
+        run: |
+          python sims_batch_eval_SimS_v1.py \
+            --base ./public \
+            --dates "${{ github.event.inputs.dates }}" \
+            --sims  "${{ github.event.inputs.sims }}" \
+            --topn  "${{ github.event.inputs.topn }}" \
+            --unit  "${{ github.event.inputs.unit }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sims_outputs
+          path: |
+            out/**
+            *.csv
+            *.json
