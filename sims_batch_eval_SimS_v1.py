@@ -8,7 +8,7 @@
 #   python sims_batch_eval_SimS_v1.py --base ./public --dates 20250810,20250811,20250812 --sims 1200 --topn 18 --unit 100
 
 import os, json, math, argparse, csv, shutil
-from collections import defaultdict, Counter
+from collections import Counter
 import numpy as np
 import pandas as pd
 
@@ -61,7 +61,7 @@ class Params:
     session_A_bias_mu=0.0
     session_A_bias_sd=0.10
 
-    # 風（簡易）：今回は env=中立で固定
+    # 風（簡易）
     wind_theta_gain=0.002
     wind_st_sigma_gain=0.5
 
@@ -89,7 +89,6 @@ def s_base_from_nat(rc: dict) -> float:
           + 0.2 * ((n3 - 70.0) / 20.0))
 
 def wind_adjustments(env: dict):
-    """風補正（今回は env=中立想定だが式は残す）"""
     d = (env.get("wind") or {}).get("dir", "cross")
     m = float((env.get("wind") or {}).get("mps", 0.0))
     sign = 1 if d=="tail" else -1 if d=="head" else 0
@@ -277,7 +276,6 @@ def collect_files(base_dir: str, kind: str, dates: set):
     root_v1 = os.path.join(base_dir, kind, "v1")
     root    = root_v1 if os.path.isdir(root_v1) else os.path.join(base_dir, kind)
     out = []
-    # dates 指定なければ root 直下の全日付ディレクトリを列挙
     date_dirs = list(dates) if dates else [
         d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d))
     ]
@@ -291,13 +289,12 @@ def collect_files(base_dir: str, kind: str, dates: set):
                 continue
             for fname in os.listdir(dir_pid):
                 if fname.endswith(".json"):
-                    race = fname[:-5]  # drop .json
+                    race = fname[:-5]
                     out.append(((d, pid, race), os.path.join(dir_pid, fname)))
     return dict(out)
 
 # ========== オッズ/結果のパース ==========
 def odds_map(odds_json: dict) -> dict:
-    """三連単オッズを { '1-2-3': decimal_odds, ... } で返す"""
     out = {}
     for item in odds_json.get("trifecta", []):
         combo = item.get("combo") or f'{item.get("F")}-{item.get("S")}-{item.get("T")}'
@@ -306,11 +303,9 @@ def odds_map(odds_json: dict) -> dict:
     return out
 
 def actual_trifecta_combo(result_json: dict):
-    """確定三連単の '1-2-3' 形式を返す（フォールバック含む）"""
     trif = (result_json.get("payouts") or {}).get("trifecta")
     if isinstance(trif, dict) and "combo" in trif:
         return trif["combo"]
-    # フォールバック：order 先頭3つ
     order = result_json.get("order")
     if isinstance(order, list) and len(order) >= 3:
         def lane_of(x):
@@ -328,18 +323,15 @@ def evaluate_one(int_path: str, odds_path: str, res_path: str, sims: int, topn: 
         d_int = json.load(f)
     tri_probs, _ = simulate_one(d_int, sims=sims)
 
-    # TOPN
     top = sorted(tri_probs.items(), key=lambda kv: kv[1], reverse=True)[:topn]
     top_keys = ['-'.join(map(str, k)) for k, _ in top]
 
-    # オッズ
     with open(odds_path, "r", encoding="utf-8") as f:
         d_odds = json.load(f)
     omap = odds_map(d_odds)
     bets = [c for c in top_keys if c in omap]
     stake = unit * len(bets)
 
-    # 結果
     with open(res_path, "r", encoding="utf-8") as f:
         d_res = json.load(f)
     hit_combo = actual_trifecta_combo(d_res)
@@ -351,21 +343,18 @@ def evaluate_one(int_path: str, odds_path: str, res_path: str, sims: int, topn: 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="./public", help="public ディレクトリのパス")
-    ap.add_argument("--dates", default="", help="カンマ区切りの日付（例: 20250810,20250811,20250812）")
+    ap.add_argument("--dates", default="", help="カンマ区切り（日付）例: 20250810,20250811")
     ap.add_argument("--sims", type=int, default=600, help="1レースあたりの試行回数")
     ap.add_argument("--topn", type=int, default=18, help="買い目TOPN")
     ap.add_argument("--unit", type=int, default=100, help="1点あたりの賭け金（円）")
     ap.add_argument("--limit", type=int, default=0, help="先頭からNレースだけ評価（0なら全件）")
-    ap.add_argument("--outdir", default="./SimS_v1.0_eval", help="出力先ディレクトリ")
+    ap.add_argument("--outdir", default="./SimS_v1.0_eval", help="(eval)出力先")
+    # predictフラグ（predoutは受けるが無視して./predict固定）
+    ap.add_argument("--predict-only", action="store_true", help="TOPN確率のみ出力")
+    ap.add_argument("--predout", default="./predict", help="(無視されます)")
 
-    # ★ predict専用モード（保存先は ./predict に固定・毎回上書き）
-    ap.add_argument("--predict-only", action="store_true",
-                    help="確率→TOPN出目だけを出力（ROI集計はしない）")
-    # predout は残すがデフォルトは ./predict に変更
-    ap.add_argument("--predout", default="./predict",
-                    help="--predict-only 時の出力先（デフォルト=./predict にフラット保存・上書き）")
-    ap.add_argument("--pids", default="", help="カンマ区切りの場コードフィルタ")
-    ap.add_argument("--races", default="", help="カンマ区切りのレース名フィルタ(例 1R,2R)")
+    ap.add_argument("--pids", default="", help="場コードフィルタ（カンマ区切り）")
+    ap.add_argument("--races", default="", help="レース名フィルタ（例 1R,2R）")
 
     args = ap.parse_args()
 
@@ -373,7 +362,7 @@ def main():
     pids_filter  = set([p.strip() for p in args.pids.split(",") if p.strip()])
     races_filter = set([r.strip() for r in args.races.split(",") if r.strip()])
 
-    # ---- predict-only: ./predict に上書き保存 ----
+    # ---- predict-only: ./predict に上書き保存（固定） ----
     if args.predict_only:
         int_idx = collect_files(args.base, "integrated", dates) if dates else \
                   collect_files(args.base, "integrated", set(os.listdir(os.path.join(args.base, "integrated", "v1"))))
@@ -383,9 +372,8 @@ def main():
         if races_filter:
             keys = [k for k in keys if k[2] in races_filter]
 
-        # 出力先を毎回クリーンに（上書きOK）
-        pred_dir = args.predout or "./predict"
-        if os.path.exists(pred_dir):
+        pred_dir = "./predict"              # 固定
+        if os.path.exists(pred_dir):        # 毎回クリーン
             shutil.rmtree(pred_dir)
         os.makedirs(pred_dir, exist_ok=True)
 
@@ -402,23 +390,22 @@ def main():
                 json.dump({"date":date,"pid":pid,"race":race,"topN":top_list,"engine":"SimS ver1.0"},
                           f, ensure_ascii=False, indent=2)
 
-            # サマリCSV用
             for i, t in enumerate(top_list, 1):
                 rows.append({"date":date,"pid":pid,"race":race,"rank":i,"ticket":t["ticket"],"prob":t["prob"]})
 
-        # サマリCSV（predict直下に上書き）
         pd.DataFrame(rows).to_csv(os.path.join(pred_dir, "predictions_summary.csv"),
                                   index=False, encoding="utf-8")
-        print(f"predict-only done -> {pred_dir}")
+        print("predict-only done -> ./predict")
         return
 
     # ---- eval（従来どおり） ----
-    # ファイル収集
-    int_idx  = collect_files(args.base, "integrated", dates) if dates else collect_files(args.base, "integrated", set(os.listdir(os.path.join(args.base, "integrated", "v1"))))
-    odds_idx = collect_files(args.base, "odds",       dates) if dates else collect_files(args.base, "odds",       set(os.listdir(os.path.join(args.base, "odds"))))
-    res_idx  = collect_files(args.base, "results",    dates) if dates else collect_files(args.base, "results",    set(os.listdir(os.path.join(args.base, "results", "v1"))))
+    int_idx  = collect_files(args.base, "integrated", dates) if dates else \
+               collect_files(args.base, "integrated", set(os.listdir(os.path.join(args.base, "integrated", "v1"))))
+    odds_idx = collect_files(args.base, "odds", dates) if dates else \
+               collect_files(args.base, "odds", set(os.listdir(os.path.join(args.base, "odds"))))
+    res_idx  = collect_files(args.base, "results", dates) if dates else \
+               collect_files(args.base, "results", set(os.listdir(os.path.join(args.base, "results", "v1"))))
 
-    # 共通キー
     keys = sorted(set(int_idx.keys()) & set(odds_idx.keys()) & set(res_idx.keys()))
     if args.limit and args.limit > 0:
         keys = keys[:args.limit]
@@ -445,7 +432,6 @@ def main():
             "hit": hit, "hit_combo": hit_combo
         })
 
-    # 集計
     df = pd.DataFrame(per_rows)
     overall = {
         "engine": "SimS ver1.0",
@@ -467,19 +453,13 @@ def main():
                      .reset_index())
         by_date["roi"] = (by_date["payout_total"] - by_date["stake_total"]) / by_date["stake_total"]
 
-    # 保存
     os.makedirs(args.outdir, exist_ok=True)
-    per_csv = os.path.join(args.outdir, "per_race_results.csv")
-    df.to_csv(per_csv, index=False)
-
+    df.to_csv(os.path.join(args.outdir, "per_race_results.csv"), index=False)
     if by_date is not None:
-        by_date_csv = os.path.join(args.outdir, "by_date_summary.csv")
-        by_date.to_csv(by_date_csv, index=False)
-
+        by_date.to_csv(os.path.join(args.outdir, "by_date_summary.csv"), index=False)
     with open(os.path.join(args.outdir, "overall.json"), "w", encoding="utf-8") as f:
         json.dump(overall, f, ensure_ascii=False, indent=2)
 
-    # 画面出力
     print("=== OVERALL (SimS ver1.0) ===")
     print(json.dumps(overall, ensure_ascii=False, indent=2))
     if by_date is not None:
