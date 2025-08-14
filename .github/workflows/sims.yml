@@ -32,13 +32,14 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
+    # リポジトリに predict/ を push するための権限
     permissions:
       contents: write
 
     steps:
       - uses: actions/checkout@v4
         with:
-          persist-credentials: true
+          persist-credentials: true   # Actions トークンで push 可
 
       - uses: actions/setup-python@v5
         with:
@@ -66,134 +67,154 @@ jobs:
             --limit "${{ github.event.inputs.limit }}" \
             --predict-only
 
-      # ★ 変更：Discord に「コンパクト表記の買い目」＋ CSV を送信
+      # === 追加: Discord 通知（predict時のみ） =========================
+      # ・predictions_summary.csv から各レースの買い目(上位N=18)を抽出
+      # ・「1-2-3, 1-2-5, 1-2-6」などは「1-2-3/5/6」にコンパクト化
+      # ・2000文字制限に収まらない場合は分割して複数メッセージ送信
+      # ・Webhook URL はリポジトリのシークレット DISCORD_WEBHOOK_URL に設定
+      # =================================================================
+      - name: Build Discord message (compact tickets)
+        if: ${{ github.event.inputs.mode == 'predict' }}
+        env:
+          TOPN:  ${{ github.event.inputs.topn }}
+          SIMS:  ${{ github.event.inputs.sims }}
+          DATES: ${{ github.event.inputs.dates }}
+          PIDS:  ${{ github.event.inputs.pids }}
+          RACES: ${{ github.event.inputs.races }}
+        run: |
+          set -e
+          if [ ! -s "./predict/predictions_summary.csv" ]; then
+            echo "No predictions_summary.csv -> skip building message."
+            exit 0
+          fi
+
+          python - <<'PY'
+import os, csv, textwrap, json
+from collections import defaultdict, OrderedDict
+
+csv_path = "./predict/predictions_summary.csv"
+topn  = int(os.environ.get("TOPN", "18"))
+sims  = os.environ.get("SIMS", "?")
+dates = os.environ.get("DATES","")
+pids  = os.environ.get("PIDS","")
+races = os.environ.get("RACES","")
+
+# 読み込み：date,pid,race,rank,ticket,prob
+rows = []
+with open(csv_path, newline="", encoding="utf-8") as f:
+    for r in csv.DictReader(f):
+        rows.append(r)
+
+# レース単位にまとめ、rank<=TOPN の ticket を集める
+by_race = defaultdict(list)
+for r in rows:
+    if int(r.get("rank", 9999)) <= topn:
+        key = (r["date"], r["pid"], r["race"])
+        by_race[key].append(r["ticket"])
+
+def compact_tickets(tickets):
+    """
+    簡易コンパクト化：
+      1) 先頭2つが同じものは 1-2-3/5/6 形式にまとめる
+      2) 上記以外はそのまま
+    """
+    buckets = defaultdict(list)
+    keep = []
+    for t in tickets:
+        parts = t.split("-")
+        if len(parts) == 3:
+            buckets[(parts[0], parts[1])].append(parts[2])
+        else:
+            keep.append(t)
+
+    out = []
+    for (a,b), tails in buckets.items():
+        # 1-2-3 のような単体のみなら通常表記、複数なら 1-2-3/5/6
+        tails = sorted(set(tails), key=lambda x: int(x) if x.isdigit() else x)
+        if len(tails) == 1:
+            out.append(f"{a}-{b}-{tails[0]}")
+        else:
+            out.append(f"{a}-{b}-" + "/".join(tails))
+    out.extend(keep)
+    return out
+
+lines = []
+header = f"**SimS v1 Predict**  dates={dates}  pid='{pids}'  races='{races}'  sims={sims}  topN={topn}"
+lines.append(header)
+
+for (d,p,r), tickets in sorted(by_race.items()):
+    comp = compact_tickets(tickets)
+    body = "、".join(comp)  # 全角カンマで見やすく
+    lines.append(f"[{d} {p} {r}]  {body}")
+
+# 2000文字制限に合わせて分割
+joined = "\n".join(lines)
+chunks = []
+buf = ""
+for line in joined.split("\n"):
+    if len(buf) + len(line) + 1 > 1800:  # 余裕を見て 1800
+        chunks.append(buf)
+        buf = line
+    else:
+        buf = (buf + "\n" + line) if buf else line
+if buf:
+    chunks.append(buf)
+
+# 出力ファイル（ワークフロー後段で送信・記録用）
+os.makedirs("./predict", exist_ok=True)
+with open("./predict/discord_message.txt", "w", encoding="utf-8") as f:
+    for i, c in enumerate(chunks, 1):
+        if len(chunks) > 1:
+            f.write(f"(part {i}/{len(chunks)})\n")
+        f.write(c.strip() + "\n\n")
+
+# ついでにコンパクト表だけのテキストも落としておく
+with open("./predict/predictions_compact.txt", "w", encoding="utf-8") as f:
+    for (d,p,r), tickets in sorted(by_race.items()):
+        comp = compact_tickets(tickets)
+        f.write(f"{d} {p} {r} : " + "、".join(comp) + "\n")
+PY
+
       - name: Notify Discord (predict)
         if: ${{ github.event.inputs.mode == 'predict' }}
         env:
           WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          DATES:   ${{ github.event.inputs.dates }}
-          PIDS:    ${{ github.event.inputs.pids }}
-          RACES:   ${{ github.event.inputs.races }}
-          SIMS:    ${{ github.event.inputs.sims }}
-          TOPN:    ${{ github.event.inputs.topn }}
         run: |
           set -e
           if [ -z "$WEBHOOK" ]; then
             echo "DISCORD_WEBHOOK_URL is not set. Skip notify."
             exit 0
           fi
-          if [ ! -s "./predict/predictions_summary.csv" ]; then
-            echo "No predictions_summary.csv. Skip notify."
+          if [ ! -s "./predict/discord_message.txt" ]; then
+            echo "No discord_message.txt. Skip notify."
             exit 0
           fi
 
-          python - << 'PY' > ./predict/discord_message.txt
-import csv, itertools
-from collections import defaultdict
-
-def parse_ticket(s):  # "1-2-3" -> (1,2,3)
-    return tuple(int(x) for x in s.split("-"))
-
-def compact_lines(tickets):
-    """
-    tickets: list[(a,b,c)]
-    まとめ方の優先順:
-      1) a-b 固定で c を束ねる  => a-b-[c1,c2,...]
-      2) a-c 固定で b を束ねる  => a-[b1,b2,...]-c
-      3) b-c 固定で a を束ねる  => [a1,a2,...]-b-c
-      4) 残りは a-b-c のまま
-    """
-    remain = set(tickets)
-    out = []
-
-    # 1) a-b -> cs
-    key = defaultdict(list)
-    for a,b,c in list(remain):
-        key[(a,b)].append(c)
-    for (a,b), cs in list(key.items()):
-        cs = sorted(set(cs))
-        if len(cs) >= 2:
-            for c in cs: remain.discard((a,b,c))
-            out.append(f"{a}-{b}-[{','.join(map(str,cs))}]")
-
-    # 2) a-c -> bs
-    key = defaultdict(list)
-    for a,b,c in list(remain):
-        key[(a,c)].append(b)
-    for (a,c), bs in list(key.items()):
-        bs = sorted(set(bs))
-        if len(bs) >= 2:
-            for b in bs: remain.discard((a,b,c))
-            out.append(f"{a}-[{','.join(map(str,bs))}]-{c}")
-
-    # 3) b-c -> as
-    key = defaultdict(list)
-    for a,b,c in list(remain):
-        key[(b,c)].append(a)
-    for (b,c), als in list(key.items()):
-        als = sorted(set(als))
-        if len(als) >= 2:
-            for a in als: remain.discard((a,b,c))
-            out.append(f"[{','.join(map(str,als))}]-{b}-{c}")
-
-    # 4) 残り
-    for a,b,c in sorted(remain):
-        out.append(f"{a}-{b}-{c}")
-    return out
-
-# CSV 読み込み
-rows=[]
-with open("./predict/predictions_summary.csv", newline="", encoding="utf-8") as f:
-    rdr=csv.DictReader(f)
-    rows=list(rdr)
-
-rows.sort(key=lambda r:(r["date"], r["pid"], r["race"], int(r["rank"])))
-
-LIMIT = 1800  # 本文長の安全上限
-body=[]
-used=0
-
-for (date,pid,race), grp in itertools.groupby(rows, key=lambda r:(r["date"],r["pid"],r["race"])):
-    g=list(grp)
-    tickets=[parse_ticket(r["ticket"]) for r in g]
-    comp=compact_lines(tickets)
-
-    header=f"[{date} #{pid} {race}]"
-    body.append(header); used += len(header)+1
-
-    line=""
-    for part in comp:
-        add = (", " if line else "") + part
-        if len(line)+len(add) > 120:
-            body.append("  " + line); used += len(line)+3
-            line = part
-        else:
-            line += add
-    if line:
-        body.append("  " + line); used += len(line)+3
-
-    if used > LIMIT:
-        body.append("...（本文は省略、CSVを参照）")
-        break
-
-title = "SimS v1 Predict — Compact TOPN"
-meta  = f"dates={ '${{ env.DATES }}' } | pid='{ '${{ env.PIDS }}' }' | races='{ '${{ env.RACES }}' }' | sims={ '${{ env.SIMS }}' } | topN={ '${{ env.TOPN }}' }"
-content = "**"+title+"**\n"+meta+"\n```text\n" + "\n".join(body) + "\n```"
-content = content.replace("\\","\\\\").replace('"','\\"')
-print(content)
+          # 本文（複数パートの場合は順次送信）
+          while IFS= read -r block || [ -n "$block" ]; do
+            # 空行でメッセージ区切り
+            if [ -z "$block" ]; then
+              continue
+            fi
+            # JSON のためのエスケープ
+            esc=$(printf "%s" "$block" | python - <<'PY'
+import sys, json
+print(json.dumps({"c": sys.stdin.read()})["c"])
 PY
+)
+            curl -sS -H "Content-Type: application/json" \
+                 -X POST \
+                 -d "{\"content\": ${esc}}" \
+                 "$WEBHOOK" >/dev/null 2>&1 || true
+          done < <(awk '1; /^$/{print ""}' ./predict/discord_message.txt)
 
-          CONTENT="$(cat ./predict/discord_message.txt)"
-          # 本文
-          curl -sS -H "Content-Type: application/json" \
-               -X POST \
-               -d "{\"content\":\"${CONTENT}\"}" \
-               "$WEBHOOK" || true
-          # CSV添付
-          curl -sS -X POST \
-               -F "payload_json={\"content\":\"predictions_summary.csv を添付します\"}" \
-               -F "file1=@./predict/predictions_summary.csv" \
-               "$WEBHOOK" || true
+          # 参考用に CSV も添付
+          if [ -s "./predict/predictions_summary.csv" ]; then
+            curl -sS -X POST \
+                 -F "payload_json={\"content\":\"predictions_summary.csv を添付します\"}" \
+                 -F "file1=@./predict/predictions_summary.csv" \
+                 "$WEBHOOK" >/dev/null 2>&1 || true
+          fi
 
       # 既存：predict をリポジトリにコミット & プッシュ
       - name: Commit predict folder to repo
