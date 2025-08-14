@@ -33,7 +33,7 @@ jobs:
   run:
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # predict を push するため
+      contents: write   # predict フォルダを push するため
 
     steps:
       - uses: actions/checkout@v4
@@ -82,44 +82,58 @@ jobs:
             exit 0
           fi
 
-          # heredoc を使わず echo で安全にスクリプト生成
-          : > build_discord_message.py
-          echo 'import os, csv' >> build_discord_message.py
-          echo 'from collections import defaultdict' >> build_discord_message.py
-          echo 'csv_path = "./predict/predictions_summary.csv"' >> build_discord_message.py
-          echo 'topn  = int(os.environ.get("TOPN", "18"))' >> build_discord_message.py
-          echo 'rows = []' >> build_discord_message.py
-          echo 'with open(csv_path, newline="", encoding="utf-8") as f:' >> build_discord_message.py
-          echo '    for r in csv.DictReader(f):' >> build_discord_message.py
-          echo '        rows.append(r)' >> build_discord_message.py
-          echo 'by_race = defaultdict(list)' >> build_discord_message.py
-          echo 'for r in rows:' >> build_discord_message.py
-          echo '    if int(r.get("rank", 9999)) <= topn:' >> build_discord_message.py
-          echo '        key = (r["date"], r["pid"], r["race"])' >> build_discord_message.py
-          echo '        by_race[key].append(r["ticket"])' >> build_discord_message.py
-          echo 'def compact_tickets(tickets):' >> build_discord_message.py
-          echo '    from collections import defaultdict' >> build_discord_message.py
-          echo '    buckets = defaultdict(list); keep = []' >> build_discord_message.py
-          echo '    for t in tickets:' >> build_discord_message.py
-          echo '        parts = t.split("-")' >> build_discord_message.py
-          echo '        if len(parts) == 3:' >> build_discord_message.py
-          echo '            buckets[(parts[0], parts[1])].append(parts[2])' >> build_discord_message.py
-          echo '        else:' >> build_discord_message.py
-          echo '            keep.append(t)' >> build_discord_message.py
-          echo '    out = []' >> build_discord_message.py
-          echo '    for (a,b), tails in buckets.items():' >> build_discord_message.py
-          echo '        tails = sorted(set(tails))' >> build_discord_message.py
-          echo '        if len(tails) == 1:' >> build_discord_message.py
-          echo '            out.append(f"{a}-{b}-{tails[0]}")' >> build_discord_message.py
-          echo '        else:' >> build_discord_message.py
-          echo '            out.append(f"{a}-{b}-" + "/".join(tails))' >> build_discord_message.py
-          echo '    out.extend(keep); return out' >> build_discord_message.py
-          echo 'lines = [f"**SimS v1 Predict**  dates={os.environ.get(\"DATES\")}  pid='\''{os.environ.get(\"PIDS\")}'\''  races='\''{os.environ.get(\"RACES\")}'\''  sims={os.environ.get(\"SIMS\")}  topN={topn}"]' >> build_discord_message.py
-          echo 'for (d,p,r), tickets in sorted(by_race.items()):' >> build_discord_message.py
-          echo '    comp = compact_tickets(tickets)' >> build_discord_message.py
-          echo '    lines.append(f"[{d} {p} {r}]  " + "、".join(comp))' >> build_discord_message.py
-          echo 'with open("./predict/discord_message.txt", "w", encoding="utf-8") as f:' >> build_discord_message.py
-          echo '    f.write("\n".join(lines))' >> build_discord_message.py
+          cat > build_discord_message.py <<'PY'
+import os, csv
+from collections import defaultdict
+
+csv_path = "./predict/predictions_summary.csv"
+topn = int(os.environ.get("TOPN", "18"))
+
+rows = []
+with open(csv_path, newline="", encoding="utf-8") as f:
+    for r in csv.DictReader(f):
+        rows.append(r)
+
+by_race = defaultdict(list)
+for r in rows:
+    if int(r.get("rank", 9999)) <= topn:
+        key = (r["date"], r["pid"], r["race"])
+        by_race[key].append(r["ticket"])
+
+def compact_tickets(tickets):
+    """同一 F-S で T を圧縮（1-2-3,1-2-5 -> 1-2-3/5）。形式外はそのまま保持。"""
+    buckets = defaultdict(list)
+    keep = []
+    for t in tickets:
+        parts = t.split("-")
+        if len(parts) == 3:
+            buckets[(parts[0], parts[1])].append(parts[2])
+        else:
+            keep.append(t)
+    out = []
+    for (a, b), tails in buckets.items():
+        tails = sorted(set(tails))
+        if len(tails) == 1:
+            out.append(f"{a}-{b}-{tails[0]}")
+        else:
+            out.append(f"{a}-{b}-" + "/".join(tails))
+    out.extend(keep)
+    return out
+
+# ← ここで f-string の中に関数呼び出しを入れない（事前に変数へ）
+dates = os.environ.get("DATES")
+pids = os.environ.get("PIDS")
+races = os.environ.get("RACES")
+sims = os.environ.get("SIMS")
+
+lines = [f"**SimS v1 Predict**  dates={dates}  pid='{pids}'  races='{races}'  sims={sims}  topN={topn}"]
+for (d, p, r), tickets in sorted(by_race.items()):
+    comp = compact_tickets(tickets)
+    lines.append(f"[{d} {p} {r}]  " + "、".join(comp))
+
+with open("./predict/discord_message.txt", "w", encoding="utf-8") as f:
+    f.write("\n".join(lines))
+PY
 
           python build_discord_message.py
 
@@ -139,11 +153,14 @@ jobs:
             exit 0
           fi
 
-          # 本文（JSONは python -c で生成）
-          JSON_PAYLOAD=$(python -c "import json,sys; s=open('./predict/discord_message.txt','r',encoding='utf-8').read(); print(json.dumps({'content': s}))")
+          JSON_PAYLOAD=$(python - <<'PY'
+import json, sys
+s = open("./predict/discord_message.txt","r",encoding="utf-8").read()
+print(json.dumps({"content": s}))
+PY
+)
           echo "$JSON_PAYLOAD" | curl -sS -H "Content-Type: application/json" -X POST -d @- "$WEBHOOK" || true
 
-          # CSV を添付
           if [ -s "./predict/predictions_summary.csv" ]; then
             curl -sS -X POST \
               -F 'payload_json={"content":"predictions_summary.csv を添付します"}' \
