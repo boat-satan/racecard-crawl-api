@@ -1,0 +1,126 @@
+{
+  "date": "20250809",
+  "pid": "02",
+  "race": "10R",
+  "source": {
+    "result": "https://www.boatrace.jp/owpc/pc/race/raceresult?rno=10&jcd=02&hd=20250809"
+  },
+  "generatedAt": "2025-08-14T20:09:01.920Z",
+  "order": [
+    {
+      "pos": 1,
+      "lane": 2,
+      "racerId": "3898",
+      "name": "平田 忠則",
+      "time": "2'01\"1"
+    },
+    {
+      "pos": 2,
+      "lane": 5,
+      "racerId": "3591",
+      "name": "後藤 孝義",
+      "time": "2'04\"6"
+    },
+    {
+      "pos": 3,
+      "lane": 4,
+      "racerId": "3717",
+      "name": "立間 充宏",
+      "time": "2'08\"2"
+    },
+    {
+      "pos": 4,
+      "lane": 3,
+      "racerId": "4366",
+      "name": "前沢 丈史",
+      "time": "2'10\"7"
+    },
+    {
+      "pos": 5,
+      "lane": 1,
+      "racerId": "5044",
+      "name": "渡邉 健",
+      "time": ""
+    }
+  ],
+  "start": [
+    {
+      "lane": 1,
+      "st": 0.32
+    },
+    {
+      "lane": 2,
+      "st": 0.11
+    },
+    {
+      "lane": 3,
+      "st": 0.07
+    },
+    {
+      "lane": 4,
+      "st": 0.09
+    },
+    {
+      "lane": 5,
+      "st": 0.27
+    },
+    {
+      "lane": 6,
+      "st": 0.1
+    }
+  ],
+  "decision": "まくり",
+  "weather": {
+    "condition": "曇り",
+    "airTemp": 31,
+    "windSpeed": 1,
+    "windDirCode": 14,
+    "waterTemp": 31,
+    "wave": 1
+  },
+  "refunds": [],
+  "payouts": {
+    "trifecta": {
+      "combo": "2-5-4",
+      "amount": 71150,
+      "popularity": 90
+    },
+    "trio": {
+      "combo": "2=4=5",
+      "amount": 10320,
+      "popularity": 17
+    },
+    "exacta": {
+      "combo": "2-5",
+      "amount": 18720,
+      "popularity": 24
+    },
+    "quinella": {
+      "combo": "2=5",
+      "amount": 8950,
+      "popularity": 15
+    },
+    "wide": [
+      {
+        "combo": "2=5",
+        "amount": 1990,
+        "popularity": 13
+      },
+      {
+        "combo": "3=140",
+        "amount": 14,
+        "popularity": null
+      }
+    ],
+    "win": {
+      "combo": "2",
+      "amount": 280
+    },
+    "place": [
+      {
+        "combo": "2",
+        "amount": 390
+      }
+    ]
+  }
+}

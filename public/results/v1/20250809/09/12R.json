@@ -1,0 +1,123 @@
+{
+  "date": "20250809",
+  "pid": "09",
+  "race": "12R",
+  "source": {
+    "result": "https://www.boatrace.jp/owpc/pc/race/raceresult?rno=12&jcd=09&hd=20250809"
+  },
+  "generatedAt": "2025-08-14T20:28:43.557Z",
+  "order": [
+    {
+      "pos": 1,
+      "lane": 3,
+      "racerId": "4736",
+      "name": "高倉 和士",
+      "time": "1'51\"0"
+    },
+    {
+      "pos": 2,
+      "lane": 2,
+      "racerId": "4144",
+      "name": "石塚 久也",
+      "time": "1'53\"1"
+    },
+    {
+      "pos": 3,
+      "lane": 4,
+      "racerId": "4772",
+      "name": "石丸 海渡",
+      "time": "1'53\"8"
+    },
+    {
+      "pos": 4,
+      "lane": 5,
+      "racerId": "5130",
+      "name": "上野 拓馬",
+      "time": "1'54\"6"
+    },
+    {
+      "pos": 5,
+      "lane": 6,
+      "racerId": "3909",
+      "name": "佐々木 康幸",
+      "time": ""
+    }
+  ],
+  "start": [
+    {
+      "lane": 1,
+      "st": 0.01
+    },
+    {
+      "lane": 3,
+      "st": 0.08
+    },
+    {
+      "lane": 4,
+      "st": 0.04
+    },
+    {
+      "lane": 6,
+      "st": 0.05
+    },
+    {
+      "lane": 5,
+      "st": 0.09
+    },
+    {
+      "lane": 2,
+      "st": 0.29
+    }
+  ],
+  "decision": "恵まれ",
+  "weather": {
+    "condition": "晴",
+    "airTemp": 32,
+    "windSpeed": 2,
+    "windDirCode": 4,
+    "waterTemp": 30,
+    "wave": 1
+  },
+  "refunds": [
+    1
+  ],
+  "payouts": {
+    "trifecta": {
+      "combo": "3-2-4",
+      "amount": 2960,
+      "popularity": 8
+    },
+    "trio": {
+      "combo": "2=3=4",
+      "amount": 440,
+      "popularity": 1
+    },
+    "exacta": {
+      "combo": "3-2",
+      "amount": 1210,
+      "popularity": 5
+    },
+    "quinella": {
+      "combo": "2=3",
+      "amount": 620,
+      "popularity": 3
+    },
+    "wide": [
+      {
+        "combo": "2=3",
+        "amount": 190,
+        "popularity": 3
+      }
+    ],
+    "win": {
+      "combo": "3",
+      "amount": 290
+    },
+    "place": [
+      {
+        "combo": "3",
+        "amount": 100
+      }
+    ]
+  }
+}
