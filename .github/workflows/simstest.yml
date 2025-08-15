@@ -11,10 +11,9 @@ on:
       strategy:  { description: "trifecta_topN / exacta_topK_third_topM", required: false, default: "trifecta_topN" }
       k:         { description: "exactaのK", required: false, default: "2" }
       m:         { description: "thirdのM", required: false, default: "4" }
-      pids:      { description: "PIDフィルタ 例: 02,04", required: false, default: "" }
-      races:     { description: "Rフィルタ 例: 1R,2R", required: false, default: "" }
+      filter:    { description: "例: pids=02,04;races=1R,2R", required: false, default: "" }
       exclude_first1:
-        description: "1着=1号艇の買い目を除外する（true/false）"
+        description: "1着=1号艇の買い目を除外（true/false）"
         required: false
         default: "false"
 
@@ -50,23 +49,37 @@ jobs:
         run: |
           set -euo pipefail
 
-          BASE_INPUT="${{ github.event.inputs.base != '' && github.event.inputs.base || '' }}"
-          DATES="${{ github.event.inputs.dates != '' && github.event.inputs.dates || '' }}"
-          SIMS="${{ github.event.inputs.sims != '' && github.event.inputs.sims || '600' }}"
-          TOPN="${{ github.event.inputs.topn != '' && github.event.inputs.topn || '18' }}"
-          UNIT="${{ github.event.inputs.unit != '' && github.event.inputs.unit || '100' }}"
-          STRATEGY="${{ github.event.inputs.strategy != '' && github.event.inputs.strategy || 'trifecta_topN' }}"
-          KVAL="${{ github.event.inputs.k != '' && github.event.inputs.k || '2' }}"
-          MVAL="${{ github.event.inputs.m != '' && github.event.inputs.m || '4' }}"
-          PIDS="${{ github.event.inputs.pids != '' && github.event.inputs.pids || '' }}"
-          RACES="${{ github.event.inputs.races != '' && github.event.inputs.races || '' }}"
-          EXCL="${{ github.event.inputs.exclude_first1 != '' && github.event.inputs.exclude_first1 || 'false' }}"
+          BASE_INPUT="${{ github.event.inputs.base || '' }}"
+          DATES="${{ github.event.inputs.dates || '' }}"
+          SIMS="${{ github.event.inputs.sims || '600' }}"
+          TOPN="${{ github.event.inputs.topn || '18' }}"
+          UNIT="${{ github.event.inputs.unit || '100' }}"
+          STRATEGY="${{ github.event.inputs.strategy || 'trifecta_topN' }}"
+          KVAL="${{ github.event.inputs.k || '2' }}"
+          MVAL="${{ github.event.inputs.m || '4' }}"
+          FILTER="${{ github.event.inputs.filter || '' }}"
+          EXCL="${{ github.event.inputs.exclude_first1 || 'false' }}"
 
-          # base が未指定なら repo 直下 public を使う（今は scripts/sims/ に居る）
+          # scripts/sims から見たデフォルト public
           if [ -z "$BASE_INPUT" ]; then
             BASE="../../public"
           else
             BASE="$BASE_INPUT"
+          fi
+
+          # filter のパース（pids=..;races=..）
+          PIDS=""
+          RACES=""
+          if [ -n "$FILTER" ]; then
+            IFS=';' read -r -a parts <<< "$FILTER"
+            for kv in "${parts[@]}"; do
+              key="${kv%%=*}"
+              val="${kv#*=}"
+              case "$key" in
+                pids|PIDS)   PIDS="$val" ;;
+                races|RACES) RACES="$val" ;;
+              esac
+            done
           fi
 
           echo "[debug] CWD=$(pwd)"
@@ -84,7 +97,7 @@ jobs:
             ARGS+=( --strategy trifecta_topN --topn "$TOPN" )
           fi
 
-          # ★ 追加: 1着=1号艇除外フラグ
+          # 1着=1号艇除外
           if [ "${EXCL,,}" = "true" ]; then
             ARGS+=( --exclude-first1 )
           fi
