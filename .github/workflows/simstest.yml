@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       base:
-        description: "public ディレクトリのパス（repo 直下）"
+        description: "public ディレクトリのパス"
         required: false
-        default: "../../public"     # ← ここを修正（作業dirが scripts/sims のため）
+        default: "../../public"
       dates:
-        description: "評価対象日(カンマ区切り) 例: 20250810,20250811"
+        description: "評価対象日(カンマ区切り)。空なら全日付を自動探索"
         required: false
         default: ""
       sims:
@@ -43,8 +43,9 @@ on:
         description: "レース名フィルタ(カンマ区切り) 例: 1R,2R"
         required: false
         default: ""
+
   schedule:
-    - cron: "15 6 * * *"  # 15:15 JST
+    - cron: "15 6 * * *"
 
 jobs:
   run:
@@ -63,22 +64,50 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          else
-            pip install numpy pandas
-          fi
+          pip install numpy pandas
+
+      - name: Preflight (count files & sample)
+        working-directory: scripts/sims
+        run: |
+          python - <<'PY'
+          import os, sys, json
+          base = os.path.abspath(os.path.join(os.getcwd(), "../../public"))
+          roots = {
+            "integrated": os.path.join(base, "integrated", "v1"),
+            "results":    os.path.join(base, "results", "v1"),
+          }
+          def walk(root):
+            out=[]
+            if not os.path.isdir(root):
+              return out
+            for d in os.listdir(root):
+              p1=os.path.join(root,d)
+              if not os.path.isdir(p1): continue
+              for pid in os.listdir(p1):
+                p2=os.path.join(p1,pid)
+                if not os.path.isdir(p2): continue
+                for fn in os.listdir(p2):
+                  if fn.endswith(".json"):
+                    out.append((d,pid,fn[:-5]))
+            return set(out)
+          ints = walk(roots["integrated"])
+          ress = walk(roots["results"])
+          both = ints & ress
+          print(f"[preflight] integrated: {len(ints)} files")
+          print(f"[preflight] results:    {len(ress)} files")
+          print(f"[preflight] intersection (eval対象): {len(both)} files")
+          print("[preflight] sample (up to 5):", sorted(list(both))[:5])
+          PY
 
       - name: Run SimS
         working-directory: scripts/sims
         shell: bash
         run: |
           set -euxo pipefail
-
-          BASE="${{ inputs.base || '../../public' }}"   # ← repo 直下の public を指す
+          BASE="${{ inputs.base || '../../public' }}"
           DATES="${{ inputs.dates }}"
           SIMS="${{ inputs.sims || '600' }}"
           TOPN="${{ inputs.topn || '18' }}"
@@ -88,37 +117,21 @@ jobs:
           MVAL="${{ inputs.m || '4' }}"
           PIDS="${{ inputs.pids }}"
           RACES="${{ inputs.races }}"
-
-          TS="$(date +'%Y%m%d-%H%M%S')"
           OUTDIR="."
 
           ARGS="--base \"$BASE\" --sims $SIMS --unit $UNIT"
           if [ -n "$DATES" ]; then ARGS="$ARGS --dates $DATES"; fi
           if [ -n "$PIDS" ];  then ARGS="$ARGS --pids $PIDS";  fi
           if [ -n "$RACES" ]; then ARGS="$ARGS --races $RACES"; fi
-
           if [ "$STRATEGY" = "exacta_topK_third_topM" ]; then
             ARGS="$ARGS --strategy exacta_topK_third_topM --k $KVAL --m $MVAL"
           else
             ARGS="$ARGS --strategy trifecta_topN --topn $TOPN"
           fi
 
-          echo "[debug] pwd=$(pwd)"
           echo "[debug] using BASE=$BASE"
           echo "[debug] args=$ARGS"
-
-          if python sims.py $ARGS --outdir "$OUTDIR"; then
-            echo "SimS finished (with --outdir)."
-          else
-            echo "SimS without --outdir fallback..."
-            python sims.py $ARGS
-            if [ -d "SimS_v1.0_eval" ]; then
-              [ -f SimS_v1.0_eval/per_race_results.csv ] && cp SimS_v1.0_eval/per_race_results.csv "./per_race_results_${TS}.csv"
-              [ -f SimS_v1.0_eval/by_date_summary.csv ] && cp SimS_v1.0_eval/by_date_summary.csv "./by_date_summary_${TS}.csv"
-              [ -f SimS_v1.0_eval/overall.json ] && cp SimS_v1.0_eval/overall.json "./overall_${TS}.json"
-              [ -f SimS_v1.0_eval/hit_report.json ] && cp SimS_v1.0_eval/hit_report.json "./hit_report_${TS}.json"
-            fi
-          fi
+          python sims.py $ARGS --outdir "$OUTDIR"
 
       - name: Commit results into repo
         shell: bash
@@ -137,4 +150,4 @@ jobs:
           path: |
             scripts/sims/*.csv
             scripts/sims/*.json
-          if-no-files-found: ignore
+          if-no-files-found: warn
