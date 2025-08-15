@@ -1,11 +1,14 @@
-# sims_batch_eval_SimS_v1.py
+# sims_batch_eval_SimS_v1_results_payout.py
 # SimS ver1.0 — 同時同条件バッチ検証（三連単 TOPN 均等買い）
 #  - 統合データ/オッズ/リザルトを読み込み
 #  - SimS ver1.0 で各レースを N試行シミュ
-#  - TOPN買いで的中率・ROIを算出
-#  - CSV/JSON に保存
+#  - TOPN買いで的中率・ROIを算出（払い戻しは results の実額を使用）
 # 使い方例：
-#   python sims_batch_eval_SimS_v1.py --base ./public --dates 20250810,20250811,20250812 --sims 1200 --topn 18 --unit 100
+#   python sims_batch_eval_SimS_v1_results_payout.py --base ./public --dates 20250810,20250811,20250812 --sims 1200 --topn 18 --unit 100
+#
+# 変更点（オリジナルとの差分）
+#  - evaluate_one(): 払戻は results.payouts.trifecta.amount を優先参照（100円基準）。
+#    results に払戻が無い、またはフォーマットが不明な場合は odds × unit にフォールバック。
 
 import os, json, math, argparse, csv, shutil
 from collections import Counter
@@ -317,27 +320,56 @@ def actual_trifecta_combo(result_json: dict):
             return None
     return None
 
+def actual_trifecta_payout_amount(result_json: dict) -> int:
+    """results から 3連単の実払戻額（100円基準）を取得。無ければ 0。"""
+    trif = (result_json.get("payouts") or {}).get("trifecta")
+    if isinstance(trif, dict):
+        amt = trif.get("amount")
+        if isinstance(amt, (int, float)):
+            return int(amt)
+    elif isinstance(trif, list):
+        # combo と amount のペア配列の可能性に対応
+        for item in trif:
+            amt = item.get("amount")
+            if isinstance(amt, (int, float)):
+                return int(amt)
+    return 0
+
 # ========== 評価（1レース） ==========
 def evaluate_one(int_path: str, odds_path: str, res_path: str, sims: int, topn: int, unit: int):
+    # 予測確率
     with open(int_path, "r", encoding="utf-8") as f:
         d_int = json.load(f)
     tri_probs, _ = simulate_one(d_int, sims=sims)
-
     top = sorted(tri_probs.items(), key=lambda kv: kv[1], reverse=True)[:topn]
     top_keys = ['-'.join(map(str, k)) for k, _ in top]
 
+    # オッズ（フォールバック用）
     with open(odds_path, "r", encoding="utf-8") as f:
         d_odds = json.load(f)
     omap = odds_map(d_odds)
-    bets = [c for c in top_keys if c in omap]
-    stake = unit * len(bets)
 
+    # 結果（combo と 実払戻額）
     with open(res_path, "r", encoding="utf-8") as f:
         d_res = json.load(f)
     hit_combo = actual_trifecta_combo(d_res)
-    payout = int(round(omap.get(hit_combo, 0.0) * unit)) if hit_combo in bets else 0
+    result_amt_100 = actual_trifecta_payout_amount(d_res)  # 100円あたりの払戻額（円）
 
-    return stake, payout, (1 if payout > 0 else 0), bets, hit_combo
+    # 的中判定
+    hit = 1 if (hit_combo in top_keys) else 0
+
+    # 払戻：results 優先、無ければ odds × unit にフォールバック
+    payout = 0
+    if hit:
+        if result_amt_100 and result_amt_100 > 0:
+            # resultsの払戻は100円基準。unitにスケール。
+            payout = int(round(result_amt_100 * (unit / 100.0)))
+        else:
+            # フォールバック：odds × unit
+            payout = int(round(omap.get(hit_combo, 0.0) * unit))
+    stake = unit * len(top_keys)  # 均等買い
+
+    return stake, payout, hit, top_keys, hit_combo
 
 # ========== メイン ==========
 def _norm_race(r: str) -> str:
@@ -355,7 +387,6 @@ def main():
     ap.add_argument("--unit", type=int, default=100, help="1点あたりの賭け金（円）")
     ap.add_argument("--limit", type=int, default=0, help="先頭からNレースだけ評価（0なら全件）")
     ap.add_argument("--outdir", default="./SimS_v1.0_eval", help="(eval)出力先")
-    # predictフラグ（predoutは受けるが無視して./predict固定）
     ap.add_argument("--predict-only", action="store_true", help="TOPN確率のみ出力")
     ap.add_argument("--predout", default="./predict", help="(無視されます)")
 
@@ -461,7 +492,7 @@ def main():
 
     df = pd.DataFrame(per_rows)
     overall = {
-        "engine": "SimS ver1.0",
+        "engine": "SimS ver1.0 (results payout)",
         "races": int(len(df)),
         "bets_total": int(df["bets"].sum()) if len(df)>0 else 0,
         "stake_total": int(total_stake),
@@ -487,11 +518,14 @@ def main():
     with open(os.path.join(args.outdir, "overall.json"), "w", encoding="utf-8") as f:
         json.dump(overall, f, ensure_ascii=False, indent=2)
 
-    print("=== OVERALL (SimS ver1.0) ===")
+    print("=== OVERALL (SimS ver1.0, results payout) ===")
     print(json.dumps(overall, ensure_ascii=False, indent=2))
     if by_date is not None:
         print("\n=== BY DATE ===")
-        print(by_date.to_string(index=False))
+        try:
+            print(by_date.to_string(index=False))
+        except Exception:
+            print(by_date)
 
 if __name__ == "__main__":
     main()
