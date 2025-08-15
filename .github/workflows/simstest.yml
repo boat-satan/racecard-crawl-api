@@ -1,10 +1,47 @@
+name: Run SimS
+
+on:
+  workflow_dispatch:
+    inputs:
+      base:      { description: "Path to public (repo rootからの相対 or 絶対)", required: false, default: "" }
+      dates:     { description: "YYYYMMDD(カンマ区切り)", required: false, default: "" }
+      sims:      { description: "Sims per race", required: false, default: "600" }
+      topn:      { description: "TopN (trifecta_topN時)", required: false, default: "18" }
+      unit:      { description: "Bet unit (JPY)", required: false, default: "100" }
+      strategy:  { description: "trifecta_topN / exacta_topK_third_topM", required: false, default: "trifecta_topN" }
+      k:         { description: "exactaのK", required: false, default: "2" }
+      m:         { description: "thirdのM", required: false, default: "4" }
+      pids:      { description: "PIDフィルタ 例: 02,04", required: false, default: "" }
+      races:     { description: "Rフィルタ 例: 1R,2R", required: false, default: "" }
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TZ: Asia/Tokyo
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pandas
+
       - name: Run SimS
         working-directory: scripts/sims
         shell: bash
         run: |
           set -euo pipefail
 
-          # inputs → 変数（workflow_dispatch は github.event.inputs で参照）
           BASE_INPUT="${{ github.event.inputs.base != '' && github.event.inputs.base || '' }}"
           DATES="${{ github.event.inputs.dates != '' && github.event.inputs.dates || '' }}"
           SIMS="${{ github.event.inputs.sims != '' && github.event.inputs.sims || '600' }}"
@@ -16,7 +53,7 @@
           PIDS="${{ github.event.inputs.pids != '' && github.event.inputs.pids || '' }}"
           RACES="${{ github.event.inputs.races != '' && github.event.inputs.races || '' }}"
 
-          # base が空なら、scripts/sims から見た public を既定に
+          # base が未指定なら repo 直下 public を使う（今は scripts/sims/ に居る）
           if [ -z "$BASE_INPUT" ]; then
             BASE="../../public"
           else
@@ -25,9 +62,8 @@
 
           echo "[debug] CWD=$(pwd)"
           echo "[debug] BASE=$BASE"
-          ls -la "$BASE" || { echo "[error] BASE not found"; exit 1; }
+          ls -la "$BASE"
 
-          # 引数を安全に配列で構築
           ARGS=( --base "$BASE" --sims "$SIMS" --unit "$UNIT" )
           [ -n "$DATES" ] && ARGS+=( --dates "$DATES" )
           [ -n "$PIDS"  ] && ARGS+=( --pids "$PIDS" )
@@ -39,8 +75,23 @@
             ARGS+=( --strategy trifecta_topN --topn "$TOPN" )
           fi
 
-          # 直下に出力
-          OUTDIR="."
           echo "[debug] args: ${ARGS[*]}"
+          python sims.py "${ARGS[@]}" --outdir .
 
-          python sims.py "${ARGS[@]}" --outdir "$OUTDIR"
+      - name: Commit results into repo
+        run: |
+          set -eux
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add scripts/sims/*.csv scripts/sims/*.json || true
+          git commit -m "SimS outputs ($(date +'%Y-%m-%d %H:%M:%S %Z'))" || true
+          git push || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sims-outputs
+          path: |
+            scripts/sims/*.csv
+            scripts/sims/*.json
+          if-no-files-found: warn
