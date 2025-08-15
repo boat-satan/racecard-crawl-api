@@ -11,24 +11,15 @@ on:
       strategy:  { description: "trifecta_topN / exacta_topK_third_topM", required: false, default: "trifecta_topN" }
       k:         { description: "exactaのK", required: false, default: "2" }
       m:         { description: "thirdのM", required: false, default: "4" }
-      filter:    { description: "例: pids=02,04;races=1R,2R;only_first1=true", required: false, default: "" }
+      filter:
+        description: >-
+          例: pids=02,04;races=1R,2R;only_first1=true;odds_base=./public/odds/v1;min_ev=1.2;require_odds=true
+        required: false
+        default: ""
       exclude_first1:
         description: "1着=1号艇の買い目を除外（true/false）"
         required: false
         default: "false"
-      # --- EV / オッズ ---
-      odds_base:
-        description: "オッズJSONルート（public/odds/v1）"
-        required: false
-        default: "./public/odds/v1"
-      min_ev:
-        description: "EVしきい値（例: 1.2）"
-        required: false
-        default: "0"
-      require_odds:
-        description: "オッズが無い買い目/日付は評価しない"
-        required: false
-        default: "true"
 
 jobs:
   run:
@@ -37,6 +28,7 @@ jobs:
       contents: write
     env:
       TZ: Asia/Tokyo
+      PYTHON_SCRIPT: scripts/sims/sims.py
 
     steps:
       - name: Checkout
@@ -57,13 +49,12 @@ jobs:
           fi
 
       - name: Run SimS
-        working-directory: scripts/sims
         shell: bash
         run: |
           set -euo pipefail
 
           BASE_INPUT="${{ github.event.inputs.base || '' }}"
-          DATES_RAW="${{ github.event.inputs.dates || '' }}"
+          DATES="${{ github.event.inputs.dates || '' }}"
           SIMS="${{ github.event.inputs.sims || '600' }}"
           TOPN="${{ github.event.inputs.topn || '18' }}"
           UNIT="${{ github.event.inputs.unit || '100' }}"
@@ -72,72 +63,48 @@ jobs:
           MVAL="${{ github.event.inputs.m || '4' }}"
           FILTER="${{ github.event.inputs.filter || '' }}"
           EXCL="${{ github.event.inputs.exclude_first1 || 'false' }}"
-          ODDS_BASE_INPUT="${{ github.event.inputs.odds_base || './public/odds/v1' }}"
-          MIN_EV="${{ github.event.inputs.min_ev || '0' }}"
-          REQUIRE_ODDS="${{ github.event.inputs.require_odds || 'true' }}"
 
-          # scripts/sims から見たデフォルト public
+          # repo 直下 public をデフォルトに
           if [ -z "$BASE_INPUT" ]; then
-            BASE="../../public"
+            BASE="public"
           else
             BASE="$BASE_INPUT"
           fi
-          # odds_base は相対/絶対どちらでもOK
-          case "$ODDS_BASE_INPUT" in
-            /*)  ODDS_BASE="$ODDS_BASE_INPUT" ;;
-            *)   ODDS_BASE="$(realpath -m "$ODDS_BASE_INPUT")" ;;
-          esac
 
-          # filter のパース（pids=..;races=..;only_first1=true）
-          PIDS=""
-          RACES=""
-          ONLY="false"
+          # filter のパース（; 区切り、key=value）
+          PIDS=""; RACES=""
+          ONLY="false"; ODDS_BASE=""; MIN_EV=""
+          REQUIRE_ODDS="false"
           if [ -n "$FILTER" ]; then
             IFS=';' read -r -a parts <<< "$FILTER"
             for kv in "${parts[@]}"; do
-              key="${kv%%=*}"
+              key="$(echo "${kv%%=*}" | tr '[:upper:]' '[:lower:]')"
               val="${kv#*=}"
               case "$key" in
-                pids|PIDS)                  PIDS="$val" ;;
-                races|RACES)                RACES="$val" ;;
-                only_first1|ONLY_FIRST1)   ONLY="$val" ;;
+                pids)          PIDS="$val" ;;
+                races)         RACES="$val" ;;
+                only_first1)   ONLY="$val" ;;
+                odds_base)     ODDS_BASE="$val" ;;
+                min_ev)        MIN_EV="$val" ;;
+                require_odds)  REQUIRE_ODDS="$val" ;;
               esac
             done
           fi
 
-          # 排他チェック（exclude & only の同時指定は不可）
+          # デフォルトのオッズディレクトリ（未指定時）
+          if [ -z "$ODDS_BASE" ]; then
+            ODDS_BASE="$BASE/odds/v1"
+          fi
+
+          # 排他チェック
           if [ "${EXCL,,}" = "true" ] && [ "${ONLY,,}" = "true" ]; then
             echo "::error ::exclude_first1 と only_first1 は同時指定できません"
             exit 1
           fi
 
-          # dates 前処理 & オッズ存在チェック
-          DATES=""
-          if [ -n "$DATES_RAW" ]; then
-            IFS=',' read -r -a ds <<< "$DATES_RAW"
-            for d in "${ds[@]}"; do
-              d="${d//-/}"                                # 2025-08-12 → 20250812
-              if [ "${REQUIRE_ODDS,,}" = "true" ]; then
-                if [ -d "$ODDS_BASE/$d" ]; then
-                  DATES+="${d},"
-                else
-                  echo "::notice ::ODDS missing for date=$d at $ODDS_BASE/$d → skip"
-                fi
-              else
-                DATES+="${d},"
-              fi
-            done
-            DATES="${DATES%,}"  # 末尾カンマ除去
-            if [ -z "$DATES" ] && [ -n "$DATES_RAW" ] && [ "${REQUIRE_ODDS,,}" = "true" ]; then
-              echo "::warning ::全ての日付でオッズ未整備のため終了します（odds_base=$ODDS_BASE）"
-              exit 0
-            fi
-          fi
-
-          echo "[debug] CWD=$(pwd)"
           echo "[debug] BASE=$BASE"
-          echo "[debug] ODDS_BASE=$ODDS_BASE"
-          ls -la "$BASE" || true
+          echo "[debug] ODDS_BASE=$ODDS_BASE  MIN_EV=${MIN_EV:-'(none)'}  REQUIRE_ODDS=$REQUIRE_ODDS"
+          [ -d "$BASE" ] && ls -la "$BASE" || true
 
           ARGS=( --base "$BASE" --sims "$SIMS" --unit "$UNIT" )
           [ -n "$DATES" ] && ARGS+=( --dates "$DATES" )
@@ -150,7 +117,7 @@ jobs:
             ARGS+=( --strategy trifecta_topN --topn "$TOPN" )
           fi
 
-          # 1着=1号艇の除外/のみ
+          # 1着=1号艇関連
           if [ "${EXCL,,}" = "true" ]; then
             ARGS+=( --exclude-first1 )
           fi
@@ -158,21 +125,17 @@ jobs:
             ARGS+=( --only-first1 )
           fi
 
-          # EV / オッズ
-          ARGS+=( --odds-base "$ODDS_BASE" )
-          # MIN_EV は数値なら渡す（空/0はフィルタ無効）
-          if [[ "$MIN_EV" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-            if [ "$(printf '%.6f' "$MIN_EV")" != "0.000000" ]; then
-              ARGS+=( --min-ev "$MIN_EV" )
-            fi
+          # EV/オッズ関連
+          [ -n "$ODDS_BASE" ] && ARGS+=( --odds-base "$ODDS_BASE" )
+          if [ -n "$MIN_EV" ]; then
+            ARGS+=( --min-ev "$MIN_EV" )
           fi
           if [ "${REQUIRE_ODDS,,}" = "true" ]; then
             ARGS+=( --require-odds )
           fi
 
           echo "[debug] args: ${ARGS[*]}"
-          # ← あなたの実行スクリプト名に合わせる（EV対応のPython）
-          python sims_batch_eval_SimS_v1.py "${ARGS[@]}" --outdir .
+          python "$PYTHON_SCRIPT" "${ARGS[@]}" --outdir scripts/sims
 
       - name: Commit results into repo
         run: |
