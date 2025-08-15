@@ -1,0 +1,144 @@
+name: Run SimS batch
+
+on:
+  # 手動実行
+  workflow_dispatch:
+    inputs:
+      base:
+        description: "public ディレクトリのパス"
+        required: false
+        default: "./public"
+      dates:
+        description: "評価対象日(カンマ区切り) 例: 20250810,20250811"
+        required: false
+        default: ""
+      sims:
+        description: "1レースあたりの試行回数"
+        required: false
+        default: "600"
+      topn:
+        description: "三連単TOPN（strategy=trifecta_topN のとき）"
+        required: false
+        default: "18"
+      unit:
+        description: "1点賭け金(円)"
+        required: false
+        default: "100"
+      strategy:
+        description: "買い目戦略 (trifecta_topN / exacta_topK_third_topM)"
+        required: false
+        default: "trifecta_topN"
+      k:
+        description: "2連単TOPK（strategy=exacta_topK_third_topM用）"
+        required: false
+        default: "2"
+      m:
+        description: "3着TOPM（strategy=exacta_topK_third_topM用）"
+        required: false
+        default: "4"
+      pids:
+        description: "場コードフィルタ(カンマ区切り) 例: 01,06"
+        required: false
+        default: ""
+      races:
+        description: "レース名フィルタ(カンマ区切り) 例: 1R,2R"
+        required: false
+        default: ""
+  # 任意: 毎日 15:15 JST に自動実行
+  schedule:
+    - cron: "15 6 * * *"  # Asia/Tokyo(+9) → 06:15 UTC = 15:15 JST
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 出力をコミットするため
+    env:
+      TZ: Asia/Tokyo
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install numpy pandas
+          fi
+
+      - name: Run SimS
+        working-directory: scripts/sims
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          # 入力を環境変数に
+          BASE="${{ inputs.base || './public' }}"
+          DATES="${{ inputs.dates }}"
+          SIMS="${{ inputs.sims || '600' }}"
+          TOPN="${{ inputs.topn || '18' }}"
+          UNIT="${{ inputs.unit || '100' }}"
+          STRATEGY="${{ inputs.strategy || 'trifecta_topN' }}"
+          KVAL="${{ inputs.k || '2' }}"
+          MVAL="${{ inputs.m || '4' }}"
+          PIDS="${{ inputs.pids }}"
+          RACES="${{ inputs.races }}"
+
+          # 出力をこのディレクトリ直下に固定（スクリプトが --outdir を受け付けない場合のフォールバックも用意）
+          TS="$(date +'%Y%m%d-%H%M%S')"
+          OUTDIR="."
+
+          # ベースとなる引数を組み立て（存在するフラグだけ付ける）
+          ARGS="--base \"$BASE\" --sims $SIMS --unit $UNIT"
+          if [ -n "$DATES" ]; then ARGS="$ARGS --dates $DATES"; fi
+          if [ -n "$PIDS" ]; then  ARGS="$ARGS --pids $PIDS";  fi
+          if [ -n "$RACES" ]; then ARGS="$ARGS --races $RACES"; fi
+
+          # strategy 切替
+          if [ "$STRATEGY" = "exacta_topK_third_topM" ]; then
+            ARGS="$ARGS --strategy exacta_topK_third_topM --k $KVAL --m $MVAL"
+          else
+            ARGS="$ARGS --strategy trifecta_topN --topn $TOPN"
+          fi
+
+          # まずは --outdir . を試す
+          if python sims.py $ARGS --outdir "$OUTDIR"; then
+            echo "SimS finished (with --outdir)."
+          else
+            echo "SimS without --outdir fallback..."
+            # フォールバック: 既定出力(例: SimS_v1.0_eval)→カレントへコピー
+            python sims.py $ARGS
+            if [ -d "SimS_v1.0_eval" ]; then
+              # タイムスタンプ付きでコピー
+              [ -f SimS_v1.0_eval/per_race_results.csv ] && cp SimS_v1.0_eval/per_race_results.csv "./per_race_results_${TS}.csv"
+              [ -f SimS_v1.0_eval/by_date_summary.csv ] && cp SimS_v1.0_eval/by_date_summary.csv "./by_date_summary_${TS}.csv"
+              [ -f SimS_v1.0_eval/overall.json ] && cp SimS_v1.0_eval/overall.json "./overall_${TS}.json"
+              [ -f SimS_v1.0_eval/hit_report.json ] && cp SimS_v1.0_eval/hit_report.json "./hit_report_${TS}.json"
+            fi
+          fi
+
+      - name: Commit results into repo
+        shell: bash
+        run: |
+          set -eux
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add scripts/sims/*.csv scripts/sims/*.json || true
+          git commit -m "SimS outputs ($(date +'%Y-%m-%d %H:%M:%S %Z'))" || echo "No changes to commit"
+          git push || echo "No changes to push"
+
+      - name: Upload artifacts (backup)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sims-outputs
+          path: |
+            scripts/sims/*.csv
+            scripts/sims/*.json
+          if-no-files-found: ignore
