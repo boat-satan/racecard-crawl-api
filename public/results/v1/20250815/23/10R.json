@@ -1,0 +1,128 @@
+{
+  "date": "20250815",
+  "pid": "23",
+  "race": "10R",
+  "source": {
+    "result": "https://www.boatrace.jp/owpc/pc/race/raceresult?rno=10&jcd=23&hd=20250815"
+  },
+  "generatedAt": "2025-08-15T08:38:10.580Z",
+  "order": [
+    {
+      "pos": 1,
+      "lane": 1,
+      "racerId": "4718",
+      "name": "北川 太一",
+      "time": "1'50\"0"
+    },
+    {
+      "pos": 2,
+      "lane": 6,
+      "racerId": "3265",
+      "name": "今村 暢孝",
+      "time": "1'52\"4"
+    },
+    {
+      "pos": 3,
+      "lane": 4,
+      "racerId": "4503",
+      "name": "上野 真之介",
+      "time": "1'53\"2"
+    },
+    {
+      "pos": 4,
+      "lane": 3,
+      "racerId": "4873",
+      "name": "蒲原 健太",
+      "time": "1'54\"1"
+    },
+    {
+      "pos": 5,
+      "lane": 5,
+      "racerId": "4981",
+      "name": "牧山 敦也",
+      "time": "1'55\"4"
+    },
+    {
+      "pos": 6,
+      "lane": 2,
+      "racerId": "4652",
+      "name": "酒見 峻介",
+      "time": "1'57\"0"
+    }
+  ],
+  "start": [
+    {
+      "lane": 1,
+      "st": 0.01
+    },
+    {
+      "lane": 6,
+      "st": 0.06
+    },
+    {
+      "lane": 2,
+      "st": 0.09
+    },
+    {
+      "lane": 3,
+      "st": 0.13
+    },
+    {
+      "lane": 4,
+      "st": 0.11
+    },
+    {
+      "lane": 5,
+      "st": 0.14
+    }
+  ],
+  "decision": "逃げ",
+  "weather": {
+    "condition": "晴",
+    "airTemp": 32,
+    "windSpeed": 5,
+    "windDirCode": 6,
+    "waterTemp": 29,
+    "wave": 5
+  },
+  "refunds": [],
+  "payouts": {
+    "trifecta": {
+      "combo": "1-6-4",
+      "amount": 3340,
+      "popularity": 10
+    },
+    "trio": {
+      "combo": "1=4=6",
+      "amount": 680,
+      "popularity": 3
+    },
+    "exacta": {
+      "combo": "1-6",
+      "amount": 1680,
+      "popularity": 7
+    },
+    "quinella": {
+      "combo": "1=6",
+      "amount": 1000,
+      "popularity": 6
+    },
+    "wide": [
+      {
+        "combo": "1=6",
+        "amount": 290,
+        "popularity": 6
+      }
+    ],
+    "win": {
+      "combo": "1",
+      "amount": 120
+    },
+    "place": [
+      {
+        "combo": "1",
+        "amount": 190
+      }
+    ]
+  }
+}
