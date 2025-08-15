@@ -164,9 +164,7 @@ def build_input_from_integrated(d: dict) -> dict:
     # ST 分布（正規）— 外枠ほど選手力量の効きを強く
     ST_model = {}
     for lane in lanes:
-        # 基本分散
         sigma = 0.02 * (1 + 0.20 * (1 if F[lane] > 0 else 0) + 0.15 * max(0.0, -S[lane]))
-        # 外枠強化（1→6で+0.1ずつ強く効かせる案）
         lane_gain = 1.0 + 0.1 * (lane - 1)  # 1=1.0, 6=1.5
         sigma *= lane_gain
         ST_model[str(lane)] = {"type": "normal", "mu": mu[lane], "sigma": sigma}
@@ -409,7 +407,7 @@ def main():
     ap.add_argument("--strategy", default="trifecta_topN", choices=["trifecta_topN","exacta_topK_third_topM"],
                     help="買い目生成ロジック")
     ap.add_argument("--k", type=int, default=2, help="exacta_topK_third_topM: 2連単TOPK")
-    ap.add_argument("--m", type=int, default=4, help="exacta_topK_third_topM: 3着TOPM")  # ← 修正
+    ap.add_argument("--m", type=int, default=4, help="exacta_topK_third_topM: 3着TOPM")
 
     args = ap.parse_args()
 
@@ -495,11 +493,9 @@ def main():
         })
 
         if ev["hit"]:
-            # 決まり手推定（確率上最多のラベル）
             k_lab = None
             if ev["kim_probs"]:
                 k_lab = sorted(ev["kim_probs"].items(), key=lambda kv: kv[1], reverse=True)[0][0]
-            # オッズ帯（results 金額ベース → 100円換算の帯に可視化）
             payout100 = ev["payout"] / args.unit if args.unit>0 else 0
             bz = None
             for lo,hi in bucket_odds:
@@ -541,10 +537,8 @@ def main():
               "rank_hit":None,"payout":d["payout"],"odds_approx":(d["payout"]/overall["unit"] if overall["unit"]>0 else 0),
               "kim_est":None} for d in per_rows if d["hit"]]] )
 
-        # ① 決まり手別（推定）は simulate_one の集計を使うほうがよいが、ここでは省略可
         by_kim = pd.DataFrame(columns=["kim_est","hits"])
 
-        # ② 1着コース分布
         def first_lane(c):
             try:
                 return int(str(c).split("-")[0])
@@ -554,7 +548,6 @@ def main():
         by_first = (hit_df.groupby("first_lane").size().reset_index(name="hits")
                     .sort_values("first_lane"))
 
-        # ③ オッズ帯（100円換算近似）
         def band(x):
             try:
                 o = float(x)
@@ -570,12 +563,9 @@ def main():
         by_band = (hit_df.groupby("odds_band").size().reset_index(name="hits")
                    .sort_values("odds_band"))
 
-        # ④ 出目パターン（上位10表示）
         by_combo = (hit_df.groupby("hit_combo").size().reset_index(name="hits")
                     .sort_values("hits", ascending=False).head(10))
 
-        # ⑤ 確率順位帯（1-6,7-12,13-18）
-        # rank_hit は evaluate_one で算出可能だが省略的に NA 扱い
         by_rank = pd.DataFrame([{"rank_bucket":"NA","hits":len(hit_df)}])
 
         report = {
