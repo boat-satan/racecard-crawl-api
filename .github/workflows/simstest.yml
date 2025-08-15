@@ -4,17 +4,17 @@
         run: |
           set -euo pipefail
 
-          # inputs → 変数
-          BASE_INPUT="${{ inputs.base }}"
-          DATES="${{ inputs.dates }}"
-          SIMS="${{ inputs.sims || '600' }}"
-          TOPN="${{ inputs.topn || '18' }}"
-          UNIT="${{ inputs.unit || '100' }}"
-          STRATEGY="${{ inputs.strategy || 'trifecta_topN' }}"
-          KVAL="${{ inputs.k || '2' }}"
-          MVAL="${{ inputs.m || '4' }}"
-          PIDS="${{ inputs.pids }}"
-          RACES="${{ inputs.races }}"
+          # inputs → 変数（workflow_dispatch は github.event.inputs で参照）
+          BASE_INPUT="${{ github.event.inputs.base != '' && github.event.inputs.base || '' }}"
+          DATES="${{ github.event.inputs.dates != '' && github.event.inputs.dates || '' }}"
+          SIMS="${{ github.event.inputs.sims != '' && github.event.inputs.sims || '600' }}"
+          TOPN="${{ github.event.inputs.topn != '' && github.event.inputs.topn || '18' }}"
+          UNIT="${{ github.event.inputs.unit != '' && github.event.inputs.unit || '100' }}"
+          STRATEGY="${{ github.event.inputs.strategy != '' && github.event.inputs.strategy || 'trifecta_topN' }}"
+          KVAL="${{ github.event.inputs.k != '' && github.event.inputs.k || '2' }}"
+          MVAL="${{ github.event.inputs.m != '' && github.event.inputs.m || '4' }}"
+          PIDS="${{ github.event.inputs.pids != '' && github.event.inputs.pids || '' }}"
+          RACES="${{ github.event.inputs.races != '' && github.event.inputs.races || '' }}"
 
           # base が空なら、scripts/sims から見た public を既定に
           if [ -z "$BASE_INPUT" ]; then
@@ -27,9 +27,8 @@
           echo "[debug] BASE=$BASE"
           ls -la "$BASE" || { echo "[error] BASE not found"; exit 1; }
 
-          # 安全な引数構築（配列）
+          # 引数を安全に配列で構築
           ARGS=( --base "$BASE" --sims "$SIMS" --unit "$UNIT" )
-
           [ -n "$DATES" ] && ARGS+=( --dates "$DATES" )
           [ -n "$PIDS"  ] && ARGS+=( --pids "$PIDS" )
           [ -n "$RACES" ] && ARGS+=( --races "$RACES" )
