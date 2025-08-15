@@ -1,13 +1,12 @@
 name: Run SimS batch
 
 on:
-  # 手動実行
   workflow_dispatch:
     inputs:
       base:
-        description: "public ディレクトリのパス"
+        description: "public ディレクトリのパス（repo 直下）"
         required: false
-        default: "./public"
+        default: "../../public"     # ← ここを修正（作業dirが scripts/sims のため）
       dates:
         description: "評価対象日(カンマ区切り) 例: 20250810,20250811"
         required: false
@@ -44,17 +43,17 @@ on:
         description: "レース名フィルタ(カンマ区切り) 例: 1R,2R"
         required: false
         default: ""
-  # 任意: 毎日 15:15 JST に自動実行
   schedule:
-    - cron: "15 6 * * *"  # Asia/Tokyo(+9) → 06:15 UTC = 15:15 JST
+    - cron: "15 6 * * *"  # 15:15 JST
 
 jobs:
   run:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # 出力をコミットするため
+      contents: write
     env:
       TZ: Asia/Tokyo
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -79,8 +78,7 @@ jobs:
         run: |
           set -euxo pipefail
 
-          # 入力を環境変数に
-          BASE="${{ inputs.base || './public' }}"
+          BASE="${{ inputs.base || '../../public' }}"   # ← repo 直下の public を指す
           DATES="${{ inputs.dates }}"
           SIMS="${{ inputs.sims || '600' }}"
           TOPN="${{ inputs.topn || '18' }}"
@@ -91,32 +89,30 @@ jobs:
           PIDS="${{ inputs.pids }}"
           RACES="${{ inputs.races }}"
 
-          # 出力をこのディレクトリ直下に固定（スクリプトが --outdir を受け付けない場合のフォールバックも用意）
           TS="$(date +'%Y%m%d-%H%M%S')"
           OUTDIR="."
 
-          # ベースとなる引数を組み立て（存在するフラグだけ付ける）
           ARGS="--base \"$BASE\" --sims $SIMS --unit $UNIT"
           if [ -n "$DATES" ]; then ARGS="$ARGS --dates $DATES"; fi
-          if [ -n "$PIDS" ]; then  ARGS="$ARGS --pids $PIDS";  fi
+          if [ -n "$PIDS" ];  then ARGS="$ARGS --pids $PIDS";  fi
           if [ -n "$RACES" ]; then ARGS="$ARGS --races $RACES"; fi
 
-          # strategy 切替
           if [ "$STRATEGY" = "exacta_topK_third_topM" ]; then
             ARGS="$ARGS --strategy exacta_topK_third_topM --k $KVAL --m $MVAL"
           else
             ARGS="$ARGS --strategy trifecta_topN --topn $TOPN"
           fi
 
-          # まずは --outdir . を試す
+          echo "[debug] pwd=$(pwd)"
+          echo "[debug] using BASE=$BASE"
+          echo "[debug] args=$ARGS"
+
           if python sims.py $ARGS --outdir "$OUTDIR"; then
             echo "SimS finished (with --outdir)."
           else
             echo "SimS without --outdir fallback..."
-            # フォールバック: 既定出力(例: SimS_v1.0_eval)→カレントへコピー
             python sims.py $ARGS
             if [ -d "SimS_v1.0_eval" ]; then
-              # タイムスタンプ付きでコピー
               [ -f SimS_v1.0_eval/per_race_results.csv ] && cp SimS_v1.0_eval/per_race_results.csv "./per_race_results_${TS}.csv"
               [ -f SimS_v1.0_eval/by_date_summary.csv ] && cp SimS_v1.0_eval/by_date_summary.csv "./by_date_summary_${TS}.csv"
               [ -f SimS_v1.0_eval/overall.json ] && cp SimS_v1.0_eval/overall.json "./overall_${TS}.json"
