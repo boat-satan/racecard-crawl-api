@@ -13,6 +13,10 @@ on:
       m:         { description: "thirdのM", required: false, default: "4" }
       pids:      { description: "PIDフィルタ 例: 02,04", required: false, default: "" }
       races:     { description: "Rフィルタ 例: 1R,2R", required: false, default: "" }
+      exclude_first1:
+        description: "1着=1号艇の買い目を除外する（true/false）"
+        required: false
+        default: "false"
 
 jobs:
   run:
@@ -34,7 +38,11 @@ jobs:
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install numpy pandas
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install numpy pandas
+          fi
 
       - name: Run SimS
         working-directory: scripts/sims
@@ -52,6 +60,7 @@ jobs:
           MVAL="${{ github.event.inputs.m != '' && github.event.inputs.m || '4' }}"
           PIDS="${{ github.event.inputs.pids != '' && github.event.inputs.pids || '' }}"
           RACES="${{ github.event.inputs.races != '' && github.event.inputs.races || '' }}"
+          EXCL="${{ github.event.inputs.exclude_first1 != '' && github.event.inputs.exclude_first1 || 'false' }}"
 
           # base が未指定なら repo 直下 public を使う（今は scripts/sims/ に居る）
           if [ -z "$BASE_INPUT" ]; then
@@ -73,6 +82,11 @@ jobs:
             ARGS+=( --strategy exacta_topK_third_topM --k "$KVAL" --m "$MVAL" )
           else
             ARGS+=( --strategy trifecta_topN --topn "$TOPN" )
+          fi
+
+          # ★ 追加: 1着=1号艇除外フラグ
+          if [ "${EXCL,,}" = "true" ]; then
+            ARGS+=( --exclude-first1 )
           fi
 
           echo "[debug] args: ${ARGS[*]}"
