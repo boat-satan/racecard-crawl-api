@@ -2,20 +2,20 @@
   "summary": {
     "engine": "SimS ver1.0 (E1)",
     "races": 132,
-    "bets_total": 1387,
-    "stake_total": 138700,
-    "payout_total": 64560,
-    "hit_rate": 0.16666666666666666,
-    "roi": -0.534534967555876,
+    "bets_total": 1125,
+    "stake_total": 112500,
+    "payout_total": 57890,
+    "hit_rate": 0.15151515151515152,
+    "roi": -0.4854222222222222,
     "strategy": "trifecta_topN",
-    "topn": 24,
+    "topn": 18,
     "k": 2,
     "m": 4,
     "sims_per_race": 10000,
     "unit": 100,
     "exclude_first1": false,
     "only_first1": false,
-    "min_ev": 1.2,
+    "min_ev": 1.3,
     "require_odds": false
   },
   "by_kimarite_est": [],
@@ -26,21 +26,17 @@
     },
     {
       "first_lane": 2,
-      "hits": 9
+      "hits": 8
     },
     {
       "first_lane": 3,
       "hits": 4
-    },
-    {
-      "first_lane": 4,
-      "hits": 1
     }
   ],
   "by_odds_band": [
     {
       "odds_band": "01-09",
-      "hits": 4
+      "hits": 3
     },
     {
       "odds_band": "10-19",
@@ -52,7 +48,7 @@
     },
     {
       "odds_band": "50-99",
-      "hits": 5
+      "hits": 4
     }
   ],
   "by_hit_combo_top10": [
@@ -69,11 +65,11 @@
       "hits": 1
     },
     {
-      "hit_combo": "1-4-3",
+      "hit_combo": "1-3-4",
       "hits": 1
     },
     {
-      "hit_combo": "1-3-4",
+      "hit_combo": "1-4-3",
       "hits": 1
     },
     {
@@ -93,14 +89,14 @@
       "hits": 1
     },
     {
-      "hit_combo": "2-3-6",
+      "hit_combo": "2-4-1",
       "hits": 1
     }
   ],
   "by_rank_bucket": [
     {
       "rank_bucket": "NA",
-      "hits": 22
+      "hits": 20
     }
   ]
 }
