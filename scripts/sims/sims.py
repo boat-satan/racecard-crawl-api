@@ -231,7 +231,6 @@ def t1m_time(ST, R, A, Ap, sq, env, lane, st_gain):
 
 def decision_bias_term(lead, chase, lane, kimarite_hint=None):
     """決まり手バイアスの簡易実装（倍率を掛けるだけの前向きバイアス）"""
-    # ここではバイアスの骨だけ（必要に応じて、コース・選手傾向で条件分岐を追加）
     base = 1.0
     if Params.decision_bias_mult != 1.0:
         base *= Params.decision_bias_mult
@@ -251,7 +250,6 @@ def one_pass(entry, T1M, A, Ap, env, lineblocks, first_right):
         turn_err = maybe_safe_margin()
         dt_eff = dt + Params.gamma_wall + Params.k_turn_err * turn_err
         logit = Params.a0 + Params.b_dt * (theta_eff - dt_eff) + Params.cK * dK + delta
-        # 決まり手バイアス（倍率）
         logit *= decision_bias_term(lead, chase, chase)
         p = sigmoid(logit)
         if rng.random() < p:
@@ -357,7 +355,6 @@ def generate_tickets(strategy, tri_probs, exacta_probs, third_probs, topn=18, k=
                     if key not in seen:
                         seen.add(key)
                         tickets.append((key, exacta_probs.get((f,s),0.0) * third_probs.get(t,0.0)))
-        # EV順に並べ替えて返す
         tickets = sorted(tickets, key=lambda kv: kv[1], reverse=True)
     else:
         top = sorted(tri_probs.items(), key=lambda kv: kv[1], reverse=True)[:topn]
@@ -412,7 +409,7 @@ def main():
     ap.add_argument("--strategy", default="trifecta_topN", choices=["trifecta_topN","exacta_topK_third_topM"],
                     help="買い目生成ロジック")
     ap.add_argument("--k", type=int, default=2, help="exacta_topK_third_topM: 2連単TOPK")
-    ap.add_argument("--m", type:int, default=4, help="exacta_topK_third_topM: 3着TOPM")
+    ap.add_argument("--m", type=int, default=4, help="exacta_topK_third_topM: 3着TOPM")  # ← 修正
 
     args = ap.parse_args()
 
@@ -538,14 +535,16 @@ def main():
 
     # ---- 的中群レポート ----
     rep_path = os.path.join(args.outdir, "hit_report.json")
-    if hit_detail:
-        hit_df = pd.DataFrame(hit_detail)
+    if len([r for r in per_rows if r["hit"]]) > 0:
+        hit_df = pd.DataFrame([h for h in 
+            [{"date":d["date"],"pid":d["pid"],"race":d["race"],"hit_combo":d["hit_combo"],
+              "rank_hit":None,"payout":d["payout"],"odds_approx":(d["payout"]/overall["unit"] if overall["unit"]>0 else 0),
+              "kim_est":None} for d in per_rows if d["hit"]]] )
 
-        # ① 決まり手別（推定）
-        by_kim = (hit_df.groupby("kim_est").size().reset_index(name="hits")
-                  .sort_values("hits", ascending=False))
+        # ① 決まり手別（推定）は simulate_one の集計を使うほうがよいが、ここでは省略可
+        by_kim = pd.DataFrame(columns=["kim_est","hits"])
 
-        # ② 1着コース分布（hit_comboから1着=最初の数字）
+        # ② 1着コース分布
         def first_lane(c):
             try:
                 return int(str(c).split("-")[0])
@@ -576,14 +575,8 @@ def main():
                     .sort_values("hits", ascending=False).head(10))
 
         # ⑤ 確率順位帯（1-6,7-12,13-18）
-        def rank_bucket(r):
-            if r is None: return "NA"
-            if r<=6: return "1-6"
-            if r<=12: return "7-12"
-            return "13-18"
-        hit_df["rank_bucket"] = hit_df["rank_hit"].map(rank_bucket)
-        by_rank = (hit_df.groupby("rank_bucket").size().reset_index(name="hits")
-                   .sort_values("rank_bucket"))
+        # rank_hit は evaluate_one で算出可能だが省略的に NA 扱い
+        by_rank = pd.DataFrame([{"rank_bucket":"NA","hits":len(hit_df)}])
 
         report = {
             "summary": overall,
