@@ -16,6 +16,19 @@ on:
         description: "1着=1号艇の買い目を除外（true/false）"
         required: false
         default: "false"
+      # --- EV / オッズ ---
+      odds_base:
+        description: "オッズJSONルート（public/odds/v1）"
+        required: false
+        default: "./public/odds/v1"
+      min_ev:
+        description: "EVしきい値（例: 1.2）"
+        required: false
+        default: "0"
+      require_odds:
+        description: "オッズが無い買い目/日付は評価しない"
+        required: false
+        default: "true"
 
 jobs:
   run:
@@ -50,7 +63,7 @@ jobs:
           set -euo pipefail
 
           BASE_INPUT="${{ github.event.inputs.base || '' }}"
-          DATES="${{ github.event.inputs.dates || '' }}"
+          DATES_RAW="${{ github.event.inputs.dates || '' }}"
           SIMS="${{ github.event.inputs.sims || '600' }}"
           TOPN="${{ github.event.inputs.topn || '18' }}"
           UNIT="${{ github.event.inputs.unit || '100' }}"
@@ -59,6 +72,9 @@ jobs:
           MVAL="${{ github.event.inputs.m || '4' }}"
           FILTER="${{ github.event.inputs.filter || '' }}"
           EXCL="${{ github.event.inputs.exclude_first1 || 'false' }}"
+          ODDS_BASE_INPUT="${{ github.event.inputs.odds_base || './public/odds/v1' }}"
+          MIN_EV="${{ github.event.inputs.min_ev || '0' }}"
+          REQUIRE_ODDS="${{ github.event.inputs.require_odds || 'true' }}"
 
           # scripts/sims から見たデフォルト public
           if [ -z "$BASE_INPUT" ]; then
@@ -66,6 +82,11 @@ jobs:
           else
             BASE="$BASE_INPUT"
           fi
+          # odds_base は相対/絶対どちらでもOK
+          case "$ODDS_BASE_INPUT" in
+            /*)  ODDS_BASE="$ODDS_BASE_INPUT" ;;
+            *)   ODDS_BASE="$(realpath -m "$ODDS_BASE_INPUT")" ;;
+          esac
 
           # filter のパース（pids=..;races=..;only_first1=true）
           PIDS=""
@@ -77,9 +98,9 @@ jobs:
               key="${kv%%=*}"
               val="${kv#*=}"
               case "$key" in
-                pids|PIDS)          PIDS="$val" ;;
-                races|RACES)        RACES="$val" ;;
-                only_first1|ONLY_FIRST1) ONLY="$val" ;;
+                pids|PIDS)                  PIDS="$val" ;;
+                races|RACES)                RACES="$val" ;;
+                only_first1|ONLY_FIRST1)   ONLY="$val" ;;
               esac
             done
           fi
@@ -90,8 +111,32 @@ jobs:
             exit 1
           fi
 
+          # dates 前処理 & オッズ存在チェック
+          DATES=""
+          if [ -n "$DATES_RAW" ]; then
+            IFS=',' read -r -a ds <<< "$DATES_RAW"
+            for d in "${ds[@]}"; do
+              d="${d//-/}"                                # 2025-08-12 → 20250812
+              if [ "${REQUIRE_ODDS,,}" = "true" ]; then
+                if [ -d "$ODDS_BASE/$d" ]; then
+                  DATES+="${d},"
+                else
+                  echo "::notice ::ODDS missing for date=$d at $ODDS_BASE/$d → skip"
+                fi
+              else
+                DATES+="${d},"
+              fi
+            done
+            DATES="${DATES%,}"  # 末尾カンマ除去
+            if [ -z "$DATES" ] && [ -n "$DATES_RAW" ] && [ "${REQUIRE_ODDS,,}" = "true" ]; then
+              echo "::warning ::全ての日付でオッズ未整備のため終了します（odds_base=$ODDS_BASE）"
+              exit 0
+            fi
+          fi
+
           echo "[debug] CWD=$(pwd)"
           echo "[debug] BASE=$BASE"
+          echo "[debug] ODDS_BASE=$ODDS_BASE"
           ls -la "$BASE" || true
 
           ARGS=( --base "$BASE" --sims "$SIMS" --unit "$UNIT" )
@@ -113,9 +158,21 @@ jobs:
             ARGS+=( --only-first1 )
           fi
 
+          # EV / オッズ
+          ARGS+=( --odds-base "$ODDS_BASE" )
+          # MIN_EV は数値なら渡す（空/0はフィルタ無効）
+          if [[ "$MIN_EV" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+            if [ "$(printf '%.6f' "$MIN_EV")" != "0.000000" ]; then
+              ARGS+=( --min-ev "$MIN_EV" )
+            fi
+          fi
+          if [ "${REQUIRE_ODDS,,}" = "true" ]; then
+            ARGS+=( --require-odds )
+          fi
+
           echo "[debug] args: ${ARGS[*]}"
-          # ※ ここはあなたの実行スクリプト名に合わせてください（sims.py or sims_batch_eval_SimS_v1.py）
-          python sims.py "${ARGS[@]}" --outdir .
+          # ← あなたの実行スクリプト名に合わせる（EV対応のPython）
+          python sims_batch_eval_SimS_v1.py "${ARGS[@]}" --outdir .
 
       - name: Commit results into repo
         run: |
