@@ -404,12 +404,18 @@ def generate_tickets(strategy, tri_probs, exacta_probs, third_probs, topn=18, k=
     return tickets
 
 # ========== 評価（1レース） ==========
-def evaluate_one(int_path: str, res_path: str, sims: int, unit: int, strategy: str, topn: int, k: int, m: int):
+def evaluate_one(int_path: str, res_path: str, sims: int, unit: int,
+                 strategy: str, topn: int, k: int, m: int,
+                 exclude_first1: bool=False):
     with open(int_path, "r", encoding="utf-8") as f:
         d_int = json.load(f)
     tri_probs, kim_probs, exacta_probs, third_probs = simulate_one(d_int, sims=sims)
 
     tickets = generate_tickets(strategy, tri_probs, exacta_probs, third_probs, topn=topn, k=k, m=m)
+    # ★ 1着=1号艇の除外オプション
+    if exclude_first1:
+        tickets = [(key,score) for (key,score) in tickets if int(key[0]) != 1]
+
     bets = ['-'.join(map(str, key)) for key,_ in tickets]
     stake = unit * len(bets)
 
@@ -448,6 +454,9 @@ def main():
                     help="買い目生成ロジック")
     ap.add_argument("--k", type=int, default=2, help="exacta_topK_third_topM: 2連単TOPK")
     ap.add_argument("--m", type=int, default=4, help="exacta_topK_third_topM: 3着TOPM")
+    # ★ 追加: 1着=1号艇の買い目を除外
+    ap.add_argument("--exclude-first1", action="store_true",
+                    help="買い目生成後に 1着=1号艇 の組み合わせを除外する")
     args = ap.parse_args()
 
     dates = set([d.strip() for d in args.dates.split(",") if d.strip()]) if args.dates else set()
@@ -457,7 +466,7 @@ def main():
     # ファイルインデックス
     int_idx  = collect_files(args.base, "integrated", dates) if dates else \
                collect_files(args.base, "integrated", set(os.listdir(os.path.join(args.base, "integrated", "v1"))))
-    res_idx  = collect_results_files(args.base, dates)  # ← resultsは柔軟版
+    res_idx  = collect_results_files(args.base, dates)  # 柔軟版
 
     # 共通キー
     keys_all = set(int_idx.keys()) & set(res_idx.keys())
@@ -487,10 +496,15 @@ def main():
                 tickets = generate_tickets(args.strategy, tri_probs, exacta_probs, third_probs, k=args.k, m=args.m)
             else:
                 tickets = generate_tickets("trifecta_topN", tri_probs, exacta_probs, third_probs, topn=args.topn)
+            # ★ 予測のみ側にも除外適用
+            if args.exclude_first1:
+                tickets = [(key,score) for (key,score) in tickets if int(key[0]) != 1]
+
             top_list = [{"ticket": "-".join(map(str, k)), "score": round(v, 6)} for k, v in tickets]
 
             with open(os.path.join(pred_dir, f"pred_{date}_{pid}_{race}.json"), "w", encoding="utf-8") as f:
-                json.dump({"date":date,"pid":pid,"race":race,"buylist":top_list,"engine":"SimS ver1.0 (E1)"},
+                json.dump({"date":date,"pid":pid,"race":race,"buylist":top_list,
+                           "engine":"SimS ver1.0 (E1)","exclude_first1":bool(args.exclude_first1)},
                           f, ensure_ascii=False, indent=2)
 
             for i, t in enumerate(top_list, 1):
@@ -516,7 +530,8 @@ def main():
             int_idx[(date,pid,race)],
             res_idx[(date,pid,race)],
             sims=args.sims, unit=args.unit,
-            strategy=args.strategy, topn=args.topn, k=args.k, m=args.m
+            strategy=args.strategy, topn=args.topn, k=args.k, m=args.m,
+            exclude_first1=args.exclude_first1
         )
         total_stake += ev["stake"]
         total_payout += ev["payout"]
@@ -557,7 +572,8 @@ def main():
         "roi": float((total_payout - total_stake)/total_stake) if total_stake>0 else 0.0,
         "strategy": args.strategy,
         "topn": args.topn, "k": args.k, "m": args.m,
-        "sims_per_race": args.sims, "unit": args.unit
+        "sims_per_race": args.sims, "unit": args.unit,
+        "exclude_first1": bool(args.exclude_first1)
     }
 
     # 保存
