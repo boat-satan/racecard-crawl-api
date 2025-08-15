@@ -11,7 +11,7 @@ on:
       strategy:  { description: "trifecta_topN / exacta_topK_third_topM", required: false, default: "trifecta_topN" }
       k:         { description: "exactaのK", required: false, default: "2" }
       m:         { description: "thirdのM", required: false, default: "4" }
-      filter:    { description: "例: pids=02,04;races=1R,2R", required: false, default: "" }
+      filter:    { description: "例: pids=02,04;races=1R,2R;only_first1=true", required: false, default: "" }
       exclude_first1:
         description: "1着=1号艇の買い目を除外（true/false）"
         required: false
@@ -67,24 +67,32 @@ jobs:
             BASE="$BASE_INPUT"
           fi
 
-          # filter のパース（pids=..;races=..）
+          # filter のパース（pids=..;races=..;only_first1=true）
           PIDS=""
           RACES=""
+          ONLY="false"
           if [ -n "$FILTER" ]; then
             IFS=';' read -r -a parts <<< "$FILTER"
             for kv in "${parts[@]}"; do
               key="${kv%%=*}"
               val="${kv#*=}"
               case "$key" in
-                pids|PIDS)   PIDS="$val" ;;
-                races|RACES) RACES="$val" ;;
+                pids|PIDS)          PIDS="$val" ;;
+                races|RACES)        RACES="$val" ;;
+                only_first1|ONLY_FIRST1) ONLY="$val" ;;
               esac
             done
           fi
 
+          # 排他チェック（exclude & only の同時指定は不可）
+          if [ "${EXCL,,}" = "true" ] && [ "${ONLY,,}" = "true" ]; then
+            echo "::error ::exclude_first1 と only_first1 は同時指定できません"
+            exit 1
+          fi
+
           echo "[debug] CWD=$(pwd)"
           echo "[debug] BASE=$BASE"
-          ls -la "$BASE"
+          ls -la "$BASE" || true
 
           ARGS=( --base "$BASE" --sims "$SIMS" --unit "$UNIT" )
           [ -n "$DATES" ] && ARGS+=( --dates "$DATES" )
@@ -97,12 +105,16 @@ jobs:
             ARGS+=( --strategy trifecta_topN --topn "$TOPN" )
           fi
 
-          # 1着=1号艇除外
+          # 1着=1号艇の除外/のみ
           if [ "${EXCL,,}" = "true" ]; then
             ARGS+=( --exclude-first1 )
           fi
+          if [ "${ONLY,,}" = "true" ]; then
+            ARGS+=( --only-first1 )
+          fi
 
           echo "[debug] args: ${ARGS[*]}"
+          # ※ ここはあなたの実行スクリプト名に合わせてください（sims.py or sims_batch_eval_SimS_v1.py）
           python sims.py "${ARGS[@]}" --outdir .
 
       - name: Commit results into repo
