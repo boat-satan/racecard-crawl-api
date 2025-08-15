@@ -1,9 +1,10 @@
 # sims_batch_eval_SimS_v1.py
-# SimS ver1.0 — 同時同条件バッチ検証（三連単 TOPN 均等買い／可変買い目ロジック対応）
-#  - 統合データ/結果を読み込み（払い戻しは results から参照）
-#  - SimS ver1.0 で各レースを N試行シミュ
-#  - 買い目を生成（デフォルトは三連単 TOP18）し、的中率・ROIを算出
-#  - 「的中群の傾向レポート」を出力（決まり手・1着コース・オッズ帯・出目・確率順位帯）
+# SimS ver1.0 — 同時同条件バッチ検証
+# - 統合データ/結果を読み込み（払い戻しは results から参照）
+# - SimS ver1.0 で各レースを N試行シミュ
+# - 買い目を生成（デフォルト: 三連単 TOPN）→ 的中率・ROI算出
+# - 任意: 1着=1号艇の除外/限定、EVフィルタ(確率×オッズ)対応
+# - 簡易ヒットレポート出力
 
 import os, json, math, argparse, shutil
 from collections import Counter
@@ -274,6 +275,34 @@ def load_result_for_race(res_path: str):
         with open(res_path, "r", encoding="utf-8") as f:
             return json.load(f)
 
+# ---------- オッズ読込（EVフィルタ用・任意） ----------
+def load_trifecta_odds(odds_base: str, date: str, pid: str, race: str):
+    """public/odds/v1/<date>/<pid>/<race>.json を読み、{combo: {'odds':float,'rank':int}} を返す"""
+    try:
+        race_norm = race.upper() if race.upper().endswith("R") else f"{race}R"
+        path = os.path.join(odds_base, date, pid, f"{race_norm}.json")
+        if not os.path.isfile(path):
+            return {}
+        with open(path, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        trif = d.get("trifecta") or []
+        out = {}
+        for row in trif:
+            combo = str(row.get("combo") or "").strip()
+            if not combo:
+                F = row.get("F"); S = row.get("S"); T = row.get("T")
+                if all(isinstance(v, (int,float)) for v in [F,S,T]):
+                    combo = f"{int(F)}-{int(S)}-{int(T)}"
+            if not combo:
+                continue
+            odds = row.get("odds")
+            rank = row.get("popularityRank")
+            if isinstance(odds, (int,float)) and math.isfinite(odds):
+                out[combo] = {"odds": float(odds), "rank": int(rank) if isinstance(rank,(int,float)) else None}
+        return out
+    except Exception:
+        return {}
+
 # ---------- 買い目生成 ----------
 def generate_tickets(strategy, tri_probs, exacta_probs, third_probs,
                      topn=18, k=2, m=4, exclude_first1=False, only_first1=False):
@@ -290,7 +319,6 @@ def generate_tickets(strategy, tri_probs, exacta_probs, third_probs,
                         seen.add(key)
                         score = exacta_probs.get((f,s),0.0) * third_probs.get(t,0.0)
                         tickets.append((key, score))
-        # フィルタ
         tickets = [(k_,p_) for (k_,p_) in tickets
                    if ((not only_first1) or k_[0]==1) and ((not exclude_first1) or k_[0]!=1)]
         tickets.sort(key=lambda kv: kv[1], reverse=True)
@@ -304,22 +332,52 @@ def generate_tickets(strategy, tri_probs, exacta_probs, third_probs,
 # ---------- 評価（1レース） ----------
 def evaluate_one(int_path: str, res_path: str, sims: int, unit: int,
                  strategy: str, topn: int, k: int, m: int,
-                 exclude_first1: bool=False, only_first1: bool=False):
+                 exclude_first1: bool=False, only_first1: bool=False,
+                 odds_base: str=None, min_ev: float=0.0, require_odds: bool=False):
+    # 予測
     with open(int_path, "r", encoding="utf-8") as f:
         d_int = json.load(f)
     tri_probs, kim_probs, exacta_probs, third_probs = simulate_one(d_int, sims=sims)
 
+    # 生成 & 1着1除外/限定
     tickets = generate_tickets(strategy, tri_probs, exacta_probs, third_probs,
                                topn=topn, k=k, m=m,
                                exclude_first1=exclude_first1, only_first1=only_first1)
 
+    # EVフィルタ（任意）
+    if min_ev and min_ev > 0:
+        # int_path: .../integrated/v1/<date>/<pid>/<race>.json 想定
+        date = pid = race = None
+        try:
+            p = os.path.normpath(int_path).split(os.sep)
+            race = os.path.splitext(p[-1])[0]; pid = p[-2]; date = p[-3]
+        except Exception:
+            pass
+        odds_map = load_trifecta_odds(odds_base, date, pid, race) if odds_base and date and pid and race else {}
+
+        kept = []
+        for (key, prob) in tickets:
+            combo = "-".join(map(str, key))
+            rec = odds_map.get(combo)
+            if rec is None:
+                if require_odds:
+                    continue
+                kept.append((key, prob))
+                continue
+            ev = prob * rec["odds"]  # 100円基準
+            if ev >= min_ev:
+                kept.append((key, prob))
+        tickets = kept
+
     bets = ['-'.join(map(str, key)) for key,_ in tickets]
     stake = unit * len(bets)
 
+    # 的中・払戻
     d_res = load_result_for_race(res_path) or {}
     hit_combo, payout_amount = actual_trifecta_combo_and_amount(d_res)
     payout = payout_amount if hit_combo in bets else 0
 
+    # 参考: 予測順位でのヒット位置
     rank_map = { '-'.join(map(str,k)): i+1
                  for i,(k,_) in enumerate(sorted(tri_probs.items(), key=lambda kv: kv[1], reverse=True)) }
     rank_hit = rank_map.get(hit_combo, None)
@@ -354,6 +412,10 @@ def main():
     ap.add_argument("--m", type=int, default=4, help="exacta_topK_third_topM: 3着TOPM")
     ap.add_argument("--exclude-first1", action="store_true", help="1着=1号艇を除外")
     ap.add_argument("--only-first1", action="store_true", help="1着=1号艇のみ購入")
+    # ★ EVフィルタ（任意）
+    ap.add_argument("--odds-base", default="./public/odds/v1", help="オッズJSONのルート")
+    ap.add_argument("--min-ev", type=float, default=0.0, help="このEV以上のみ購入 (EV=p*odds)")
+    ap.add_argument("--require-odds", action="store_true", help="オッズが無い買い目は除外")
     args = ap.parse_args()
 
     if args.exclude_first1 and args.only_first1:
@@ -392,21 +454,43 @@ def main():
                                        topn=args.topn, k=args.k, m=args.m,
                                        exclude_first1=args.exclude_first1,
                                        only_first1=args.only_first1)
-            top_list = [{"ticket": "-".join(map(str, k)), "score": round(v, 6)} for k, v in tickets]
+
+            # EV情報も一緒に出す（フィルタも適用）
+            odds_map = {}
+            if args.min_ev > 0 or args.require_odds:
+                odds_map = load_trifecta_odds(args.odds_base, date, pid, race)
+
+            out_list = []
+            for (key, p) in tickets:
+                combo = "-".join(map(str, key))
+                rec = odds_map.get(combo) if odds_map else None
+                odds = rec["odds"] if rec else None
+                ev   = (p * odds) if (odds is not None) else None
+                if args.min_ev > 0:
+                    if ev is None and args.require_odds:  # オッズ必須
+                        continue
+                    if ev is not None and ev < args.min_ev:
+                        continue
+                out_list.append({"ticket": combo, "score": round(p,6),
+                                 "odds": (None if odds is None else float(odds)),
+                                 "ev": (None if ev is None else round(ev,6))})
 
             with open(os.path.join(pred_dir, f"pred_{date}_{pid}_{race}.json"), "w", encoding="utf-8") as f:
-                json.dump({"date":date,"pid":pid,"race":race,"buylist":top_list,
+                json.dump({"date":date,"pid":pid,"race":race,"buylist":out_list,
                            "engine":"SimS ver1.0 (E1)",
                            "exclude_first1":bool(args.exclude_first1),
-                           "only_first1":bool(args.only_first1)},
+                           "only_first1":bool(args.only_first1),
+                           "min_ev": args.min_ev, "require_odds": bool(args.require_odds)},
                           f, ensure_ascii=False, indent=2)
 
-            for i, t in enumerate(top_list, 1):
-                rows.append({"date":date,"pid":pid,"race":race,"rank":i,"ticket":t["ticket"],"score":t["score"]})
+            for i, t in enumerate(out_list, 1):
+                rows.append({"date":date,"pid":pid,"race":race,"rank":i,
+                             "ticket":t["ticket"],"score":t["score"],
+                             "odds":t["odds"],"ev":t["ev"]})
 
         pd.DataFrame(rows).to_csv(os.path.join(pred_dir, "predictions_summary.csv"),
                                   index=False, encoding="utf-8")
-        print(f"[predict] candidates: {len(keys)}  -> {pred_dir}")
+        print(f("[predict] candidates: {len(keys)}  -> {pred_dir}"))
         return
 
     # ---- eval ----
@@ -417,7 +501,8 @@ def main():
         ev = evaluate_one(int_idx[(date,pid,race)], res_idx[(date,pid,race)],
                           sims=args.sims, unit=args.unit, strategy=args.strategy,
                           topn=args.topn, k=args.k, m=args.m,
-                          exclude_first1=args.exclude_first1, only_first1=args.only_first1)
+                          exclude_first1=args.exclude_first1, only_first1=args.only_first1,
+                          odds_base=args.odds_base, min_ev=args.min_ev, require_odds=args.require_odds)
         total_stake += ev["stake"]; total_payout += ev["payout"]
         per_rows.append({"date": date, "pid": pid, "race": race,
                          "bets": len(ev["bets"]), "stake": ev["stake"],
@@ -438,6 +523,8 @@ def main():
         "sims_per_race": args.sims, "unit": args.unit,
         "exclude_first1": bool(args.exclude_first1),
         "only_first1": bool(args.only_first1),
+        "min_ev": float(args.min_ev),
+        "require_odds": bool(args.require_odds),
     }
 
     df.to_csv(os.path.join(args.outdir, "per_race_results.csv"), index=False)
@@ -446,7 +533,7 @@ def main():
 
     # 簡易ヒットレポート
     rep_path = os.path.join(args.outdir, "hit_report.json")
-    if (df["hit"]==1).any():
+    if (len(df) > 0) and (df["hit"]==1).any():
         hit_df = df[df["hit"]==1].copy()
         def first_lane(c):
             try: return int(str(c).split("-")[0])
