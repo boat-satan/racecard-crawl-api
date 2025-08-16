@@ -14,15 +14,12 @@ on:
       params:    { description: "外部パラメータ（ファイル名のみ。例: freer-10.toml）※固定パス scripts/sims/params/ を参照", required: false, default: "" }
       filter:
         description: >-
-          追加フィルタ（;区切り）。例:
-          pids=02,04;races=1R,2R;only_first1=true;
-          odds_bands=01-09,10-19,20-49;
-          require_odds=false;predict_only=false
+          追加フィルタ（;区切り）。
+          例: pids=02,04;races=1R,2R;only_first1=true;
+              odds_bands=01-09,10-19,20-49;require_odds=false;predict_only=false;
+              keyman_enable=true;keyman_threshold=0.7
         required: false
         default: ""
-      # --- 追加：sims.py 内で pass1/ pass2 を実行する制御用 ---
-      keyman_enable:    { description: "pass2（キーマン補正）を有効化", required: false, default: "true" }
-      keyman_threshold: { description: "KEYMAN_RANK しきい値 (0-1)", required: false, default: "0.7" }
 
 jobs:
   run:
@@ -67,8 +64,6 @@ jobs:
           MIN_EV_IN="${{ github.event.inputs.min_ev || '' }}"
           PARAMS_NAME="${{ github.event.inputs.params || '' }}"   # filename only
           FILTER="${{ github.event.inputs.filter || '' }}"
-          KEYMAN_ENABLE_IN="${{ github.event.inputs.keyman_enable || 'true' }}"
-          KEYMAN_THRESHOLD="${{ github.event.inputs.keyman_threshold || '0.7' }}"
 
           # ===== Defaults / Derived =====
           BASE="${BASE_INPUT:-public}"
@@ -83,6 +78,10 @@ jobs:
           ODDS_MAX="${ODDS_MAX_IN}"
           PREDICT_ONLY="false"
 
+          # ▼ keyman 制御（filter で上書き可能）
+          KEYMAN_ENABLE_IN="true"     # デフォルト: ON
+          KEYMAN_THRESHOLD="0.7"      # デフォルト: 0.7
+
           # ===== Parse FILTER (lowercase keys) =====
           if [ -n "$FILTER" ]; then
             IFS=';' read -r -a parts <<< "$FILTER"
@@ -90,16 +89,18 @@ jobs:
               key="$(echo "${kv%%=*}" | tr '[:upper:]' '[:lower:]')"
               val="${kv#*=}"
               case "$key" in
-                pids)           PIDS="$val" ;;
-                races)          RACES="$val" ;;
-                only_first1)    ONLY="$val" ;;
-                odds_base)      ODDS_BASE="$val" ;;
-                min_ev)         MIN_EV="${MIN_EV:-$val}" ;;
-                require_odds)   REQUIRE_ODDS="$val" ;;
-                odds_bands)     ODDS_BANDS="$val" ;;
-                odds_min)       ODDS_MIN="${ODDS_MIN:-$val}" ;;
-                odds_max)       ODDS_MAX="${ODDS_MAX:-$val}" ;;
-                predict_only)   PREDICT_ONLY="$val" ;;
+                pids)             PIDS="$val" ;;
+                races)            RACES="$val" ;;
+                only_first1)      ONLY="$val" ;;
+                odds_base)        ODDS_BASE="$val" ;;
+                min_ev)           MIN_EV="${MIN_EV:-$val}" ;;
+                require_odds)     REQUIRE_ODDS="$val" ;;
+                odds_bands)       ODDS_BANDS="$val" ;;
+                odds_min)         ODDS_MIN="${ODDS_MIN:-$val}" ;;
+                odds_max)         ODDS_MAX="${ODDS_MAX:-$val}" ;;
+                predict_only)     PREDICT_ONLY="$val" ;;
+                keyman_enable)    KEYMAN_ENABLE_IN="$val" ;;
+                keyman_threshold) KEYMAN_THRESHOLD="$val" ;;
               esac
             done
           fi
@@ -142,10 +143,17 @@ jobs:
             ARGS+=( --params "$PARAMS_PATH" )
           fi
 
-          # ▼ 新規追加: keyman制御（sims.py 内で pass2 を動かすためのフラグ）
+          # ▼ 新規: keyman 制御（sims.py が pass2 実行/しきい値を解釈）
           ARGS+=( --keyman-enable "$KEYMAN_ENABLE_IN" --keyman-threshold "$KEYMAN_THRESHOLD" )
 
+          echo "[debug] BASE=$BASE"
+          echo "[debug] DATES=${DATES:-'(none)'}  SIMS=$SIMS  TOPN=$TOPN  UNIT=$UNIT"
+          echo "[debug] ODDS_BASE=$ODDS_BASE  ODDS_BANDS=${ODDS_BANDS:-'(none)'}  ODDS_MIN=${ODDS_MIN:-'(none)'}  ODDS_MAX=${ODDS_MAX:-'(none)'}"
+          echo "[debug] MIN_EV=${MIN_EV:-'(none)'}  REQUIRE_ODDS=$REQUIRE_ODDS  ONLY_FIRST1=$ONLY  PREDICT_ONLY=$PREDICT_ONLY"
+          echo "[debug] KEYMAN_ENABLE=$KEYMAN_ENABLE_IN  KEYMAN_THRESHOLD=$KEYMAN_THRESHOLD"
+          echo "[debug] PARAMS=${PARAMS_NAME:-'(none)'} -> ${PARAMS_PATH:-'(n/a)'}"
           echo "[debug] args: ${ARGS[*]}"
+
           python "$PYTHON_SCRIPT" "${ARGS[@]}" --outdir scripts/sims
 
       - name: Commit results into repo
