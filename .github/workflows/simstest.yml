@@ -13,7 +13,8 @@ on:
       m:         { description: "thirdのM", required: false, default: "4" }
       filter:
         description: >-
-          例: pids=02,04;races=1R,2R;only_first1=true;odds_base=./public/odds/v1;min_ev=1.2;require_odds=true
+          例: pids=02,04;races=1R,2R;only_first1=true;odds_base=./public/odds/v1;
+              odds_bands=01-09,10-19,20-49;odds_min=10;odds_max=49;min_ev=1.2;require_odds=true;predict_only=false
         required: false
         default: ""
       exclude_first1:
@@ -28,7 +29,8 @@ jobs:
       contents: write
     env:
       TZ: Asia/Tokyo
-      PYTHON_SCRIPT: scripts/sims/sims.py
+      # 実行するPythonスクリプト。必要に応じて sims_batch_eval_SimS_v1.py に変更してください
+      PYTHON_SCRIPT: scripts/sims/sims_batch_eval_SimS_v1.py
 
     steps:
       - name: Checkout
@@ -73,20 +75,30 @@ jobs:
 
           # filter のパース（; 区切り、key=value）
           PIDS=""; RACES=""
-          ONLY="false"; ODDS_BASE=""; MIN_EV=""
+          ONLY="false"; ODDS_BASE=""
+          MIN_EV=""
           REQUIRE_ODDS="false"
+          ODDS_BANDS=""
+          ODDS_MIN=""
+          ODDS_MAX=""
+          PREDICT_ONLY="false"
+
           if [ -n "$FILTER" ]; then
             IFS=';' read -r -a parts <<< "$FILTER"
             for kv in "${parts[@]}"; do
               key="$(echo "${kv%%=*}" | tr '[:upper:]' '[:lower:]')"
               val="${kv#*=}"
               case "$key" in
-                pids)          PIDS="$val" ;;
-                races)         RACES="$val" ;;
-                only_first1)   ONLY="$val" ;;
-                odds_base)     ODDS_BASE="$val" ;;
-                min_ev)        MIN_EV="$val" ;;
-                require_odds)  REQUIRE_ODDS="$val" ;;
+                pids)           PIDS="$val" ;;
+                races)          RACES="$val" ;;
+                only_first1)    ONLY="$val" ;;
+                odds_base)      ODDS_BASE="$val" ;;
+                min_ev)         MIN_EV="$val" ;;
+                require_odds)   REQUIRE_ODDS="$val" ;;
+                odds_bands)     ODDS_BANDS="$val" ;;
+                odds_min)       ODDS_MIN="$val" ;;
+                odds_max)       ODDS_MAX="$val" ;;
+                predict_only)   PREDICT_ONLY="$val" ;;
               esac
             done
           fi
@@ -103,7 +115,11 @@ jobs:
           fi
 
           echo "[debug] BASE=$BASE"
+          echo "[debug] DATES=${DATES:-'(none)'}"
+          echo "[debug] STRATEGY=$STRATEGY  TOPN=$TOPN  K=$KVAL  M=$MVAL"
           echo "[debug] ODDS_BASE=$ODDS_BASE  MIN_EV=${MIN_EV:-'(none)'}  REQUIRE_ODDS=$REQUIRE_ODDS"
+          echo "[debug] ODDS_BANDS=${ODDS_BANDS:-'(none)'}  ODDS_MIN=${ODDS_MIN:-'(none)'}  ODDS_MAX=${ODDS_MAX:-'(none)'}"
+          echo "[debug] ONLY_FIRST1=$ONLY  EXCLUDE_FIRST1=$EXCL  PREDICT_ONLY=$PREDICT_ONLY"
           [ -d "$BASE" ] && ls -la "$BASE" || true
 
           ARGS=( --base "$BASE" --sims "$SIMS" --unit "$UNIT" )
@@ -125,6 +141,11 @@ jobs:
             ARGS+=( --only-first1 )
           fi
 
+          # 予測のみ
+          if [ "${PREDICT_ONLY,,}" = "true" ]; then
+            ARGS+=( --predict-only )
+          fi
+
           # EV/オッズ関連
           [ -n "$ODDS_BASE" ] && ARGS+=( --odds-base "$ODDS_BASE" )
           if [ -n "$MIN_EV" ]; then
@@ -132,6 +153,14 @@ jobs:
           fi
           if [ "${REQUIRE_ODDS,,}" = "true" ]; then
             ARGS+=( --require-odds )
+          fi
+
+          # オッズバンド（複数帯 or 単一レンジ）
+          if [ -n "$ODDS_BANDS" ]; then
+            ARGS+=( --odds-bands "$ODDS_BANDS" )
+          else
+            [ -n "$ODDS_MIN" ] && ARGS+=( --odds-min "$ODDS_MIN" )
+            [ -n "$ODDS_MAX" ] && ARGS+=( --odds-max "$ODDS_MAX" )
           fi
 
           echo "[debug] args: ${ARGS[*]}"
