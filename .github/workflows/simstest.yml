@@ -30,7 +30,7 @@ jobs:
     env:
       TZ: Asia/Tokyo
       # 実行するPythonスクリプト。必要に応じて sims_batch_eval_SimS_v1.py に変更してください
-      PYTHON_SCRIPT: scripts/sims/sims_batch_eval_SimS_v1.py
+      PYTHON_SCRIPT: scripts/sims/sims.py
 
     steps:
       - name: Checkout
