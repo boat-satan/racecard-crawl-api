@@ -7,6 +7,7 @@
 # - 簡易ヒットレポート出力
 # - （既存）外部パラメータ上書き (--params/--set)
 # - （NEW）キーマン指標を <outdir>/keyman/<date>/<pid>/<race>.json に保存
+# - （NEW）H1/H2/H3を除外し、展開ドライバのみで KEYMAN_RANK を算出・保存
 
 import os, json, math, argparse, shutil
 from collections import Counter, defaultdict
@@ -330,6 +331,67 @@ def simulate_one(integrated_json: dict, sims: int = 600):
     }
     return tri_probs, kim_probs, exacta_probs, third_probs, keyman
 
+# ---------- （NEW）展開ドライバのみで KEYMAN_RANK を付与 ----------
+def _minmax_norm(d: dict, lanes_s: list[str]) -> dict:
+    vals = [float(d.get(k, 0.0)) for k in lanes_s]
+    lo, hi = (min(vals), max(vals)) if vals else (0.0, 0.0)
+    den = (hi - lo) if (hi - lo) > 0 else 1.0
+    return {k: (float(d.get(k, 0.0)) - lo) / den for k in lanes_s}
+
+def _compute_keyman_rank_only_drivers(keyman: dict) -> dict:
+    lanes_s = sorted((keyman.get("WAKE") or {}).keys(), key=lambda x: int(x))
+    if not lanes_s:
+        return {}
+
+    # 1) WAKE
+    wake = {k: float(keyman.get("WAKE", {}).get(k, 0.0)) for k in lanes_s}
+
+    # 2) POS_DELTA_AVG（負は0に）
+    pos_raw = {k: float(keyman.get("POS_DELTA_AVG", {}).get(k, 0.0)) for k in lanes_s}
+    pos_plus = {k: (v if v > 0 else 0.0) for k, v in pos_raw.items()}
+
+    # 3) SWAP（外→内のみを「攻め度」として寄与）
+    swaps = keyman.get("SWAP", {}) or {}
+    total_swaps = sum(int(v) for v in swaps.values()) if swaps else 0
+    outer_cnt_per_lane = {k: 0 for k in lanes_s}
+    if total_swaps > 0:
+        for pair, cnt in swaps.items():
+            try:
+                ch, ld = pair.split(">")
+                if int(ch) > int(ld):  # 外から内へ
+                    outer_cnt_per_lane[str(int(ch))] = outer_cnt_per_lane.get(str(int(ch)), 0) + int(cnt)
+            except Exception:
+                continue
+    swap_outshare = {k: (outer_cnt_per_lane.get(k, 0) / total_swaps) if total_swaps > 0 else 0.0 for k in lanes_s}
+
+    # 4) BACKOFF / 5) CAV
+    backoff = {k: float(keyman.get("BACKOFF", {}).get(k, 0.0)) for k in lanes_s}
+    cav     = {k: float(keyman.get("CAV", {}).get(k, 0.0)) for k in lanes_s}
+
+    # 要素ごとに min-max 正規化
+    wake_n    = _minmax_norm(wake, lanes_s)
+    pos_n     = _minmax_norm(pos_plus, lanes_s)
+    swap_n    = _minmax_norm(swap_outshare, lanes_s)
+    backoff_n = _minmax_norm(backoff, lanes_s)
+    cav_n     = _minmax_norm(cav, lanes_s)
+
+    # 合成（H1/H2/H3は使わない）
+    w_wake, w_pos, w_swap, w_back, w_cav = 0.35, 0.25, 0.25, 0.10, 0.05
+    raw = {
+        k: (w_wake*wake_n[k] + w_pos*pos_n[k] + w_swap*swap_n[k] + w_back*backoff_n[k] + w_cav*cav_n[k])
+        for k in lanes_s
+    }
+    return _minmax_norm(raw, lanes_s)
+
+def attach_keyman_rank(keyman: dict) -> dict:
+    try:
+        kmr = _compute_keyman_rank_only_drivers(keyman)
+        if kmr:
+            keyman["KEYMAN_RANK"] = kmr
+    except Exception:
+        pass
+    return keyman
+
 # ---------- データ収集 ----------
 def collect_files(base_dir: str, kind: str, dates: set):
     root_v1 = os.path.join(base_dir, kind, "v1")
@@ -509,6 +571,9 @@ def evaluate_one(int_path: str, res_path: str, sims: int, unit: int,
         d_int = json.load(f)
     tri_probs, kim_probs, exacta_probs, third_probs, keyman = simulate_one(d_int, sims=sims)
 
+    # （NEW）KEYMAN_RANK を付与（H1/H2/H3を使わない）
+    keyman = attach_keyman_rank(keyman)
+
     # 生成 & 1着1除外/限定
     tickets = generate_tickets(strategy, tri_probs, exacta_probs, third_probs,
                                topn=topn, k=k, m=m,
@@ -686,6 +751,9 @@ def main():
             with open(int_idx[(date,pid,race)], "r", encoding="utf-8") as f:
                 d_int = json.load(f)
             tri_probs, kim_probs, exacta_probs, third_probs, keyman = simulate_one(d_int, sims=args.sims)
+
+            # （NEW）KEYMAN_RANK を付与（H1/H2/H3は使わない）
+            keyman = attach_keyman_rank(keyman)
 
             # 生成
             tickets = generate_tickets(args.strategy, tri_probs, exacta_probs, third_probs,
