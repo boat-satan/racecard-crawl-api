@@ -17,7 +17,7 @@ on:
           追加フィルタ（;区切り）。
           例: pids=02,04;races=1R,2R;only_first1=true;
               odds_bands=01-09,10-19,20-49;require_odds=false;predict_only=false;
-              keyman_enable=true;keyman_threshold=0.7
+              keyman_enable=true;keyman_threshold=0.7;keyman_boost=0.15
         required: false
         default: ""
 
@@ -80,7 +80,8 @@ jobs:
 
           # ▼ keyman 制御（filter で上書き可能）
           KEYMAN_ENABLE_IN="true"     # デフォルト: ON
-          KEYMAN_THRESHOLD="0.7"      # デフォルト: 0.7
+          KEYMAN_THRESHOLD="0.9"      # デフォルト: 0.7
+          KEYMAN_BOOST="4.15"         # デフォルト: 0.15（= 1.15倍）
 
           # ===== Parse FILTER (lowercase keys) =====
           if [ -n "$FILTER" ]; then
@@ -101,6 +102,7 @@ jobs:
                 predict_only)     PREDICT_ONLY="$val" ;;
                 keyman_enable)    KEYMAN_ENABLE_IN="$val" ;;
                 keyman_threshold) KEYMAN_THRESHOLD="$val" ;;
+                keyman_boost)     KEYMAN_BOOST="$val" ;;
               esac
             done
           fi
@@ -143,14 +145,14 @@ jobs:
             ARGS+=( --params "$PARAMS_PATH" )
           fi
 
-          # ▼ 新規: keyman 制御（sims.py が pass2 実行/しきい値を解釈）
-          ARGS+=( --keyman-enable "$KEYMAN_ENABLE_IN" --keyman-threshold "$KEYMAN_THRESHOLD" )
+          # ▼ 新規: keyman 制御（sims.py が pass2 実行/しきい値/ブーストを解釈）
+          ARGS+=( --keyman-enable "$KEYMAN_ENABLE_IN" --keyman-threshold "$KEYMAN_THRESHOLD" --keyman-boost "$KEYMAN_BOOST" )
 
           echo "[debug] BASE=$BASE"
           echo "[debug] DATES=${DATES:-'(none)'}  SIMS=$SIMS  TOPN=$TOPN  UNIT=$UNIT"
           echo "[debug] ODDS_BASE=$ODDS_BASE  ODDS_BANDS=${ODDS_BANDS:-'(none)'}  ODDS_MIN=${ODDS_MIN:-'(none)'}  ODDS_MAX=${ODDS_MAX:-'(none)'}"
           echo "[debug] MIN_EV=${MIN_EV:-'(none)'}  REQUIRE_ODDS=$REQUIRE_ODDS  ONLY_FIRST1=$ONLY  PREDICT_ONLY=$PREDICT_ONLY"
-          echo "[debug] KEYMAN_ENABLE=$KEYMAN_ENABLE_IN  KEYMAN_THRESHOLD=$KEYMAN_THRESHOLD"
+          echo "[debug] KEYMAN_ENABLE=$KEYMAN_ENABLE_IN  KEYMAN_THRESHOLD=$KEYMAN_THRESHOLD  KEYMAN_BOOST=$KEYMAN_BOOST"
           echo "[debug] PARAMS=${PARAMS_NAME:-'(none)'} -> ${PARAMS_PATH:-'(n/a)'}"
           echo "[debug] args: ${ARGS[*]}"
 
