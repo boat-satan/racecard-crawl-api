@@ -1,0 +1,22 @@
+# params/chaotic.toml
+b_dt = 20.0
+cK = 0.95
+decision_bias_mult = 1.20
+
+p_safe_margin = 0.30
+safe_margin_mu = 0.006
+safe_margin_sigma = 0.004
+
+session_ST_shift_sd = 0.006
+session_A_bias_sd   = 0.15
+k_turn_err = 0.014
+
+base_wake = 0.26
+beta_wk   = 0.006
+extra_wake_when_outside = 0.30
+
+delta_first = 0.80
+delta_lineblock = 0.70
+
+wind_theta_gain = 0.003
+wind_st_sigma_gain = 0.7
