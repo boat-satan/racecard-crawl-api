@@ -7,6 +7,7 @@
 # - 簡易ヒットレポート出力
 # - （既存）外部パラメータ上書き (--params/--set)
 # - （NEW）キーマン指標を <outdir>/keyman/<date>/<pid>/<race>.json に保存
+# - （NEW）H1/H2/H3を除外し、展開ドライバのみで KEYMAN_RANK を算出・保存
 
 import os, json, math, argparse, shutil
 from collections import Counter, defaultdict
@@ -330,159 +331,72 @@ def simulate_one(integrated_json: dict, sims: int = 600):
     }
     return tri_probs, kim_probs, exacta_probs, third_probs, keyman
 
-# ---------- データ収集 ----------
-def collect_files(base_dir: str, kind: str, dates: set):
-    root_v1 = os.path.join(base_dir, kind, "v1")
-    root    = root_v1 if os.path.isdir(root_v1) else os.path.join(base_dir, kind)
-    out = []
-    date_dirs = list(dates) if dates else [d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d))]
-    for d in date_dirs:
-        dir_d = os.path.join(root, d)
-        if not os.path.isdir(dir_d): continue
-        for pid in os.listdir(dir_d):
-            dir_pid = os.path.join(dir_d, pid)
-            if not os.path.isdir(dir_pid): continue
-            for fname in os.listdir(dir_pid):
-                if fname.endswith(".json"):
-                    race = fname[:-5]
-                    out.append(((d, pid, race), os.path.join(dir_pid, fname)))
-    return dict(out)
+# ---------- （NEW）展開ドライバのみで KEYMAN_RANK を付与 ----------
+def _minmax_norm(d: dict, lanes_s: list[str]) -> dict:
+    vals = [float(d.get(k, 0.0)) for k in lanes_s]
+    lo, hi = (min(vals), max(vals)) if vals else (0.0, 0.0)
+    den = (hi - lo) if (hi - lo) > 0 else 1.0
+    return {k: (float(d.get(k, 0.0)) - lo) / den for k in lanes_s}
 
-def collect_results_files(base_dir: str, dates: set):
-    root_v1 = os.path.join(base_dir, "results", "v1")
-    root    = root_v1 if os.path.isdir(root_v1) else os.path.join(base_dir, "results")
-    out = {}
-    date_dirs = list(dates) if dates else [d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d))]
-    for d in date_dirs:
-        dir_d = os.path.join(root, d)
-        if not os.path.isdir(dir_d): continue
-        for pid in os.listdir(dir_d):
-            dir_pid = os.path.join(dir_d, pid)
-            if not os.path.isdir(dir_pid): continue
-            # ① レース別
-            per_race = [f for f in os.listdir(dir_pid) if f.lower().endswith(".json") and f.upper().endswith("R.JSON")]
-            if per_race:
-                for fname in per_race:
-                    race = fname[:-5].upper()
-                    if not race.endswith("R"): race += "R"
-                    out[(d, pid, race)] = os.path.join(dir_pid, fname)
-                continue
-            # ② まとめファイル
-            json_files = [f for f in os.listdir(dir_pid) if f.lower().endswith(".json")]
-            for fname in json_files:
-                path = os.path.join(dir_pid, fname)
-                try:
-                    with open(path, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    races_obj = data.get("races") if isinstance(data, dict) else None
-                    container = races_obj if isinstance(races_obj, dict) else (data if isinstance(data, dict) else {})
-                    for race_key in list(container.keys()):
-                        rk = str(race_key).upper()
-                        if rk.isdigit(): rk += "R"
-                        if not rk.endswith("R"): continue
-                        out[(d, pid, rk)] = path + "#" + rk
-                except Exception:
-                    pass
-    return out
-
-def load_result_for_race(res_path: str):
-    if "#" in res_path:
-        path, race = res_path.split("#", 1)
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        races_obj = data.get("races", data) if isinstance(data, dict) else {}
-        d = races_obj.get(race) or races_obj.get(race.upper()) or races_obj.get(race.lower())
-        return d if isinstance(d, dict) else None
-    else:
-        with open(res_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-
-# ---------- オッズ読込 ----------
-def load_trifecta_odds(odds_base: str, date: str, pid: str, race: str):
-    try:
-        race_norm = race.upper() if race.upper().endswith("R") else f"{race}R"
-        path = os.path.join(odds_base, date, pid, f"{race_norm}.json")
-        if not os.path.isfile(path):
-            return {}
-        with open(path, "r", encoding="utf-8") as f:
-            d = json.load(f)
-        trif = d.get("trifecta") or []
-        out = {}
-        for row in trif:
-            combo = str(row.get("combo") or "").strip()
-            if not combo:
-                F = row.get("F"); S = row.get("S"); T = row.get("T")
-                if all(isinstance(v, (int,float)) for v in [F,S,T]):
-                    combo = f"{int(F)}-{int(S)}-{int(T)}"
-            if not combo:
-                continue
-            odds = row.get("odds")
-            rank = row.get("popularityRank")
-            if isinstance(odds, (int,float)) and math.isfinite(odds):
-                out[combo] = {"odds": float(odds), "rank": int(rank) if isinstance(rank,(int,float)) else None}
-        return out
-    except Exception:
+def _compute_keyman_rank_only_drivers(keyman: dict) -> dict:
+    # レーン集合は WAKE のキーから取得
+    lanes_s = sorted((keyman.get("WAKE") or {}).keys(), key=lambda x: int(x))
+    if not lanes_s:
         return {}
 
-# ---------- オッズバンドユーティリティ ----------
-def parse_odds_bands(bands_str: str, odds_min: float, odds_max: float):
-    bands = []
-    if bands_str:
-        for part in bands_str.split(","):
-            part = part.strip()
-            if not part: continue
-            if "-" not in part:
+    # 1) WAKE
+    wake = {k: float(keyman.get("WAKE", {}).get(k, 0.0)) for k in lanes_s}
+
+    # 2) POS_DELTA_AVG（負は0にクリップ）
+    pos_raw = {k: float(keyman.get("POS_DELTA_AVG", {}).get(k, 0.0)) for k in lanes_s}
+    pos_plus = {k: (v if v > 0 else 0.0) for k, v in pos_raw.items()}
+
+    # 3) SWAP（外→内の抜き/総SWAP）
+    swaps = keyman.get("SWAP", {}) or {}
+    total_swaps = sum(int(v) for v in swaps.values()) if swaps else 0
+    outer_cnt_per_lane = {k: 0 for k in lanes_s}
+    if total_swaps > 0:
+        for pair, cnt in swaps.items():
+            try:
+                ch, ld = pair.split(">")
+                # 外→内
+                if int(ch) > int(ld):
+                    outer_cnt_per_lane[str(int(ch))] = outer_cnt_per_lane.get(str(int(ch)), 0) + int(cnt)
+            except Exception:
                 continue
-            lo_s, hi_s = part.split("-", 1)
-            lo = float(lo_s) if lo_s.strip() else float("-inf")
-            hi = float(hi_s) if hi_s.strip() else float("inf")
-            if math.isfinite(lo) and math.isfinite(hi) and lo > hi:
-                lo, hi = hi, lo
-            bands.append((lo, hi))
-    else:
-        lo = float(odds_min) if odds_min and odds_min>0 else float("-inf")
-        hi = float(odds_max) if odds_max and odds_max>0 else float("inf")
-        if (math.isfinite(lo) or math.isfinite(hi)) and (lo != float("-inf") or hi != float("inf")):
-            if math.isfinite(lo) and math.isfinite(hi) and lo > hi:
-                lo, hi = hi, lo
-            bands.append((lo, hi))
-    return bands
+    swap_outshare = {k: (outer_cnt_per_lane.get(k, 0) / total_swaps) if total_swaps > 0 else 0.0 for k in lanes_s}
 
-def odds_in_any_band(odds: float, bands: list[tuple[float,float]]) -> bool:
-    if not bands:
-        return True
-    if odds is None or not math.isfinite(odds):
-        return False
-    for lo, hi in bands:
-        if odds >= lo and odds <= hi:
-            return True
-    return False
+    # 4) BACKOFF / 5) CAV
+    backoff = {k: float(keyman.get("BACKOFF", {}).get(k, 0.0)) for k in lanes_s}
+    cav     = {k: float(keyman.get("CAV", {}).get(k, 0.0)) for k in lanes_s}
 
-# ---------- 買い目生成 ----------
-def generate_tickets(strategy, tri_probs, exacta_probs, third_probs,
-                     topn=18, k=2, m=4, exclude_first1=False, only_first1=False):
-    tickets = []
-    if strategy == "exacta_topK_third_topM":
-        top2 = sorted(exacta_probs.items(), key=lambda kv: kv[1], reverse=True)[:k]
-        top3 = [t for t,_ in sorted(third_probs.items(), key=lambda kv: kv[1], reverse=True)[:m]]
-        seen = set()
-        for (f,s), _ in top2:
-            for t in top3:
-                if t!=f and t!=s:
-                    key = (f,s,t)
-                    if key not in seen:
-                        seen.add(key)
-                        score = exacta_probs.get((f,s),0.0) * third_probs.get(t,0.0)
-                        tickets.append((key, score))
-        tickets = [(k_,p_) for (k_,p_) in tickets
-                   if ((not only_first1) or k_[0]==1) and ((not exclude_first1) or k_[0]!=1)]
-        tickets.sort(key=lambda kv: kv[1], reverse=True)
-    else:
-        top = sorted(tri_probs.items(), key=lambda kv: kv[1], reverse=True)[:topn]
-        top = [(k_,p_) for (k_,p_) in top
-               if ((not only_first1) or k_[0]==1) and ((not exclude_first1) or k_[0]!=1)]
-        tickets = [(k_, p_) for k_,p_ in top]
-    return tickets
+    # 正規化（各要素ごとにmin-max）
+    wake_n   = _minmax_norm(wake, lanes_s)
+    pos_n    = _minmax_norm(pos_plus, lanes_s)
+    swap_n   = _minmax_norm(swap_outshare, lanes_s)
+    backoff_n= _minmax_norm(backoff, lanes_s)
+    cav_n    = _minmax_norm(cav, lanes_s)
+
+    # 重み合成（H1/H2/H3は使わない）
+    w_wake, w_pos, w_swap, w_back, w_cav = 0.35, 0.25, 0.25, 0.10, 0.05
+    raw = {
+        k: (w_wake*wake_n[k] + w_pos*pos_n[k] + w_swap*swap_n[k] + w_back*backoff_n[k] + w_cav*cav_n[k])
+        for k in lanes_s
+    }
+
+    # 最終0-1正規化
+    final = _minmax_norm(raw, lanes_s)
+    return final
+
+def attach_keyman_rank(keyman: dict) -> dict:
+    try:
+        kmr = _compute_keyman_rank_only_drivers(keyman)
+        if kmr:
+            keyman["KEYMAN_RANK"] = kmr
+    except Exception as e:
+        # 壊れていても他の情報は保存したいので握りつぶし
+        pass
+    return keyman
 
 # ---------- キーマンJSON保存 ----------
 def save_keyman(outdir: str, date: str, pid: str, race: str, keyman: dict, meta: dict):
@@ -508,6 +422,9 @@ def evaluate_one(int_path: str, res_path: str, sims: int, unit: int,
     with open(int_path, "r", encoding="utf-8") as f:
         d_int = json.load(f)
     tri_probs, kim_probs, exacta_probs, third_probs, keyman = simulate_one(d_int, sims=sims)
+
+    # （NEW）KEYMAN_RANK を付与
+    keyman = attach_keyman_rank(keyman)
 
     # 生成 & 1着1除外/限定
     tickets = generate_tickets(strategy, tri_probs, exacta_probs, third_probs,
@@ -686,6 +603,9 @@ def main():
             with open(int_idx[(date,pid,race)], "r", encoding="utf-8") as f:
                 d_int = json.load(f)
             tri_probs, kim_probs, exacta_probs, third_probs, keyman = simulate_one(d_int, sims=args.sims)
+
+            # （NEW）KEYMAN_RANK を付与
+            keyman = attach_keyman_rank(keyman)
 
             # 生成
             tickets = generate_tickets(args.strategy, tri_probs, exacta_probs, third_probs,
