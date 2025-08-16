@@ -1,0 +1,167 @@
+name: Run SimS keymon
+
+on:
+  workflow_dispatch:
+    inputs:
+      base:      { description: "Path to public (repo rootからの相対 or 絶対)", required: false, default: "" }
+      dates:     { description: "YYYYMMDD(カンマ区切り)", required: false, default: "" }
+      sims:      { description: "Sims per race", required: false, default: "600" }
+      topn:      { description: "TopN (trifecta_topN時)", required: false, default: "18" }
+      unit:      { description: "Bet unit (JPY)", required: false, default: "100" }
+      odds_min:  { description: "単一レンジの下限（例: 10）", required: false, default: "" }
+      odds_max:  { description: "単一レンジの上限（例: 49.9）", required: false, default: "" }
+      min_ev:    { description: "最小EV (EV=p*odds)。例: 1.2", required: false, default: "" }
+      params:    { description: "外部パラメータ（ファイル名のみ。例: freer-10.toml）※固定パス scripts/sims/params/ を参照", required: false, default: "" }
+      filter:
+        description: >-
+          追加フィルタ（;区切り）。例:
+          pids=02,04;races=1R,2R;only_first1=true;
+          odds_bands=01-09,10-19,20-49;
+          require_odds=false;predict_only=false
+        required: false
+        default: ""
+      # --- 追加：sims.py 内で pass1/ pass2 を実行する制御用 ---
+      keyman_enable:    { description: "pass2（キーマン補正）を有効化", required: false, default: "true" }
+      keyman_threshold: { description: "KEYMAN_RANK しきい値 (0-1)", required: false, default: "0.7" }
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TZ: Asia/Tokyo
+      PYTHON_SCRIPT: scripts/sims/sims.py
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install numpy pandas
+          fi
+
+      - name: Run SimS
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # ===== Inputs =====
+          BASE_INPUT="${{ github.event.inputs.base || '' }}"
+          DATES="${{ github.event.inputs.dates || '' }}"
+          SIMS="${{ github.event.inputs.sims || '600' }}"
+          TOPN="${{ github.event.inputs.topn || '18' }}"
+          UNIT="${{ github.event.inputs.unit || '100' }}"
+          ODDS_MIN_IN="${{ github.event.inputs.odds_min || '' }}"
+          ODDS_MAX_IN="${{ github.event.inputs.odds_max || '' }}"
+          MIN_EV_IN="${{ github.event.inputs.min_ev || '' }}"
+          PARAMS_NAME="${{ github.event.inputs.params || '' }}"   # filename only
+          FILTER="${{ github.event.inputs.filter || '' }}"
+          KEYMAN_ENABLE_IN="${{ github.event.inputs.keyman_enable || 'true' }}"
+          KEYMAN_THRESHOLD="${{ github.event.inputs.keyman_threshold || '0.7' }}"
+
+          # ===== Defaults / Derived =====
+          BASE="${BASE_INPUT:-public}"
+          STRATEGY="trifecta_topN"
+          PIDS=""; RACES=""
+          ONLY="false"
+          ODDS_BASE=""         # 未指定なら後で BASE/odds/v1
+          MIN_EV="${MIN_EV_IN}"
+          REQUIRE_ODDS="true"  # 既定: true（filterで false 指定時のみ無効化）
+          ODDS_BANDS=""
+          ODDS_MIN="${ODDS_MIN_IN}"
+          ODDS_MAX="${ODDS_MAX_IN}"
+          PREDICT_ONLY="false"
+
+          # ===== Parse FILTER (lowercase keys) =====
+          if [ -n "$FILTER" ]; then
+            IFS=';' read -r -a parts <<< "$FILTER"
+            for kv in "${parts[@]}"; do
+              key="$(echo "${kv%%=*}" | tr '[:upper:]' '[:lower:]')"
+              val="${kv#*=}"
+              case "$key" in
+                pids)           PIDS="$val" ;;
+                races)          RACES="$val" ;;
+                only_first1)    ONLY="$val" ;;
+                odds_base)      ODDS_BASE="$val" ;;
+                min_ev)         MIN_EV="${MIN_EV:-$val}" ;;
+                require_odds)   REQUIRE_ODDS="$val" ;;
+                odds_bands)     ODDS_BANDS="$val" ;;
+                odds_min)       ODDS_MIN="${ODDS_MIN:-$val}" ;;
+                odds_max)       ODDS_MAX="${ODDS_MAX:-$val}" ;;
+                predict_only)   PREDICT_ONLY="$val" ;;
+              esac
+            done
+          fi
+
+          # オッズディレクトリ（未指定時）
+          if [ -z "$ODDS_BASE" ]; then
+            ODDS_BASE="$BASE/odds/v1"
+          fi
+
+          # 引数組み立て（出力は sims.py が scripts/sims/pass1, pass2 に分ける）
+          ARGS=( --base "$BASE" --sims "$SIMS" --unit "$UNIT" --strategy "$STRATEGY" --topn "$TOPN" )
+          [ -n "$DATES" ] && ARGS+=( --dates "$DATES" )
+          [ -n "$PIDS"  ] && ARGS+=( --pids "$PIDS" )
+          [ -n "$RACES" ] && ARGS+=( --races "$RACES" )
+          [ -n "$ODDS_BASE" ] && ARGS+=( --odds-base "$ODDS_BASE" )
+
+          if [ "${ONLY,,}" = "true" ]; then
+            ARGS+=( --only-first1 )
+          fi
+          if [ "${PREDICT_ONLY,,}" = "true" ]; then
+            ARGS+=( --predict-only )
+          fi
+
+          if [ -n "$ODDS_BANDS" ]; then
+            ARGS+=( --odds-bands "$ODDS_BANDS" )
+          else
+            [ -n "$ODDS_MIN" ] && ARGS+=( --odds-min "$ODDS_MIN" )
+            [ -n "$ODDS_MAX" ] && ARGS+=( --odds-max "$ODDS_MAX" )
+          fi
+
+          if [ -n "$MIN_EV" ]; then
+            ARGS+=( --min-ev "$MIN_EV" )
+          fi
+          if [ "${REQUIRE_ODDS,,}" != "false" ]; then
+            ARGS+=( --require-odds )
+          fi
+
+          if [ -n "$PARAMS_NAME" ]; then
+            PARAMS_PATH="scripts/sims/params/$PARAMS_NAME"
+            ARGS+=( --params "$PARAMS_PATH" )
+          fi
+
+          # ▼ 新規追加: keyman制御（sims.py 内で pass2 を動かすためのフラグ）
+          ARGS+=( --keyman-enable "$KEYMAN_ENABLE_IN" --keyman-threshold "$KEYMAN_THRESHOLD" )
+
+          echo "[debug] args: ${ARGS[*]}"
+          python "$PYTHON_SCRIPT" "${ARGS[@]}" --outdir scripts/sims
+
+      - name: Commit results into repo
+        run: |
+          set -eux
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add -A scripts/sims || true
+          git commit -m "SimS outputs ($(date +'%Y-%m-%d %H:%M:%S %Z'))" || true
+          git push || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sims-outputs
+          path: |
+            scripts/sims/**/*.csv
+            scripts/sims/**/*.json
+          if-no-files-found: warn
