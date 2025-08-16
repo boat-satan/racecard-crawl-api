@@ -1,11 +1,11 @@
 {
   "engine": "SimS ver1.0 (E1)",
   "races": 502,
-  "bets_total": 298,
-  "stake_total": 29800,
-  "payout_total": 22090,
-  "hit_rate": 0.03187250996015936,
-  "roi": -0.2587248322147651,
+  "bets_total": 9036,
+  "stake_total": 903600,
+  "payout_total": 684510,
+  "hit_rate": 0.5577689243027888,
+  "roi": -0.24246347941567065,
   "strategy": "trifecta_topN",
   "topn": 18,
   "k": 2,
@@ -13,10 +13,10 @@
   "sims_per_race": 10000,
   "unit": 100,
   "exclude_first1": false,
-  "only_first1": true,
-  "min_ev": 1.0,
-  "require_odds": true,
+  "only_first1": false,
+  "min_ev": 0.0,
+  "require_odds": false,
   "odds_bands": "",
-  "odds_min": 10.0,
-  "odds_max": 19.9
+  "odds_min": 0.0,
+  "odds_max": 0.0
 }
