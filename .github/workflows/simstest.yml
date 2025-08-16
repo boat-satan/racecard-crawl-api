@@ -8,7 +8,6 @@ on:
       sims:      { description: "Sims per race", required: false, default: "600" }
       topn:      { description: "TopN (trifecta_topN時)", required: false, default: "18" }
       unit:      { description: "Bet unit (JPY)", required: false, default: "100" }
-      strategy:  { description: "trifecta_topN / exacta_topK_third_topM", required: false, default: "trifecta_topN" }
       k:         { description: "exactaのK", required: false, default: "2" }
       m:         { description: "thirdのM", required: false, default: "4" }
       filter:
@@ -21,6 +20,10 @@ on:
         description: "1着=1号艇の買い目を除外（true/false）"
         required: false
         default: "false"
+      params:
+        description: "外部パラメータファイル(.toml/.json)のパス（例: params/freer-10.toml）"
+        required: false
+        default: ""
 
 jobs:
   run:
@@ -29,7 +32,7 @@ jobs:
       contents: write
     env:
       TZ: Asia/Tokyo
-      # 実行するPythonスクリプト。必要に応じて sims_batch_eval_SimS_v1.py に変更してください
+      # ★ TOML/JSON を読ませるため、評価スクリプトを指定
       PYTHON_SCRIPT: scripts/sims/sims.py
 
     steps:
@@ -60,11 +63,13 @@ jobs:
           SIMS="${{ github.event.inputs.sims || '600' }}"
           TOPN="${{ github.event.inputs.topn || '18' }}"
           UNIT="${{ github.event.inputs.unit || '100' }}"
-          STRATEGY="${{ github.event.inputs.strategy || 'trifecta_topN' }}"
+          # strategy 入力は削除 → 常に trifecta_topN（必要ならfilterで切替）
+          STRATEGY="trifecta_topN"
           KVAL="${{ github.event.inputs.k || '2' }}"
           MVAL="${{ github.event.inputs.m || '4' }}"
           FILTER="${{ github.event.inputs.filter || '' }}"
           EXCL="${{ github.event.inputs.exclude_first1 || 'false' }}"
+          PARAMS_FILE="${{ github.event.inputs.params || '' }}"
 
           # repo 直下 public をデフォルトに
           if [ -z "$BASE_INPUT" ]; then
@@ -73,10 +78,11 @@ jobs:
             BASE="$BASE_INPUT"
           fi
 
-          # filter のパース（; 区切り、key=value）
+          # filter のパース
           PIDS=""; RACES=""
           ONLY="false"; ODDS_BASE=""
           MIN_EV=""
+          # 既定を true に寄せたければここを "true" に
           REQUIRE_ODDS="false"
           ODDS_BANDS=""
           ODDS_MIN=""
@@ -120,6 +126,7 @@ jobs:
           echo "[debug] ODDS_BASE=$ODDS_BASE  MIN_EV=${MIN_EV:-'(none)'}  REQUIRE_ODDS=$REQUIRE_ODDS"
           echo "[debug] ODDS_BANDS=${ODDS_BANDS:-'(none)'}  ODDS_MIN=${ODDS_MIN:-'(none)'}  ODDS_MAX=${ODDS_MAX:-'(none)'}"
           echo "[debug] ONLY_FIRST1=$ONLY  EXCLUDE_FIRST1=$EXCL  PREDICT_ONLY=$PREDICT_ONLY"
+          echo "[debug] PARAMS_FILE=${PARAMS_FILE:-'(none)'}"
           [ -d "$BASE" ] && ls -la "$BASE" || true
 
           ARGS=( --base "$BASE" --sims "$SIMS" --unit "$UNIT" )
@@ -127,11 +134,8 @@ jobs:
           [ -n "$PIDS"  ] && ARGS+=( --pids "$PIDS" )
           [ -n "$RACES" ] && ARGS+=( --races "$RACES" )
 
-          if [ "$STRATEGY" = "exacta_topK_third_topM" ]; then
-            ARGS+=( --strategy exacta_topK_third_topM --k "$KVAL" --m "$MVAL" )
-          else
-            ARGS+=( --strategy trifecta_topN --topn "$TOPN" )
-          fi
+          # 買い目ロジック（固定）
+          ARGS+=( --strategy "$STRATEGY" --topn "$TOPN" )
 
           # 1着=1号艇関連
           if [ "${EXCL,,}" = "true" ]; then
@@ -161,6 +165,11 @@ jobs:
           else
             [ -n "$ODDS_MIN" ] && ARGS+=( --odds-min "$ODDS_MIN" )
             [ -n "$ODDS_MAX" ] && ARGS+=( --odds-max "$ODDS_MAX" )
+          fi
+
+          # ★ 新規：外部パラメータファイル
+          if [ -n "$PARAMS_FILE" ]; then
+            ARGS+=( --params "$PARAMS_FILE" )
           fi
 
           echo "[debug] args: ${ARGS[*]}"
