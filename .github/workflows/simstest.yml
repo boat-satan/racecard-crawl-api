@@ -8,18 +8,16 @@ on:
       sims:      { description: "Sims per race", required: false, default: "600" }
       topn:      { description: "TopN (trifecta_topN時)", required: false, default: "18" }
       unit:      { description: "Bet unit (JPY)", required: false, default: "100" }
+      odds_min:  { description: "単一レンジの下限（例: 10）", required: false, default: "" }
+      odds_max:  { description: "単一レンジの上限（例: 49.9）", required: false, default: "" }
+      min_ev:    { description: "最小EV (EV=p*odds)。例: 1.2", required: false, default: "" }
+      params:    { description: "外部パラメータ（ファイル名のみ。例: freer-10.toml）※固定パス scripts/sims/params/ を参照", required: false, default: "" }
       filter:
         description: >-
-          例: pids=02,04;races=1R,2R;only_first1=true;odds_base=./public/odds/v1;
-              odds_bands=01-09,10-19,20-49;odds_min=10;odds_max=49;min_ev=1.2;require_odds=true;predict_only=false
-        required: false
-        default: ""
-      exclude_first1:
-        description: "1着=1号艇の買い目を除外（true/false）"
-        required: false
-        default: "false"
-      params_name:
-        description: "外部パラメータのファイル名のみ（例: freer-10.toml）※固定パス scripts/sims/params/ 配下を参照"
+          追加フィルタ（;区切り）。例:
+          pids=02,04;races=1R,2R;only_first1=true;
+          odds_bands=01-09,10-19,20-49;
+          require_odds=false;predict_only=false
         required: false
         default: ""
 
@@ -55,28 +53,32 @@ jobs:
         run: |
           set -euo pipefail
 
+          # ===== Inputs =====
           BASE_INPUT="${{ github.event.inputs.base || '' }}"
           DATES="${{ github.event.inputs.dates || '' }}"
           SIMS="${{ github.event.inputs.sims || '600' }}"
           TOPN="${{ github.event.inputs.topn || '18' }}"
           UNIT="${{ github.event.inputs.unit || '100' }}"
+          ODDS_MIN_IN="${{ github.event.inputs.odds_min || '' }}"
+          ODDS_MAX_IN="${{ github.event.inputs.odds_max || '' }}"
+          MIN_EV_IN="${{ github.event.inputs.min_ev || '' }}"
+          PARAMS_NAME="${{ github.event.inputs.params || '' }}"   # filename only
           FILTER="${{ github.event.inputs.filter || '' }}"
-          EXCL="${{ github.event.inputs.exclude_first1 || 'false' }}"
-          PARAMS_NAME="${{ github.event.inputs.params_name || '' }}"
 
-          # repo 直下 public をデフォルトに
+          # ===== Defaults / Derived =====
           BASE="${BASE_INPUT:-public}"
-
-          # filter のパース
+          STRATEGY="trifecta_topN"
           PIDS=""; RACES=""
-          ONLY="false"; ODDS_BASE=""
-          MIN_EV=""
-          REQUIRE_ODDS="false"
+          ONLY="false"
+          ODDS_BASE=""         # 未指定なら後で BASE/odds/v1
+          MIN_EV="${MIN_EV_IN}"
+          REQUIRE_ODDS="true"  # 既定: true（filterで false 指定時のみ無効化）
           ODDS_BANDS=""
-          ODDS_MIN=""
-          ODDS_MAX=""
+          ODDS_MIN="${ODDS_MIN_IN}"
+          ODDS_MAX="${ODDS_MAX_IN}"
           PREDICT_ONLY="false"
 
+          # ===== Parse FILTER (lowercase keys) =====
           if [ -n "$FILTER" ]; then
             IFS=';' read -r -a parts <<< "$FILTER"
             for kv in "${parts[@]}"; do
@@ -87,65 +89,68 @@ jobs:
                 races)          RACES="$val" ;;
                 only_first1)    ONLY="$val" ;;
                 odds_base)      ODDS_BASE="$val" ;;
-                min_ev)         MIN_EV="$val" ;;
+                min_ev)         MIN_EV="${MIN_EV:-$val}" ;;
                 require_odds)   REQUIRE_ODDS="$val" ;;
                 odds_bands)     ODDS_BANDS="$val" ;;
-                odds_min)       ODDS_MIN="$val" ;;
-                odds_max)       ODDS_MAX="$val" ;;
+                odds_min)       ODDS_MIN="${ODDS_MIN:-$val}" ;;
+                odds_max)       ODDS_MAX="${ODDS_MAX:-$val}" ;;
                 predict_only)   PREDICT_ONLY="$val" ;;
               esac
             done
           fi
 
-          # デフォルトのオッズディレクトリ（未指定時）
+          # オッズディレクトリ（未指定時）
           if [ -z "$ODDS_BASE" ]; then
             ODDS_BASE="$BASE/odds/v1"
           fi
 
-          # 排他チェック
-          if [ "${EXCL,,}" = "true" ] && [ "${ONLY,,}" = "true" ]; then
-            echo "::error ::exclude_first1 と only_first1 は同時指定できません"
-            exit 1
-          fi
-
-          # ★ 固定プレフィックス: scripts/sims/params/ + <ファイル名>
-          PARAMS_FILE=""
-          if [ -n "$PARAMS_NAME" ]; then
-            PARAMS_FILE="scripts/sims/params/$PARAMS_NAME"
-            if [ ! -f "$PARAMS_FILE" ]; then
-              echo "::error ::params file not found: $PARAMS_FILE"
-              exit 1
-            fi
-          fi
-
-          echo "[debug] BASE=$BASE"
-          echo "[debug] DATES=${DATES:-'(none)'}"
-          echo "[debug] TOPN=$TOPN  SIMS=$SIMS  UNIT=$UNIT"
-          echo "[debug] ODDS_BASE=$ODDS_BASE  MIN_EV=${MIN_EV:-'(none)'}  REQUIRE_ODDS=$REQUIRE_ODDS"
-          echo "[debug] ODDS_BANDS=${ODDS_BANDS:-'(none)'}  ODDS_MIN=${ODDS_MIN:-'(none)'}  ODDS_MAX=${ODDS_MAX:-'(none)'}"
-          echo "[debug] ONLY_FIRST1=$ONLY  EXCLUDE_FIRST1=$EXCL  PREDICT_ONLY=$PREDICT_ONLY"
-          echo "[debug] PARAMS_FILE=${PARAMS_FILE:-'(none)'}"
-          [ -d "$BASE" ] && ls -la "$BASE" || true
-
-          ARGS=( --base "$BASE" --sims "$SIMS" --unit "$UNIT" --strategy trifecta_topN --topn "$TOPN" )
+          # 引数組み立て
+          ARGS=( --base "$BASE" --sims "$SIMS" --unit "$UNIT" --strategy "$STRATEGY" --topn "$TOPN" )
           [ -n "$DATES" ] && ARGS+=( --dates "$DATES" )
           [ -n "$PIDS"  ] && ARGS+=( --pids "$PIDS" )
           [ -n "$RACES" ] && ARGS+=( --races "$RACES" )
-          if [ "${EXCL,,}" = "true" ]; then ARGS+=( --exclude-first1 ); fi
-          if [ "${ONLY,,}" = "true" ]; then ARGS+=( --only-first1 ); fi
-          if [ "${PREDICT_ONLY,,}" = "true" ]; then ARGS+=( --predict-only ); fi
           [ -n "$ODDS_BASE" ] && ARGS+=( --odds-base "$ODDS_BASE" )
-          [ -n "$MIN_EV" ] && ARGS+=( --min-ev "$MIN_EV" )
-          if [ "${REQUIRE_ODDS,,}" = "true" ]; then ARGS+=( --require-odds ); fi
+
+          # 1着=1号艇限定（除外は filter で対応）
+          if [ "${ONLY,,}" = "true" ]; then
+            ARGS+=( --only-first1 )
+          fi
+
+          # 予測のみ
+          if [ "${PREDICT_ONLY,,}" = "true" ]; then
+            ARGS+=( --predict-only )
+          fi
+
+          # オッズバンド or 単一レンジ
           if [ -n "$ODDS_BANDS" ]; then
             ARGS+=( --odds-bands "$ODDS_BANDS" )
           else
             [ -n "$ODDS_MIN" ] && ARGS+=( --odds-min "$ODDS_MIN" )
             [ -n "$ODDS_MAX" ] && ARGS+=( --odds-max "$ODDS_MAX" )
           fi
-          if [ -n "$PARAMS_FILE" ]; then ARGS+=( --params "$PARAMS_FILE" ); fi
 
+          # EV / require_odds
+          if [ -n "$MIN_EV" ]; then
+            ARGS+=( --min-ev "$MIN_EV" )
+          fi
+          if [ "${REQUIRE_ODDS,,}" != "false" ]; then
+            ARGS+=( --require-odds )
+          fi
+
+          # 外部パラメータ（ファイル名のみ → 固定ディレクトリを前置）
+          if [ -n "$PARAMS_NAME" ]; then
+            PARAMS_PATH="scripts/sims/params/$PARAMS_NAME"
+            ARGS+=( --params "$PARAMS_PATH" )
+          fi
+
+          echo "[debug] BASE=$BASE"
+          echo "[debug] DATES=${DATES:-'(none)'}  SIMS=$SIMS  TOPN=$TOPN  UNIT=$UNIT"
+          echo "[debug] ODDS_BASE=$ODDS_BASE  ODDS_BANDS=${ODDS_BANDS:-'(none)'}  ODDS_MIN=${ODDS_MIN:-'(none)'}  ODDS_MAX=${ODDS_MAX:-'(none)'}"
+          echo "[debug] MIN_EV=${MIN_EV:-'(none)'}  REQUIRE_ODDS=$REQUIRE_ODDS  ONLY_FIRST1=$ONLY  PREDICT_ONLY=$PREDICT_ONLY"
+          echo "[debug] PARAMS=${PARAMS_NAME:-'(none)'} -> ${PARAMS_PATH:-'(n/a)'}"
           echo "[debug] args: ${ARGS[*]}"
+          [ -d "$BASE" ] && ls -la "$BASE" || true
+
           python "$PYTHON_SCRIPT" "${ARGS[@]}" --outdir scripts/sims
 
       - name: Commit results into repo
