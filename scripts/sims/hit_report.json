@@ -2,11 +2,11 @@
   "summary": {
     "engine": "SimS ver1.0 (E1)",
     "races": 360,
-    "bets_total": 6480,
-    "stake_total": 648000,
-    "payout_total": 482410,
-    "hit_rate": 0.6361111111111111,
-    "roi": -0.2555401234567901,
+    "bets_total": 6462,
+    "stake_total": 646200,
+    "payout_total": 480770,
+    "hit_rate": 0.6333333333333333,
+    "roi": -0.25600433302383163,
     "strategy": "trifecta_topN",
     "topn": 18,
     "k": 2,
@@ -16,7 +16,7 @@
     "exclude_first1": false,
     "only_first1": false,
     "min_ev": 0.0,
-    "require_odds": false,
+    "require_odds": true,
     "odds_bands": "",
     "odds_min": 0.0,
     "odds_max": 0.0
@@ -25,7 +25,7 @@
   "by_first_lane": [
     {
       "first_lane": 1,
-      "hits": 157
+      "hits": 156
     },
     {
       "first_lane": 2,
@@ -55,7 +55,7 @@
     },
     {
       "odds_band": "10-19",
-      "hits": 76
+      "hits": 75
     },
     {
       "odds_band": "100-999",
@@ -100,12 +100,12 @@
       "hits": 10
     },
     {
-      "hit_combo": "1-2-5",
+      "hit_combo": "1-3-6",
       "hits": 9
     },
     {
-      "hit_combo": "1-3-6",
-      "hits": 9
+      "hit_combo": "1-2-5",
+      "hits": 8
     },
     {
       "hit_combo": "1-4-5",
@@ -115,7 +115,7 @@
   "by_rank_bucket": [
     {
       "rank_bucket": "NA",
-      "hits": 229
+      "hits": 228
     }
   ]
 }
