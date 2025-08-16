@@ -1,7 +1,7 @@
 # 展開寄与を強める攻め設定
-cK = 1.9               # dK感度↑
+cK = 5.0               # dK感度↑
 alpha_A  = -0.012      # Aのt1M寄与を強める
 alpha_Ap = -0.014      # Apのt1M寄与を強める
 delta_first     = 0.9  # 先マイ補正↑
 delta_lineblock = 0.6  # ラインブロック補正↑
-decision_bias_mult = 1.15
+decision_bias_mult = 5.0
