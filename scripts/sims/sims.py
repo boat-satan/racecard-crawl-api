@@ -2,8 +2,11 @@
 # SimS ver1.0 — 同時同条件バッチ検証 + キーマン出力 + pass1/pass2 (keyman補正再シム)
 # 変更点:
 # - --keyman-enable/--keyman-threshold/--keyman-boost 追加
+# - --keyman-aggr 追加（0〜1, pass2のみ: シミュレーションの挙動を“攻め”に寄せる）
 # - 出力先を outdir/pass1 と outdir/pass2 に分割
-# - simulate_one() に boost_map 注入（KEYMAN_RANK >= 閾値の艇へ A/Ap を乗算）
+# - simulate_one() に boost_map / aggr_map 注入
+#   ・boost_map: KEYMAN_RANK >= 閾値の艇に A/Ap を (1+boost) 倍（静的スカラー）
+#   ・aggr_map : 同艇に対し ST分布前倒し・分散縮小、入替・ブロック・ウェイクに小修正（動的挙動）
 
 import os, json, math, argparse, shutil
 from collections import Counter, defaultdict
@@ -120,7 +123,6 @@ def apply_session_bias(ST, A, Ap):
     Ap *= (1.0 + rng.normal(Params.session_A_bias_mu, Params.session_A_bias_sd))
     return ST, A, Ap
 
-# （NEW）フラグ返却に変更
 def maybe_backoff(ST, A):
     if rng.random() < Params.p_backoff:
         return ST + Params.backoff_ST_shift, A * (1.0 - Params.backoff_A_penalty), True
@@ -196,7 +198,6 @@ def build_input_from_integrated(d: dict) -> dict:
 # ---------- 1レース・シミュ ----------
 def sample_ST(model): return rng.normal(model["mu"], model["sigma"])
 
-# （NEW）フラグも返す
 def t1m_time(ST, R, A, Ap, sq, env, lane, st_gain):
     ST, A, Ap = apply_session_bias(ST, A, Ap)
     ST, A, did_backoff = maybe_backoff(ST, A)
@@ -211,23 +212,30 @@ def decision_bias_term(lead, chase, lane, kimarite_hint=None):
     if Params.decision_bias_mult != 1.0: base *= Params.decision_bias_mult
     return base
 
-# （NEW）入れ替わり/ブロックの記録を返す
-def one_pass(entry, T1M, A, Ap, env, lineblocks, first_right):
+def one_pass(entry, T1M, A, Ap, env, lineblocks, first_right, aggr_map=None):
     exit_order = entry[:]
     swaps = []   # list of (chase, lead)
     blocks = []  # list of (lead, chase) when delta>0 and no swap
     safe_used_count = 0
     d_theta, _ = wind_adjustments(env); theta_eff = Params.theta + d_theta
+    aggr_map = aggr_map or {}
     for k in range(len(exit_order) - 1):
         lead, chase = exit_order[k], exit_order[k+1]
         dt = T1M[chase] - T1M[lead]
         dK = (A[chase] + Ap[chase]) - (A[lead] + Ap[lead])
         delta = (Params.delta_lineblock if (lead, chase) in lineblocks else 0.0)
+        # 先行がキー艇ならブロック寄与を微増
+        if str(lead) in aggr_map:
+            delta += 0.10 * float(aggr_map[str(lead)])
         if lead in first_right: delta += Params.delta_first
         turn_err, used = maybe_safe_margin()
         if used: safe_used_count += 1
         dt_eff = dt + Params.gamma_wall + Params.k_turn_err * turn_err
         logit = Params.a0 + Params.b_dt*(theta_eff - dt_eff) + Params.cK*dK + delta
+        # 追走がキー艇なら入替ロジットを押し上げ（攻撃ボーナス）
+        if str(chase) in aggr_map:
+            a = float(aggr_map[str(chase)])
+            logit += 0.45 * a
         logit *= decision_bias_term(lead, chase, chase)
         will_swap = (rng.random() < sigmoid(logit))
         if will_swap:
@@ -238,7 +246,9 @@ def one_pass(entry, T1M, A, Ap, env, lineblocks, first_right):
                 blocks.append((lead, chase))
     return exit_order, swaps, blocks, safe_used_count
 
-def simulate_one(integrated_json: dict, sims: int = 600, boost_map: dict | None = None):
+def simulate_one(integrated_json: dict, sims: int = 600,
+                 boost_map: dict | None = None,
+                 aggr_map: dict | None = None):
     # boost_map: {"1":0.15, "4":0.15} → A/Ap を (1+0.15) 倍
     inp = build_input_from_integrated(integrated_json)
     if boost_map:
@@ -247,6 +257,16 @@ def simulate_one(integrated_json: dict, sims: int = 600, boost_map: dict | None 
             if b != 0.0:
                 inp["A"][l]  *= (1.0 + b)
                 inp["Ap"][l] *= (1.0 + b)
+
+    # aggr_map: {"3":0.8, ...} → 挙動改変（キー艇のみ）
+    aggr_map = aggr_map or {}
+    if aggr_map:
+        for l in list(inp["ST_model"].keys()):
+            a = float(aggr_map.get(str(l), 0.0))
+            if a <= 0: continue
+            # ST 分布：平均を前倒し（小さく）、分散を縮小
+            inp["ST_model"][str(l)]["mu"]    = max(0.05, inp["ST_model"][str(l)]["mu"] - 0.006*a)
+            inp["ST_model"][str(l)]["sigma"] = max(0.005, inp["ST_model"][str(l)]["sigma"] * (1.0 - 0.35*a))
 
     lanes = inp["lanes"]; env = inp["env"]; _, st_gain = wind_adjustments(env)
 
@@ -274,14 +294,20 @@ def simulate_one(integrated_json: dict, sims: int = 600, boost_map: dict | None 
 
         entry = sorted(lanes, key=lambda x: T1M[x])
 
-        # ウェイク
+        # ウェイク（キー艇は被弾確率を低減、非キー艇は極小増でバランス）
         for i in lanes:
-            if rng.random() < wake_loss_probability(i, entry):
+            p = wake_loss_probability(i, entry)
+            if aggr_map:
+                if str(i) in aggr_map:
+                    p *= max(0.0, 1.0 - 0.60*float(aggr_map[str(i)]))
+                else:
+                    p *= (1.0 + 0.05*max(aggr_map.values(), default=0.0))
+            if rng.random() < min(0.95, max(0.0, p)):
                 wake_hits[i] += 1
                 T1M[i] += Params.beta_wk
 
         exit_order, swaps, blocks, safe_used_cnt = one_pass(
-            entry, T1M, inp["A"], inp["Ap"], env, inp["lineblocks"], inp["first_right"]
+            entry, T1M, inp["A"], inp["Ap"], env, inp["lineblocks"], inp["first_right"], aggr_map=aggr_map
         )
         safe_used_total += safe_used_cnt
 
@@ -543,7 +569,7 @@ def save_keyman(outdir: str, date: str, pid: str, race: str, keyman: dict, meta:
     except Exception as e:
         print(f"[warn] keyman save failed for {date}/{pid}/{race}: {e}")
 
-# ---------- pass2 用: keyman読み込み → boost_map作成 ----------
+# ---------- pass2 用: keyman読み込み → boost/aggr マップ作成 ----------
 def load_keyman_boost_map(pass1_outdir: str, date: str, pid: str, race: str,
                           threshold: float, boost: float) -> dict:
     path = os.path.join(pass1_outdir, "keyman", date, pid, f"{race}.json")
@@ -566,13 +592,16 @@ def evaluate_one(int_path: str, res_path: str, sims: int, unit: int,
                  odds_bands: list[tuple[float,float]] = None,
                  outdir: str = "./SimS_v1.0_eval",
                  boost_map: dict | None = None,
+                 aggr_map: dict | None = None,
                  meta_extra: dict | None = None):
     # 予測
     with open(int_path, "r", encoding="utf-8") as f:
         d_int = json.load(f)
-    tri_probs, kim_probs, exacta_probs, third_probs, keyman = simulate_one(d_int, sims=sims, boost_map=boost_map)
+    tri_probs, kim_probs, exacta_probs, third_probs, keyman = simulate_one(
+        d_int, sims=sims, boost_map=boost_map, aggr_map=aggr_map
+    )
 
-    # （NEW）KEYMAN_RANK を付与
+    # KEYMAN_RANK を付与
     keyman = attach_keyman_rank(keyman)
 
     # 生成
@@ -707,6 +736,7 @@ def main():
     ap.add_argument("--keyman-enable", default="true", help="pass2を実行するか（true/false）")
     ap.add_argument("--keyman-threshold", type=float, default=0.7, help="KEYMAN_RANK 閾値")
     ap.add_argument("--keyman-boost", type=float, default=0.15, help="A/Ap 乗算の増分 (例 0.15→1.15倍)")
+    ap.add_argument("--keyman-aggr",  type=float, default=0.0, help="pass2のみ: 挙動改変の強さ(0〜1)")
 
     args = ap.parse_args()
 
@@ -716,6 +746,7 @@ def main():
     keyman_enable = parse_boolish(args.keyman_enable, True)
     keyman_threshold = float(args.keyman_threshold)
     keyman_boost = float(args.keyman_boost)
+    keyman_aggr  = max(0.0, min(1.0, float(args.keyman_aggr)))
 
     # Params 上書き
     try:
@@ -846,7 +877,6 @@ def main():
         pd.DataFrame(rows).to_csv(os.path.join(pred_dir, "predictions_summary.csv"),
                                   index=False, encoding="utf-8")
         print(f"[predict/pass1] candidates: {len(keys)}  -> {pred_dir}")
-        # predict-only のときも pass2 へは進まず終了
         return
 
     # ---- eval pass1 ----
@@ -860,7 +890,8 @@ def main():
                           exclude_first1=args.exclude_first1, only_first1=args.only_first1,
                           odds_base=args.odds_base, min_ev=args.min_ev, require_odds=args.require_odds,
                           odds_bands=bands, outdir=target_dir,
-                          boost_map=None, meta_extra={"pass":"pass1"})
+                          boost_map=None, aggr_map=None,
+                          meta_extra={"pass":"pass1"})
         total_stake += ev["stake"]; total_payout += ev["payout"]
         per_rows.append({"date": date, "pid": pid, "race": race,
                          "bets": len(ev["bets"]), "stake": ev["stake"],
@@ -948,21 +979,27 @@ def main():
     os.makedirs(pass2_dir, exist_ok=True)
 
     per_rows2 = []; total_stake2 = 0; total_payout2 = 0
-    print(f"[eval pass2] keyman_threshold={keyman_threshold}, boost={keyman_boost}")
+    print(f"[eval pass2] keyman_threshold={keyman_threshold}, boost={keyman_boost}, aggr={keyman_aggr}")
 
     for (date, pid, race) in keys:
+        # pass1の KEYMAN_RANK≥threshold を対象に、boostとaggrを構成
         boost_map = load_keyman_boost_map(pass1_dir, date, pid, race,
                                           threshold=keyman_threshold, boost=keyman_boost)
+        aggr_map  = load_keyman_boost_map(pass1_dir, date, pid, race,
+                                          threshold=keyman_threshold, boost=keyman_aggr)
+
         ev2 = evaluate_one(int_idx[(date,pid,race)], res_idx[(date,pid,race)],
                            sims=args.sims, unit=args.unit, strategy=args.strategy,
                            topn=args.topn, k=args.k, m=args.m,
                            exclude_first1=args.exclude_first1, only_first1=args.only_first1,
                            odds_base=args.odds_base, min_ev=args.min_ev, require_odds=args.require_odds,
                            odds_bands=bands, outdir=pass2_dir,
-                           boost_map=boost_map,
-                           meta_extra={"pass":"pass2","boost_map":boost_map,
+                           boost_map=boost_map, aggr_map=aggr_map,
+                           meta_extra={"pass":"pass2",
+                                       "boost_map":boost_map,
                                        "keyman_threshold": keyman_threshold,
-                                       "keyman_boost": keyman_boost})
+                                       "keyman_boost": keyman_boost,
+                                       "keyman_aggr": keyman_aggr})
         total_stake2 += ev2["stake"]; total_payout2 += ev2["payout"]
         per_rows2.append({"date": date, "pid": pid, "race": race,
                           "bets": len(ev2["bets"]), "stake": ev2["stake"],
@@ -991,6 +1028,7 @@ def main():
         "pass": "pass2",
         "keyman_threshold": keyman_threshold,
         "keyman_boost": keyman_boost,
+        "keyman_aggr": keyman_aggr,
     }
 
     df2.to_csv(os.path.join(pass2_dir, "per_race_results.csv"), index=False)
