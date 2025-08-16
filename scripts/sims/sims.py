@@ -339,19 +339,15 @@ def _minmax_norm(d: dict, lanes_s: list[str]) -> dict:
     return {k: (float(d.get(k, 0.0)) - lo) / den for k in lanes_s}
 
 def _compute_keyman_rank_only_drivers(keyman: dict) -> dict:
-    # レーン集合は WAKE のキーから取得
     lanes_s = sorted((keyman.get("WAKE") or {}).keys(), key=lambda x: int(x))
     if not lanes_s:
         return {}
 
-    # 1) WAKE
     wake = {k: float(keyman.get("WAKE", {}).get(k, 0.0)) for k in lanes_s}
 
-    # 2) POS_DELTA_AVG（負は0にクリップ）
     pos_raw = {k: float(keyman.get("POS_DELTA_AVG", {}).get(k, 0.0)) for k in lanes_s}
     pos_plus = {k: (v if v > 0 else 0.0) for k, v in pos_raw.items()}
 
-    # 3) SWAP（外→内の抜き/総SWAP）
     swaps = keyman.get("SWAP", {}) or {}
     total_swaps = sum(int(v) for v in swaps.values()) if swaps else 0
     outer_cnt_per_lane = {k: 0 for k in lanes_s}
@@ -359,32 +355,27 @@ def _compute_keyman_rank_only_drivers(keyman: dict) -> dict:
         for pair, cnt in swaps.items():
             try:
                 ch, ld = pair.split(">")
-                # 外→内
                 if int(ch) > int(ld):
                     outer_cnt_per_lane[str(int(ch))] = outer_cnt_per_lane.get(str(int(ch)), 0) + int(cnt)
             except Exception:
                 continue
     swap_outshare = {k: (outer_cnt_per_lane.get(k, 0) / total_swaps) if total_swaps > 0 else 0.0 for k in lanes_s}
 
-    # 4) BACKOFF / 5) CAV
     backoff = {k: float(keyman.get("BACKOFF", {}).get(k, 0.0)) for k in lanes_s}
     cav     = {k: float(keyman.get("CAV", {}).get(k, 0.0)) for k in lanes_s}
 
-    # 正規化（各要素ごとにmin-max）
     wake_n   = _minmax_norm(wake, lanes_s)
     pos_n    = _minmax_norm(pos_plus, lanes_s)
     swap_n   = _minmax_norm(swap_outshare, lanes_s)
     backoff_n= _minmax_norm(backoff, lanes_s)
     cav_n    = _minmax_norm(cav, lanes_s)
 
-    # 重み合成（H1/H2/H3は使わない）
     w_wake, w_pos, w_swap, w_back, w_cav = 0.35, 0.25, 0.25, 0.10, 0.05
     raw = {
         k: (w_wake*wake_n[k] + w_pos*pos_n[k] + w_swap*swap_n[k] + w_back*backoff_n[k] + w_cav*cav_n[k])
         for k in lanes_s
     }
 
-    # 最終0-1正規化
     final = _minmax_norm(raw, lanes_s)
     return final
 
@@ -393,10 +384,95 @@ def attach_keyman_rank(keyman: dict) -> dict:
         kmr = _compute_keyman_rank_only_drivers(keyman)
         if kmr:
             keyman["KEYMAN_RANK"] = kmr
-    except Exception as e:
-        # 壊れていても他の情報は保存したいので握りつぶし
+    except Exception:
         pass
     return keyman
+
+# ---------- オッズ読込 ----------
+def load_trifecta_odds(odds_base: str, date: str, pid: str, race: str):
+    try:
+        race_norm = race.upper() if race.upper().endswith("R") else f"{race}R"
+        path = os.path.join(odds_base, date, pid, f"{race_norm}.json")
+        if not os.path.isfile(path):
+            return {}
+        with open(path, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        trif = d.get("trifecta") or []
+        out = {}
+        for row in trif:
+            combo = str(row.get("combo") or "").strip()
+            if not combo:
+                F = row.get("F"); S = row.get("S"); T = row.get("T")
+                if all(isinstance(v, (int,float)) for v in [F,S,T]):
+                    combo = f"{int(F)}-{int(S)}-{int(T)}"
+            if not combo:
+                continue
+            odds = row.get("odds")
+            rank = row.get("popularityRank")
+            if isinstance(odds, (int,float)) and math.isfinite(odds):
+                out[combo] = {"odds": float(odds), "rank": int(rank) if isinstance(rank,(int,float)) else None}
+        return out
+    except Exception:
+        return {}
+
+# ---------- オッズバンドユーティリティ（復活） ----------
+def parse_odds_bands(bands_str: str, odds_min: float, odds_max: float):
+    bands = []
+    if bands_str:
+        for part in bands_str.split(","):
+            part = part.strip()
+            if not part or "-" not in part:
+                continue
+            lo_s, hi_s = part.split("-", 1)
+            lo = float(lo_s) if lo_s.strip() else float("-inf")
+            hi = float(hi_s) if hi_s.strip() else float("inf")
+            if math.isfinite(lo) and math.isfinite(hi) and lo > hi:
+                lo, hi = hi, lo
+            bands.append((lo, hi))
+    else:
+        lo = float(odds_min) if odds_min and odds_min > 0 else float("-inf")
+        hi = float(odds_max) if odds_max and odds_max > 0 else float("inf")
+        if not (lo == float("-inf") and hi == float("inf")):
+            if math.isfinite(lo) and math.isfinite(hi) and lo > hi:
+                lo, hi = hi, lo
+            bands.append((lo, hi))
+    return bands
+
+def odds_in_any_band(odds: float, bands: list[tuple[float,float]]) -> bool:
+    if not bands:
+        return True
+    if odds is None or not math.isfinite(odds):
+        return False
+    for lo, hi in bands:
+        if odds >= lo and odds <= hi:
+            return True
+    return False
+
+# ---------- 買い目生成 ----------
+def generate_tickets(strategy, tri_probs, exacta_probs, third_probs,
+                     topn=18, k=2, m=4, exclude_first1=False, only_first1=False):
+    tickets = []
+    if strategy == "exacta_topK_third_topM":
+        top2 = sorted(exacta_probs.items(), key=lambda kv: kv[1], reverse=True)[:k]
+        top3 = [t for t,_ in sorted(third_probs.items(), key=lambda kv: kv[1], reverse=True)[:m]]
+        seen = set()
+        for (f,s), _ in top2:
+            for t in top3:
+                if t!=f and t!=s:
+                    key = (f,s,t)
+                    if key not in seen:
+                        seen.add(key)
+                        score = exacta_probs.get((f,s),0.0) * third_probs.get(t,0.0)
+                        tickets.append((key, score))
+        tickets = [(k_,p_) for (k_,p_) in tickets
+                   if ((not only_first1) or k_[0]==1) and ((not exclude_first1) or k_[0]!=1)]
+        tickets.sort(key=lambda kv: kv[1], reverse=True)
+    else:
+        top = sorted(tri_probs.items(), key=lambda kv: kv[1], reverse=True)[:topn]
+        top = [(k_,p_) for (k_,p_) in top
+               if ((not only_first1) or k_[0]==1) and ((not exclude_first1) or k_[0]!=1)]
+        tickets = [(k_, p_) for k_,p_ in top]
+    return tickets
 
 # ---------- キーマンJSON保存 ----------
 def save_keyman(outdir: str, date: str, pid: str, race: str, keyman: dict, meta: dict):
@@ -418,7 +494,6 @@ def evaluate_one(int_path: str, res_path: str, sims: int, unit: int,
                  odds_base: str=None, min_ev: float=0.0, require_odds: bool=False,
                  odds_bands: list[tuple[float,float]] = None,
                  outdir: str = "./SimS_v1.0_eval"):
-    # 予測
     with open(int_path, "r", encoding="utf-8") as f:
         d_int = json.load(f)
     tri_probs, kim_probs, exacta_probs, third_probs, keyman = simulate_one(d_int, sims=sims)
@@ -426,12 +501,10 @@ def evaluate_one(int_path: str, res_path: str, sims: int, unit: int,
     # （NEW）KEYMAN_RANK を付与
     keyman = attach_keyman_rank(keyman)
 
-    # 生成 & 1着1除外/限定
     tickets = generate_tickets(strategy, tri_probs, exacta_probs, third_probs,
                                topn=topn, k=k, m=m,
                                exclude_first1=exclude_first1, only_first1=only_first1)
 
-    # オッズ（EV/帯 用）
     date = pid = race = None
     odds_map = {}
     try:
@@ -442,7 +515,6 @@ def evaluate_one(int_path: str, res_path: str, sims: int, unit: int,
     if odds_base and date and pid and race:
         odds_map = load_trifecta_odds(odds_base, date, pid, race)
 
-    # フィルタ（オッズバンド → EV）
     bands = odds_bands or []
     kept = []
     for (key, prob) in tickets:
@@ -451,21 +523,17 @@ def evaluate_one(int_path: str, res_path: str, sims: int, unit: int,
         odds = rec["odds"] if rec else None
 
         if bands:
-            if odds is None:
-                continue
-            if not odds_in_any_band(odds, bands):
-                continue
+            if odds is None: continue
+            if not odds_in_any_band(odds, bands): continue
         elif require_odds and odds is None:
             continue
 
         if min_ev and min_ev > 0:
             if odds is None:
-                if require_odds:
-                    continue
+                if require_odds: continue
             else:
                 ev = prob * odds
-                if ev < min_ev:
-                    continue
+                if ev < min_ev: continue
 
         kept.append((key, prob))
 
@@ -474,17 +542,14 @@ def evaluate_one(int_path: str, res_path: str, sims: int, unit: int,
     bets = ['-'.join(map(str, key)) for key,_ in tickets]
     stake = unit * len(bets)
 
-    # 的中・払戻
     d_res = load_result_for_race(res_path) or {}
     hit_combo, payout_amount = actual_trifecta_combo_and_amount(d_res)
     payout = payout_amount if hit_combo in bets else 0
 
-    # 参考: 予測順位でのヒット位置
     rank_map = { '-'.join(map(str,k)): i+1
                  for i,(k,_) in enumerate(sorted(tri_probs.items(), key=lambda kv: kv[1], reverse=True)) }
     rank_hit = rank_map.get(hit_combo, None)
 
-    # NEW: キーマン保存
     if all([date, pid, race]):
         meta = {
             "engine": "SimS ver1.0 (E1)",
@@ -530,18 +595,15 @@ def main():
     ap.add_argument("--exclude-first1", action="store_true", help="1着=1号艇を除外")
     ap.add_argument("--only-first1", action="store_true", help="1着=1号艇のみ購入")
 
-    # オッズ/EV フィルタ
     ap.add_argument("--odds-base", default="./public/odds/v1", help="オッズJSONのルート")
     ap.add_argument("--min-ev", type=float, default=0.0, help="このEV以上のみ購入 (EV=p*odds)")
     ap.add_argument("--require-odds", action="store_true", help="オッズが無い買い目は除外")
 
-    # オッズバンド指定（複数帯 or 単一レンジ）
     ap.add_argument("--odds-bands", default="",
                     help='オッズ帯のホワイトリスト。例: "01-09,10-19,20-49", "50-", "-20"')
     ap.add_argument("--odds-min", type=float, default=0.0, help="単一レンジの下限（--odds-bands が優先）")
     ap.add_argument("--odds-max", type=float, default=0.0, help="単一レンジの上限（--odds-bands が優先）")
 
-    # 外部パラメータ上書き
     ap.add_argument("--params", default="", help="パラメータ上書きファイル(.json/.toml)")
     ap.add_argument("--set", default="", help="個別キー上書き。例: b_dt=17,cK=1.05,base_wake=0.15")
 
@@ -550,7 +612,6 @@ def main():
     if args.exclude_first1 and args.only_first1:
         raise SystemExit("--exclude-first1 と --only_first1 は同時指定できません")
 
-    # Params 上書き
     try:
         if args.params:
             file_over = load_param_file(args.params)
@@ -561,7 +622,6 @@ def main():
     except Exception as e:
         raise SystemExit(f"[params] override failed: {e}")
 
-    # 現在値を書き出し（監査）
     try:
         os.makedirs(args.outdir, exist_ok=True)
         active = {k:getattr(Params,k) for k in dir(Params)
@@ -571,7 +631,6 @@ def main():
     except Exception:
         pass
 
-    # オッズバンドを解釈
     bands = parse_odds_bands(args.odds_bands, args.odds_min, args.odds_max)
 
     dates = set([d.strip() for d in args.dates.split(",") if d.strip()]) if args.dates else set()
@@ -591,7 +650,6 @@ def main():
 
     os.makedirs(args.outdir, exist_ok=True)
 
-    # 予測のみ
     if args.predict_only:
         pred_dir = os.path.join(args.outdir, "predict")
         if os.path.exists(pred_dir): shutil.rmtree(pred_dir)
@@ -604,16 +662,13 @@ def main():
                 d_int = json.load(f)
             tri_probs, kim_probs, exacta_probs, third_probs, keyman = simulate_one(d_int, sims=args.sims)
 
-            # （NEW）KEYMAN_RANK を付与
             keyman = attach_keyman_rank(keyman)
 
-            # 生成
             tickets = generate_tickets(args.strategy, tri_probs, exacta_probs, third_probs,
                                        topn=args.topn, k=args.k, m=args.m,
                                        exclude_first1=args.exclude_first1,
                                        only_first1=args.only_first1)
 
-            # オッズ読み込み
             odds_map = {}
             if (args.min_ev > 0) or args.require_odds or bands:
                 odds_map = load_trifecta_odds(args.odds_base, date, pid, race)
@@ -625,7 +680,6 @@ def main():
                 odds = rec["odds"] if rec else None
                 ev   = (p * odds) if (odds is not None) else None
 
-                # 帯 → EV → require_odds
                 if bands:
                     if odds is None or not odds_in_any_band(odds, bands):
                         continue
@@ -656,7 +710,6 @@ def main():
                            "odds_max": float(args.odds_max)},
                           f, ensure_ascii=False, indent=2)
 
-            # NEW: キーマンも保存
             save_keyman(args.outdir, date, pid, race, keyman, {
                 "engine": "SimS ver1.0 (E1)",
                 "sims_per_race": int(args.sims),
@@ -679,7 +732,6 @@ def main():
         print(f"[predict] candidates: {len(keys)}  -> {pred_dir}")
         return
 
-    # ---- eval ----
     print(f"[eval] races to evaluate: {len(keys)}")
     per_rows = []; total_stake = 0; total_payout = 0
 
@@ -721,7 +773,6 @@ def main():
     with open(os.path.join(args.outdir, "overall.json"), "w", encoding="utf-8") as f:
         json.dump(overall, f, ensure_ascii=False, indent=2)
 
-    # 簡易ヒットレポート
     rep_path = os.path.join(args.outdir, "hit_report.json")
     if (len(df) > 0) and (df["hit"]==1).any():
         hit_df = df[df["hit"]==1].copy()
