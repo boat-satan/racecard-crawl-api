@@ -5,11 +5,62 @@
 # - 買い目を生成（デフォルト: 三連単 TOPN）→ 的中率・ROI算出
 # - 任意: 1着=1号艇の除外/限定、EVフィルタ、オッズバンドフィルタ対応
 # - 簡易ヒットレポート出力
+# - ★最小変更: 外部パラメータ上書き (--params/--set) を追加
 
 import os, json, math, argparse, shutil
 from collections import Counter
 import numpy as np
 import pandas as pd
+
+# ======== （NEW）パラメータ上書きユーティリティ（最小追加・同一ファイル内） ========
+try:
+    import tomllib  # py311+
+except Exception:
+    tomllib = None
+
+def load_param_file(path: str) -> dict:
+    if not path:
+        return {}
+    p = os.path.expanduser(path)
+    if not os.path.isfile(p):
+        raise FileNotFoundError(p)
+    ext = os.path.splitext(p)[1].lower()
+    if ext == ".json":
+        with open(p, "r", encoding="utf-8") as f:
+            return json.load(f)
+    if ext == ".toml":
+        if tomllib is None:
+            raise RuntimeError("tomlファイルを読むには Python 3.11 以上が必要です")
+        with open(p, "rb") as f:
+            return tomllib.load(f)
+    raise ValueError(f"Unsupported params file extension: {ext} (use .json or .toml)")
+
+def parse_set_overrides(expr: str) -> dict:
+    # 例: "b_dt=17,cK=1.05,base_wake=0.15"
+    out = {}
+    if not expr:
+        return out
+    for kv in [p.strip() for p in expr.split(",") if p.strip()]:
+        if "=" not in kv:
+            continue
+        k, v = kv.split("=", 1)
+        k = k.strip()
+        v = v.strip()
+        try:
+            if v.lower() in ("true","false"):
+                out[k] = (v.lower() == "true")
+            else:
+                # 数値に落とせれば数値に
+                out[k] = float(v) if (("." in v) or ("e" in v.lower())) else int(v)
+        except Exception:
+            out[k] = v
+    return out
+
+def apply_overrides_to_class(cls, over: dict):
+    for k, v in over.items():
+        if hasattr(cls, k):
+            setattr(cls, k, v)
+# ======== （NEWここまで） =====================================================
 
 # =========================
 # SimS ver1.0 パラメータ（調整済み）
@@ -316,7 +367,6 @@ def parse_odds_bands(bands_str: str, odds_min: float, odds_max: float):
             part = part.strip()
             if not part: continue
             if "-" not in part:
-                # 単点は lo=hi として扱わずスキップ（誤指定防止）
                 continue
             lo_s, hi_s = part.split("-", 1)
             lo = float(lo_s) if lo_s.strip() else float("-inf")
@@ -404,7 +454,6 @@ def evaluate_one(int_path: str, res_path: str, sims: int, unit: int,
         rec = odds_map.get(combo)
         odds = rec["odds"] if rec else None
 
-        # オッズ必須: 帯指定がある or require_odds が True の場合
         if bands:
             if odds is None:
                 continue
@@ -413,10 +462,8 @@ def evaluate_one(int_path: str, res_path: str, sims: int, unit: int,
         elif require_odds and odds is None:
             continue
 
-        # EV しきい値
         if min_ev and min_ev > 0:
             if odds is None:
-                # EVが計算できない → require_oddsがTrueなら除外、Falseなら通す（帯が無い前提）
                 if require_odds:
                     continue
             else:
@@ -483,10 +530,36 @@ def main():
     ap.add_argument("--odds-min", type=float, default=0.0, help="単一レンジの下限（--odds-bands が優先）")
     ap.add_argument("--odds-max", type=float, default=0.0, help="単一レンジの上限（--odds-bands が優先）")
 
+    # ======== （NEW）外部パラメータ上書き引数 ========
+    ap.add_argument("--params", default="", help="パラメータ上書きファイル(.json/.toml)")
+    ap.add_argument("--set", default="", help="個別キー上書き。例: b_dt=17,cK=1.05,base_wake=0.15")
+    # ======== （NEWここまで） ========================
+
     args = ap.parse_args()
 
     if args.exclude_first1 and args.only_first1:
-        raise SystemExit("--exclude-first1 と --only-first1 は同時指定できません")
+        raise SystemExit("--exclude-first1 と --only_first1 は同時指定できません")
+
+    # ======== （NEW）Params に上書きを適用 ========
+    try:
+        if args.params:
+            file_over = load_param_file(args.params)
+            apply_overrides_to_class(Params, file_over)
+        cli_over = parse_set_overrides(args.__dict__.get("set",""))
+        if cli_over:
+            apply_overrides_to_class(Params, cli_over)
+    except Exception as e:
+        raise SystemExit(f"[params] override failed: {e}")
+    # （任意）現在値を保存（監査用途）
+    try:
+        os.makedirs(args.outdir, exist_ok=True)
+        active = {k:getattr(Params,k) for k in dir(Params)
+                  if not k.startswith("_") and isinstance(getattr(Params,k),(int,float,bool))}
+        with open(os.path.join(args.outdir, "active_params.json"), "w", encoding="utf-8") as f:
+            json.dump(active, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+    # ======== （NEWここまで） ========================
 
     # オッズバンドを解釈
     bands = parse_odds_bands(args.odds_bands, args.odds_min, args.odds_max)
