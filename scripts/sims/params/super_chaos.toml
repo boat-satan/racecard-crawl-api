@@ -1,0 +1,27 @@
+# scripts/sims/params/super_chaos.toml
+b_dt = 40.0
+theta = 0.060
+cK = 0.15
+decision_bias_mult = 1.80
+
+p_safe_margin = 0.75
+safe_margin_mu = 0.016
+safe_margin_sigma = 0.010
+
+session_ST_shift_sd = 0.018
+session_A_bias_sd   = 0.45
+k_turn_err = 0.035
+
+base_wake = 0.60
+extra_wake_when_outside = 0.55
+beta_wk   = 0.018
+
+delta_first = 1.60
+delta_lineblock = 1.40
+
+p_backoff = 0.35
+backoff_ST_shift = 0.040
+backoff_A_penalty = 0.45
+
+p_cav = 0.15
+cav_A_penalty = 0.55
