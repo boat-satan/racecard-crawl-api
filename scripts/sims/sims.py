@@ -3,7 +3,7 @@
 # - 統合データ/結果を読み込み（払い戻しは results から参照）
 # - SimS ver1.0 で各レースを N試行シミュ
 # - 買い目を生成（デフォルト: 三連単 TOPN）→ 的中率・ROI算出
-# - 任意: 1着=1号艇の除外/限定、EVフィルタ(確率×オッズ)対応
+# - 任意: 1着=1号艇の除外/限定、EVフィルタ、オッズバンドフィルタ対応
 # - 簡易ヒットレポート出力
 
 import os, json, math, argparse, shutil
@@ -275,7 +275,7 @@ def load_result_for_race(res_path: str):
         with open(res_path, "r", encoding="utf-8") as f:
             return json.load(f)
 
-# ---------- オッズ読込（EVフィルタ用・任意） ----------
+# ---------- オッズ読込（EV/オッズバンド用・任意） ----------
 def load_trifecta_odds(odds_base: str, date: str, pid: str, race: str):
     """public/odds/v1/<date>/<pid>/<race>.json を読み、{combo: {'odds':float,'rank':int}} を返す"""
     try:
@@ -302,6 +302,46 @@ def load_trifecta_odds(odds_base: str, date: str, pid: str, race: str):
         return out
     except Exception:
         return {}
+
+# ---------- オッズバンドユーティリティ ----------
+def parse_odds_bands(bands_str: str, odds_min: float, odds_max: float):
+    """
+    bands_str 例: "01-09,10-19,20-49" / "10-" / "-20" / ""(無効)
+    返り値: [(lo, hi), ...]  (lo/hi は float、閉区間)
+    bands_str が空なら、odds_min/odds_max から単一レンジを作る（両方0/Noneなら無効）
+    """
+    bands = []
+    if bands_str:
+        for part in bands_str.split(","):
+            part = part.strip()
+            if not part: continue
+            if "-" not in part:
+                # 単点は lo=hi として扱わずスキップ（誤指定防止）
+                continue
+            lo_s, hi_s = part.split("-", 1)
+            lo = float(lo_s) if lo_s.strip() else float("-inf")
+            hi = float(hi_s) if hi_s.strip() else float("inf")
+            if math.isfinite(lo) and math.isfinite(hi) and lo > hi:
+                lo, hi = hi, lo
+            bands.append((lo, hi))
+    else:
+        lo = float(odds_min) if odds_min and odds_min>0 else float("-inf")
+        hi = float(odds_max) if odds_max and odds_max>0 else float("inf")
+        if (math.isfinite(lo) or math.isfinite(hi)) and (lo != float("-inf") or hi != float("inf")):
+            if math.isfinite(lo) and math.isfinite(hi) and lo > hi:
+                lo, hi = hi, lo
+            bands.append((lo, hi))
+    return bands
+
+def odds_in_any_band(odds: float, bands: list[tuple[float,float]]) -> bool:
+    if not bands:  # 指定なし
+        return True
+    if odds is None or not math.isfinite(odds):
+        return False
+    for lo, hi in bands:
+        if odds >= lo and odds <= hi:
+            return True
+    return False
 
 # ---------- 買い目生成 ----------
 def generate_tickets(strategy, tri_probs, exacta_probs, third_probs,
@@ -333,7 +373,8 @@ def generate_tickets(strategy, tri_probs, exacta_probs, third_probs,
 def evaluate_one(int_path: str, res_path: str, sims: int, unit: int,
                  strategy: str, topn: int, k: int, m: int,
                  exclude_first1: bool=False, only_first1: bool=False,
-                 odds_base: str=None, min_ev: float=0.0, require_odds: bool=False):
+                 odds_base: str=None, min_ev: float=0.0, require_odds: bool=False,
+                 odds_bands: list[tuple[float,float]] = None):
     # 予測
     with open(int_path, "r", encoding="utf-8") as f:
         d_int = json.load(f)
@@ -344,30 +385,48 @@ def evaluate_one(int_path: str, res_path: str, sims: int, unit: int,
                                topn=topn, k=k, m=m,
                                exclude_first1=exclude_first1, only_first1=only_first1)
 
-    # EVフィルタ（任意）
-    if min_ev and min_ev > 0:
-        # int_path: .../integrated/v1/<date>/<pid>/<race>.json 想定
-        date = pid = race = None
-        try:
-            p = os.path.normpath(int_path).split(os.sep)
-            race = os.path.splitext(p[-1])[0]; pid = p[-2]; date = p[-3]
-        except Exception:
-            pass
-        odds_map = load_trifecta_odds(odds_base, date, pid, race) if odds_base and date and pid and race else {}
+    # オッズ（EV/帯 用）
+    date = pid = race = None
+    odds_map = {}
+    try:
+        p = os.path.normpath(int_path).split(os.sep)
+        race = os.path.splitext(p[-1])[0]; pid = p[-2]; date = p[-3]
+    except Exception:
+        pass
+    if odds_base and date and pid and race:
+        odds_map = load_trifecta_odds(odds_base, date, pid, race)
 
-        kept = []
-        for (key, prob) in tickets:
-            combo = "-".join(map(str, key))
-            rec = odds_map.get(combo)
-            if rec is None:
+    # フィルタ（オッズバンド → EV） ※帯が指定されていてオッズ不明なら除外
+    bands = odds_bands or []
+    kept = []
+    for (key, prob) in tickets:
+        combo = "-".join(map(str, key))
+        rec = odds_map.get(combo)
+        odds = rec["odds"] if rec else None
+
+        # オッズ必須: 帯指定がある or require_odds が True の場合
+        if bands:
+            if odds is None:
+                continue
+            if not odds_in_any_band(odds, bands):
+                continue
+        elif require_odds and odds is None:
+            continue
+
+        # EV しきい値
+        if min_ev and min_ev > 0:
+            if odds is None:
+                # EVが計算できない → require_oddsがTrueなら除外、Falseなら通す（帯が無い前提）
                 if require_odds:
                     continue
-                kept.append((key, prob))
-                continue
-            ev = prob * rec["odds"]  # 100円基準
-            if ev >= min_ev:
-                kept.append((key, prob))
-        tickets = kept
+            else:
+                ev = prob * odds
+                if ev < min_ev:
+                    continue
+
+        kept.append((key, prob))
+
+    tickets = kept
 
     bets = ['-'.join(map(str, key)) for key,_ in tickets]
     stake = unit * len(bets)
@@ -412,14 +471,25 @@ def main():
     ap.add_argument("--m", type=int, default=4, help="exacta_topK_third_topM: 3着TOPM")
     ap.add_argument("--exclude-first1", action="store_true", help="1着=1号艇を除外")
     ap.add_argument("--only-first1", action="store_true", help="1着=1号艇のみ購入")
-    # ★ EVフィルタ（任意）
+
+    # ★ オッズ/EV フィルタ
     ap.add_argument("--odds-base", default="./public/odds/v1", help="オッズJSONのルート")
     ap.add_argument("--min-ev", type=float, default=0.0, help="このEV以上のみ購入 (EV=p*odds)")
     ap.add_argument("--require-odds", action="store_true", help="オッズが無い買い目は除外")
+
+    # ★ オッズバンド指定（複数帯 or 単一レンジ）
+    ap.add_argument("--odds-bands", default="",
+                    help='オッズ帯のホワイトリスト。例: "01-09,10-19,20-49", "50-", "-20"')
+    ap.add_argument("--odds-min", type=float, default=0.0, help="単一レンジの下限（--odds-bands が優先）")
+    ap.add_argument("--odds-max", type=float, default=0.0, help="単一レンジの上限（--odds-bands が優先）")
+
     args = ap.parse_args()
 
     if args.exclude_first1 and args.only_first1:
         raise SystemExit("--exclude-first1 と --only-first1 は同時指定できません")
+
+    # オッズバンドを解釈
+    bands = parse_odds_bands(args.odds_bands, args.odds_min, args.odds_max)
 
     dates = set([d.strip() for d in args.dates.split(",") if d.strip()]) if args.dates else set()
     pids_filter  = set([p.strip() for p in args.pids.split(",") if p.strip()])
@@ -455,9 +525,9 @@ def main():
                                        exclude_first1=args.exclude_first1,
                                        only_first1=args.only_first1)
 
-            # EV情報も一緒に出す（フィルタも適用）
+            # オッズ読み込み
             odds_map = {}
-            if args.min_ev > 0 or args.require_odds:
+            if (args.min_ev > 0) or args.require_odds or bands:
                 odds_map = load_trifecta_odds(args.odds_base, date, pid, race)
 
             out_list = []
@@ -466,11 +536,22 @@ def main():
                 rec = odds_map.get(combo) if odds_map else None
                 odds = rec["odds"] if rec else None
                 ev   = (p * odds) if (odds is not None) else None
+
+                # 帯 → EV の順でフィルタ
+                if bands:
+                    if odds is None or not odds_in_any_band(odds, bands):
+                        continue
+                elif args.require_odds and odds is None:
+                    continue
+
                 if args.min_ev > 0:
-                    if ev is None and args.require_odds:  # オッズ必須
-                        continue
-                    if ev is not None and ev < args.min_ev:
-                        continue
+                    if odds is None:
+                        if args.require_odds:
+                            continue
+                    else:
+                        if ev < args.min_ev:
+                            continue
+
                 out_list.append({"ticket": combo, "score": round(p,6),
                                  "odds": (None if odds is None else float(odds)),
                                  "ev": (None if ev is None else round(ev,6))})
@@ -480,7 +561,11 @@ def main():
                            "engine":"SimS ver1.0 (E1)",
                            "exclude_first1":bool(args.exclude_first1),
                            "only_first1":bool(args.only_first1),
-                           "min_ev": args.min_ev, "require_odds": bool(args.require_odds)},
+                           "min_ev": float(args.min_ev),
+                           "require_odds": bool(args.require_odds),
+                           "odds_bands": args.odds_bands or "",
+                           "odds_min": float(args.odds_min),
+                           "odds_max": float(args.odds_max)},
                           f, ensure_ascii=False, indent=2)
 
             for i, t in enumerate(out_list, 1):
@@ -490,7 +575,7 @@ def main():
 
         pd.DataFrame(rows).to_csv(os.path.join(pred_dir, "predictions_summary.csv"),
                                   index=False, encoding="utf-8")
-        print(f("[predict] candidates: {len(keys)}  -> {pred_dir}"))
+        print(f"[predict] candidates: {len(keys)}  -> {pred_dir}")
         return
 
     # ---- eval ----
@@ -502,7 +587,8 @@ def main():
                           sims=args.sims, unit=args.unit, strategy=args.strategy,
                           topn=args.topn, k=args.k, m=args.m,
                           exclude_first1=args.exclude_first1, only_first1=args.only_first1,
-                          odds_base=args.odds_base, min_ev=args.min_ev, require_odds=args.require_odds)
+                          odds_base=args.odds_base, min_ev=args.min_ev, require_odds=args.require_odds,
+                          odds_bands=bands)
         total_stake += ev["stake"]; total_payout += ev["payout"]
         per_rows.append({"date": date, "pid": pid, "race": race,
                          "bets": len(ev["bets"]), "stake": ev["stake"],
@@ -525,6 +611,9 @@ def main():
         "only_first1": bool(args.only_first1),
         "min_ev": float(args.min_ev),
         "require_odds": bool(args.require_odds),
+        "odds_bands": args.odds_bands or "",
+        "odds_min": float(args.odds_min),
+        "odds_max": float(args.odds_max),
     }
 
     df.to_csv(os.path.join(args.outdir, "per_race_results.csv"), index=False)
