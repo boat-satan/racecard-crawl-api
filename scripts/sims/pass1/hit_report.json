@@ -2,19 +2,19 @@
   "summary": {
     "engine": "SimS ver1.0 (E1)",
     "races": 1254,
-    "bets_total": 14011,
-    "stake_total": 1401100,
-    "payout_total": 1029800,
-    "hit_rate": 0.42105263157894735,
-    "roi": -0.2650060666619085,
+    "bets_total": 30488,
+    "stake_total": 3048800,
+    "payout_total": 2320290,
+    "hit_rate": 0.6180223285486444,
+    "roi": -0.23894975072159538,
     "strategy": "trifecta_topN",
-    "topn": 120,
+    "topn": 30,
     "k": 2,
     "m": 4,
     "sims_per_race": 1200,
     "unit": 100,
     "exclude_first1": false,
-    "only_first1": true,
+    "only_first1": false,
     "min_ev": 0.0,
     "require_odds": true,
     "odds_bands": "",
@@ -22,45 +22,65 @@
     "odds_max": 0.0,
     "pass": "pass1",
     "buy_if_keyman_in_top3": false,
-    "buy_keyman_threshold": 0.95
+    "buy_keyman_threshold": 0.7
   },
   "by_kimarite_est": [],
   "by_first_lane": [
     {
       "first_lane": 1,
-      "hits": 528
+      "hits": 483
+    },
+    {
+      "first_lane": 2,
+      "hits": 118
+    },
+    {
+      "first_lane": 3,
+      "hits": 87
+    },
+    {
+      "first_lane": 4,
+      "hits": 56
+    },
+    {
+      "first_lane": 5,
+      "hits": 22
+    },
+    {
+      "first_lane": 6,
+      "hits": 9
     }
   ],
   "by_odds_band": [
     {
       "odds_band": "01-09",
-      "hits": 194
+      "hits": 216
     },
     {
       "odds_band": "10-19",
-      "hits": 178
+      "hits": 238
     },
     {
       "odds_band": "100-999",
-      "hits": 7
+      "hits": 39
     },
     {
       "odds_band": "20-49",
-      "hits": 124
+      "hits": 206
     },
     {
       "odds_band": "50-99",
-      "hits": 25
+      "hits": 76
     }
   ],
   "by_hit_combo_top10": [
     {
       "hit_combo": "1-2-3",
-      "hits": 60
+      "hits": 58
     },
     {
       "hit_combo": "1-3-4",
-      "hits": 59
+      "hits": 58
     },
     {
       "hit_combo": "1-2-4",
@@ -68,37 +88,37 @@
     },
     {
       "hit_combo": "1-3-2",
-      "hits": 53
+      "hits": 52
     },
     {
       "hit_combo": "1-4-2",
-      "hits": 42
-    },
-    {
-      "hit_combo": "1-2-5",
-      "hits": 32
+      "hits": 41
     },
     {
       "hit_combo": "1-4-3",
-      "hits": 32
+      "hits": 30
+    },
+    {
+      "hit_combo": "1-2-5",
+      "hits": 28
     },
     {
       "hit_combo": "1-3-5",
-      "hits": 32
-    },
-    {
-      "hit_combo": "1-4-5",
-      "hits": 25
+      "hits": 26
     },
     {
       "hit_combo": "1-2-6",
-      "hits": 24
+      "hits": 23
+    },
+    {
+      "hit_combo": "1-4-5",
+      "hits": 20
     }
   ],
   "by_rank_bucket": [
     {
       "rank_bucket": "NA",
-      "hits": 528
+      "hits": 775
     }
   ]
 }
