@@ -1,13 +1,6 @@
+# scripts/predict_trifecta.py
 # -*- coding: utf-8 -*-
-"""
-推論スクリプト（オッズの有無どちらでもOK）
-- 統合JSONと（あれば）オッズJSONを読む
-- 3連単120通り（またはオッズ側の候補）を展開
-- 学習モデルの raw_score → レース内softmax で確率化
-- あればEV（= p * odds）も計算
-- 出力CSV: outputs/trifecta_pred_<date>_<jcd>_<race>.csv
-"""
-import os, json, glob, re
+import os, json, glob, re, argparse
 import numpy as np
 import pandas as pd
 import joblib
@@ -16,7 +9,10 @@ from itertools import permutations
 BASE   = "public"
 INTEG  = os.path.join(BASE, "integrated", "v1")
 ODDS   = os.path.join(BASE, "odds",       "v1")
-OUTDIR = "outputs"
+OUTDIR = os.path.join(BASE, "preds", "v1")
+
+MODEL_PKL = "models/trifecta_lgbm.pkl"
+FEATS_JSON = "models/trifecta_feature_cols.json"  # 予備
 
 def to_float(x):
     if x is None: return None
@@ -131,7 +127,7 @@ def expand_trifecta_rows(integ, odds):
     rows = []
     for item in trifecta_list:
         combo = item.get("combo")
-        if not combo: 
+        if not combo:
             continue
         try:
             F, S, T = map(int, [item.get("F"), item.get("S"), item.get("T")] if item.get("F") is not None else combo.split("-"))
@@ -161,55 +157,68 @@ def softmax_by_group(scores: pd.Series, keys: pd.Series) -> pd.Series:
         return pd.Series(e / e.sum(), index=s.index)
     return scores.groupby(keys).apply(_sm)
 
-def predict_one(model_pack, integ_path, odds_path=None, outdir=OUTDIR):
-    os.makedirs(outdir, exist_ok=True)
-    integ = safe_load(integ_path)
-    odds  = safe_load(odds_path) if odds_path and os.path.exists(odds_path) else {}
+def load_model_and_features():
+    obj = joblib.load(MODEL_PKL)
+    # dict 形式（model + feature_cols）ならそのまま
+    if isinstance(obj, dict) and "model" in obj and "feature_cols" in obj:
+        return obj["model"], obj["feature_cols"]
+    # モデル単体なら feature_cols を別ファイルから
+    if os.path.exists(FEATS_JSON):
+        with open(FEATS_JSON, "r", encoding="utf-8") as f:
+            feats = json.load(f)
+        return obj, feats
+    raise RuntimeError(
+        "モデルは読み込めたが feature_cols が見つからない。"
+        "train 時に feature_cols を保存するか、models/trifecta_feature_cols.json を用意して。"
+    )
 
+def predict_one(model, feat_cols, integ_path, odds_path, outdir):
+    integ = safe_load(integ_path)
+    odds  = safe_load(odds_path) if (odds_path and os.path.exists(odds_path)) else {}
     df = expand_trifecta_rows(integ, odds)
     if df.empty:
         return None
 
-    feature_cols = model_pack["feature_cols"]
-    clf = model_pack["model"]
-
-    # 特徴構築
-    drop_cols = {"combo","odds","popularity_rank","date","jcd","race","weather","windDir"}
-    # 念のため列を揃える
-    for c in feature_cols:
+    # 列揃え
+    for c in feat_cols:
         if c not in df.columns:
             df[c] = 0.0
-    X = df[feature_cols].copy().fillna(0.0).astype(float)
+    X = df[feat_cols].copy().fillna(0.0).astype(float)
 
-    # 予測 → softmax
+    # 予測（raw_score→softmax）
     df["race_key"] = df["date"].astype(str) + "-" + df["jcd"].astype(str) + "-" + df["race"]
-    z = clf.predict(X, raw_score=True)
+    z = model.predict(X, raw_score=True)
     df["score"] = z
     df["p"] = softmax_by_group(df["score"], df["race_key"])
-
-    # EV（オッズがある行のみ）
     has_odds = df["odds"].notna()
     df.loc[has_odds, "EV"] = df.loc[has_odds, "p"] * df.loc[has_odds, "odds"]
 
-    # 出力
-    date = df.iloc[0]["date"]; jcd = df.iloc[0]["jcd"]; race = df.iloc[0]["race"]
-    out = df[["date","jcd","race","combo","F","S","T","odds","p","EV","popularity_rank"]].copy()
-    out = out.sort_values("p", ascending=False)
-    out_path = os.path.join(outdir, f"trifecta_pred_{date}_{jcd}_{race}.csv")
+    # 保存
+    date = str(df.iloc[0]["date"]); jcd = str(df.iloc[0]["jcd"]); race = str(df.iloc[0]["race"])
+    outdir2 = os.path.join(outdir, date, jcd)
+    os.makedirs(outdir2, exist_ok=True)
+    out = df[["date","jcd","race","combo","F","S","T","odds","p","EV","popularity_rank"]].sort_values("p", ascending=False)
+    out_path = os.path.join(outdir2, f"trifecta_pred_{date}_{jcd}_{race}.csv")
     out.to_csv(out_path, index=False, encoding="utf-8")
-    print(f"Saved: {out_path}")
+    print("Saved:", out_path)
     return out_path
 
 def main():
-    model_pack = joblib.load("models/trifecta_lgbm.pkl")
-    # 例: 全日全場走査（オッズはあれば読む）
-    for integ_path in sorted(glob.glob(os.path.join(INTEG, "*", "*", "*.json"))):
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--date", required=True)
+    ap.add_argument("--jcd",  required=True)
+    ap.add_argument("--race", default="")
+    args = ap.parse_args()
+
+    model, feat_cols = load_model_and_features()
+
+    race_pat = f"{args.race}.json" if args.race else "*.json"
+    integ_glob = os.path.join(INTEG, args.date, args.jcd, race_pat)
+    for integ_path in sorted(glob.glob(integ_glob)):
         fname = os.path.basename(integ_path)
-        date  = os.path.basename(os.path.dirname(os.path.dirname(integ_path)))
-        jcd   = os.path.basename(os.path.dirname(integ_path))
-        odds_path = os.path.join(ODDS, date, jcd, fname)
+        odds_path = os.path.join(ODDS, args.date, args.jcd, fname)
         try:
-            predict_one(model_pack, integ_path, odds_path if os.path.exists(odds_path) else None)
+            predict_one(model, feat_cols, integ_path, odds_path, OUTDIR)
         except Exception as e:
             print("skip:", integ_path, e)
 
