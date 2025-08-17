@@ -1,60 +1,77 @@
+# scripts/TENKAI/build_c_features.py
 # -*- coding: utf-8 -*-
 """
-integrated/v1 を走査して C(編成・相対)特徴をレースごとCSVで出力
-出力: public/TENKAI/features_c/v1/<date>/<pid>/<race>.csv
+integrated/v1 を走査して C(編成・相対)特徴を CSV に出力
+- 入力: --date YYYYMMDD, --pid 02 など、--race (例: 1R) は任意
+- 走査対象: public/integrated/v1/<date>/<pid>/<race or *.json>
+- 出力:  public/TENKAI/features_c/v1/features_c.csv
 """
-import os, glob, json, csv, sys, argparse
+import os
+import glob
+import json
+import csv
+import argparse
 
-# TENKAI 配下の自作モジュールを import
-sys.path.append(os.path.dirname(__file__))
-from features_c import build_c_features  # build_c_features(integ_json) -> dict(1行)
+# 同ディレクトリの features_c.py を利用
+from features_c import build_c_features
 
-BASE   = "public"
-INTEG  = os.path.join(BASE, "integrated", "v1")
-OUTRT  = os.path.join(BASE, "TENKAI", "features_c", "v1")
+BASE = "public"
+INTEG = os.path.join(BASE, "integrated", "v1")
 
-def _safe_load(p):
-    with open(p, encoding="utf-8") as f:
+# ✅ workflow と揃える（大文字の TENKAI）
+OUTDIR = os.path.join(BASE, "TENKAI", "features_c", "v1")
+OUTCSV = os.path.join(OUTDIR, "features_c.csv")
+
+
+def _safe_load(path: str):
+    with open(path, encoding="utf-8") as f:
         return json.load(f)
 
-def _write_one_row_csv(out_path: str, row: dict):
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    # 安定順: まず date/pid/race を先頭、その後はキー昇順
-    head = ["date", "pid", "race"]
-    rest = sorted([k for k in row.keys() if k not in head])
-    cols = [c for c in head if c in row] + rest
-    with open(out_path, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=cols)
-        w.writeheader()
-        w.writerow(row)
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--date", required=True, help="YYYYMMDD")
-    ap.add_argument("--pid",  required=True, help="場コード (例: 02)")
-    ap.add_argument("--race", default="",  help="例: 1R 空なら全R")
+    ap.add_argument("--date", required=True, help="対象日 YYYYMMDD")
+    ap.add_argument("--pid",  required=True, help="場コード pid (例: 02)")
+    ap.add_argument("--race", default="",   help="レース名 (例: 1R) 空なら全R")
     args = ap.parse_args()
 
-    # 走査対象を絞り込み
+    # 走査パスを組み立て
     race_pat = f"{args.race}.json" if args.race else "*.json"
-    paths = sorted(glob.glob(os.path.join(INTEG, args.date, args.pid, race_pat)))
+    glob_pat = os.path.join(INTEG, args.date, args.pid, race_pat)
+    paths = sorted(glob.glob(glob_pat))
+
     if not paths:
-        print("no targets:", os.path.join(INTEG, args.date, args.pid, race_pat))
+        print(f"no targets: {glob_pat}")
         return
 
+    os.makedirs(OUTDIR, exist_ok=True)
+
+    rows = []
     for p in paths:
         try:
             integ = _safe_load(p)
-            row = build_c_features(integ)  # 1レース=1行の辞書
-            # 出力パス
-            date = str(integ.get("date"))
-            pid  = str(integ.get("pid"))
-            race = str(integ.get("race"))
-            out_path = os.path.join(OUTRT, date, pid, f"{race}.csv")
-            _write_one_row_csv(out_path, row)
-            print("saved:", out_path)
+            row = build_c_features(integ)   # features_c.py が dict を返す想定
+            if isinstance(row, dict):
+                rows.append(row)
+            else:
+                print("skip (not dict):", p)
         except Exception as e:
             print("skip:", p, e)
+
+    if not rows:
+        print("no rows.")
+        return
+
+    # 列順は最初の行のキー順に合わせる（安定しない場合はここで並べ替え定義）
+    cols = list(rows[0].keys())
+
+    with open(OUTCSV, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=cols)
+        w.writeheader()
+        for r in rows:
+            w.writerow(r)
+
+    print(f"saved: {OUTCSV} ({len(rows)} rows)")
 
 if __name__ == "__main__":
     main()
