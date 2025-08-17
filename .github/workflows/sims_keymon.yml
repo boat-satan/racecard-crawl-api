@@ -17,7 +17,8 @@ on:
           追加フィルタ（;区切り）。
           例: pids=02,04;races=1R,2R;only_first1=true;
               odds_bands=01-09,10-19,20-49;require_odds=false;predict_only=false;
-              keyman_enable=true;keyman_threshold=0.7;keyman_boost=0.15;keyman_aggr=0.6
+              keyman_enable=true;keyman_threshold=0.7;keyman_boost=0.15;keyman_aggr=0.6;
+              buy_if_keyman_in_top3=true;buy_keyman_threshold=0.8
         required: false
         default: ""
 
@@ -79,10 +80,14 @@ jobs:
           PREDICT_ONLY="false"
 
           # ▼ keyman 制御（filter で上書き可能）
-          KEYMAN_ENABLE_IN="true"     # 既定: ON
-          KEYMAN_THRESHOLD="0.8"      # 既定: 0.9（例に合わせる）
-          KEYMAN_BOOST="1.00"         # 既定: 4.15（例に合わせる）
-          KEYMAN_AGGR="1.0"           # ★追加: 展開寄与率（0〜1目安）
+          KEYMAN_ENABLE_IN="true"
+          KEYMAN_THRESHOLD="0.8"
+          KEYMAN_BOOST="1.00"
+          KEYMAN_AGGR="1.0"
+
+          # ▼ NEW: キーマン買い目フィルター（filter で上書き）
+          BUY_KM_FILTER="false"
+          BUY_KM_THR=""
 
           # ===== Parse FILTER (lowercase keys) =====
           if [ -n "$FILTER" ]; then
@@ -91,20 +96,23 @@ jobs:
               key="$(echo "${kv%%=*}" | tr '[:upper:]' '[:lower:]')"
               val="${kv#*=}"
               case "$key" in
-                pids)             PIDS="$val" ;;
-                races)            RACES="$val" ;;
-                only_first1)      ONLY="$val" ;;
-                odds_base)        ODDS_BASE="$val" ;;
-                min_ev)           MIN_EV="${MIN_EV:-$val}" ;;
-                require_odds)     REQUIRE_ODDS="$val" ;;
-                odds_bands)       ODDS_BANDS="$val" ;;
-                odds_min)         ODDS_MIN="${ODDS_MIN:-$val}" ;;
-                odds_max)         ODDS_MAX="${ODDS_MAX:-$val}" ;;
-                predict_only)     PREDICT_ONLY="$val" ;;
-                keyman_enable)    KEYMAN_ENABLE_IN="$val" ;;
-                keyman_threshold) KEYMAN_THRESHOLD="$val" ;;
-                keyman_boost)     KEYMAN_BOOST="$val" ;;
-                keyman_aggr)      KEYMAN_AGGR="$val" ;;   # ★追加
+                pids)                   PIDS="$val" ;;
+                races)                  RACES="$val" ;;
+                only_first1)            ONLY="$val" ;;
+                odds_base)              ODDS_BASE="$val" ;;
+                min_ev)                 MIN_EV="${MIN_EV:-$val}" ;;
+                require_odds)           REQUIRE_ODDS="$val" ;;
+                odds_bands)             ODDS_BANDS="$val" ;;
+                odds_min)               ODDS_MIN="${ODDS_MIN:-$val}" ;;
+                odds_max)               ODDS_MAX="${ODDS_MAX:-$val}" ;;
+                predict_only)           PREDICT_ONLY="$val" ;;
+                keyman_enable)          KEYMAN_ENABLE_IN="$val" ;;
+                keyman_threshold)       KEYMAN_THRESHOLD="$val" ;;
+                keyman_boost)           KEYMAN_BOOST="$val" ;;
+                keyman_aggr)            KEYMAN_AGGR="$val" ;;
+                # --- NEW: キーマン買い目フィルター ---
+                buy_if_keyman_in_top3)  BUY_KM_FILTER="$val" ;;
+                buy_keyman_threshold)   BUY_KM_THR="$val" ;;
               esac
             done
           fi
@@ -150,11 +158,20 @@ jobs:
           # ▼ keyman 制御（sims.py が pass2 実行/しきい値/ブースト/寄与率を解釈）
           ARGS+=( --keyman-enable "$KEYMAN_ENABLE_IN" --keyman-threshold "$KEYMAN_THRESHOLD" --keyman-boost "$KEYMAN_BOOST" --keyman-aggr "$KEYMAN_AGGR" )
 
+          # ▼ NEW: キーマン買い目フィルターを sims.py に伝える
+          if [ "${BUY_KM_FILTER,,}" = "true" ]; then
+            ARGS+=( --buy-if-keyman-in-top3 )
+          fi
+          if [ -n "$BUY_KM_THR" ]; then
+            ARGS+=( --buy-keyman-threshold "$BUY_KM_THR" )
+          fi
+
           echo "[debug] BASE=$BASE"
           echo "[debug] DATES=${DATES:-'(none)'}  SIMS=$SIMS  TOPN=$TOPN  UNIT=$UNIT"
           echo "[debug] ODDS_BASE=$ODDS_BASE  ODDS_BANDS=${ODDS_BANDS:-'(none)'}  ODDS_MIN=${ODDS_MIN:-'(none)'}  ODDS_MAX=${ODDS_MAX:-'(none)'}"
           echo "[debug] MIN_EV=${MIN_EV:-'(none)'}  REQUIRE_ODDS=$REQUIRE_ODDS  ONLY_FIRST1=$ONLY  PREDICT_ONLY=$PREDICT_ONLY"
           echo "[debug] KEYMAN_ENABLE=$KEYMAN_ENABLE_IN  KEYMAN_THRESHOLD=$KEYMAN_THRESHOLD  KEYMAN_BOOST=$KEYMAN_BOOST  KEYMAN_AGGR=$KEYMAN_AGGR"
+          echo "[debug] BUY_IF_KEYMAN_IN_TOP3=${BUY_KM_FILTER}  BUY_KEYMAN_THRESHOLD=${BUY_KM_THR:-'(default in sims.py)'}"
           echo "[debug] PARAMS=${PARAMS_NAME:-'(none)'} -> ${PARAMS_PATH:-'(n/a)'}"
           echo "[debug] args: ${ARGS[*]}"
 
