@@ -1,259 +1,149 @@
 # -*- coding: utf-8 -*-
 """
-TENKAI: C(編成・相対)特徴のみを抽出
-- 入力: integrated/v1 の1レース dict
-- 出力: 1レース=1行の特徴 dict
-※ ボート/モーターは使わない
+TENKAI C-features builder
+- integrated/v1 の 1レース分 dict を受け取り、編成・相対特徴の1行 dict を返す
+- ボート/モーターの素性は含めない（依頼どおり）
+- 決まり手カウントは「抜き」「恵まれ」を除外
 """
+
+from typing import Dict, Any, List
 import math
-import json
-import numpy as np
 
-# ── 小道具 ────────────────────────────────────────────────────────────────
-def _to_float(x):
+EXCLUDE_KIMARITE = {"抜き", "恵まれ"}
+
+def _nan_to_none(x):
+    # pandas未使用の軽い正規化
+    if x is None:
+        return None
     try:
-        return float(x) if x is not None else np.nan
-    except:
-        return np.nan
+        if isinstance(x, float) and math.isnan(x):
+            return None
+    except Exception:
+        pass
+    return x
 
-def _ratio(n, d):
-    n = _to_float(n); d = _to_float(d)
-    if d is None or math.isnan(d) or d <= 0: return 0.0
-    n = 0.0 if n is None or math.isnan(n) else n
-    return float(n)/float(d)
+def _get(d: Dict, *keys, default=None):
+    cur = d
+    for k in keys:
+        if cur is None:
+            return default
+        cur = cur.get(k)
+    return default if cur is None else cur
 
-def _get_entry_by_lane(integ, lane):
-    for e in integ.get("entries", []):
-        if int(e.get("lane")) == lane:
-            return e
-    return {}
+def _num(x):
+    try:
+        return float(x)
+    except Exception:
+        return None
 
-def _ec(e):
-    return ((e.get("stats") or {}).get("entryCourse")) or {}
+def _lane_stat(entry: Dict) -> Dict[str, Any]:
+    rc = entry.get("racecard", {}) or {}
+    ec = (_get(entry, "stats", "entryCourse") or {}) if entry.get("stats") else {}
 
-def _ss(e):
-    return (_ec(e).get("selfSummary")) or {}
+    # 決まり手（自艇勝ち/負け）から「抜き」「恵まれ」を除外して合計
+    win_k = {k: int(v) for k, v in (ec.get("winKimariteSelf") or {}).items()
+             if k not in EXCLUDE_KIMARITE}
+    lose_k = {k: int(v) for k, v in (ec.get("loseKimarite") or {}).items()
+              if k not in EXCLUDE_KIMARITE}
+    win_sum  = sum(win_k.values())
+    lose_sum = sum(lose_k.values())
 
-def _winK(e):
-    # 決まり手（抜き・恵まれは除外）
-    wk = (_ec(e).get("winKimariteSelf")) or {}
-    return {
-        "逃げ": int(wk.get("逃げ", 0) or 0),
-        "差し": int(wk.get("差し", 0) or 0),
-        "まくり": int(wk.get("まくり", 0) or 0),
-        "まくり差し": int(wk.get("まくり差し", 0) or 0),
-    }
+    ss = ec.get("selfSummary") or {}
+    ms = ec.get("matrixSelf") or {}
 
-def _loseK(e):
-    lk = (_ec(e).get("loseKimarite")) or {}
-    # ここも抜き・恵まれは度外視
-    return {
-        "逃げ": int(lk.get("逃げ", 0) or 0),
-        "差し": int(lk.get("差し", 0) or 0),
-        "まくり": int(lk.get("まくり", 0) or 0),
-        "まくり差し": int(lk.get("まくり差し", 0) or 0),
-    }
+    out = dict(
+        startCourse=_get(entry, "startCourse"),
+        classNumber=_get(rc, "classNumber"),
+        age=_get(rc, "age"),
+        avgST_rc=_num(_get(rc, "avgST")),
+        flying=_get(rc, "flyingCount"),
+        late=_get(rc, "lateCount"),
+        ec_avgST=_num(_get(ec, "avgST")),
+        ss_starts=_get(ss, "starts"),
+        ss_first=_get(ss, "firstCount"),
+        ss_second=_get(ss, "secondCount"),
+        ss_third=_get(ss, "thirdCount"),
+        ms_winRate=_num(_get(ms, "winRate")),
+        ms_top2Rate=_num(_get(ms, "top2Rate")),
+        ms_top3Rate=_num(_get(ms, "top3Rate")),
+        win_k_count=win_sum,
+        lose_k_count=lose_sum,
+    )
+    return out
 
-def _rc(e):
-    return e.get("racecard") or {}
+def _mean(values: List[float]) -> float:
+    xs = [float(v) for v in values if v is not None]
+    return sum(xs) / len(xs) if xs else 0.0
 
-def _val_pref_rc_then_ec_avgST(e):
-    # STはレースカードavgSTを優先、無ければコース別avgST
-    v = _to_float(_rc(e).get("avgST"))
-    if v is None or math.isnan(v):
-        v = _to_float(_ec(e).get("avgST"))
-    return v
+def _rank(values: List[float], asc=True) -> List[int]:
+    # Noneは末尾に
+    arr = [(i, v) for i, v in enumerate(values)]
+    arr.sort(key=lambda t: (t[1] is None, t[1]), reverse=not asc)
+    rank = [0]*len(values)
+    for r, (i, _) in enumerate(arr, start=1):
+        rank[i] = r
+    return rank
 
-# ── 主処理 ────────────────────────────────────────────────────────────────
-def build_c_features(integ: dict) -> dict:
-    """1レースのC特徴量を返す（dict）"""
-    # レース基本
-    date = str(integ.get("date") or "")
-    pid  = str(integ.get("pid") or "")
-    race = str(integ.get("race") or "")
-
-    # 6艇分を配列化
-    lanes = range(1, 7)
-    ST = []
-    cls = []
-    age = []
-    late = []
-    fly = []
-    natTop3 = []
-    locTop3 = []
-
-    # 決まり手系
-    starts = []
-    win_1_escape = []   # 1枠の逃げなど個別で使うので lane=1等は別算出もする
-    win_2_sashi  = []
-    win_3_makuri = []
-
-    # for outer pressure, etc.
-    win_makuri_outer = []
-    win_makurizashi_outer = []
-
-    # lose for lane=1
-    lose1_sashi = lose1_makuri = lose1_makurizashi = 0
-    starts1 = 0
-
-    for L in lanes:
-        e = _get_entry_by_lane(integ, L)
-        rc = _rc(e)
-        ec = _ec(e)
-        ss = _ss(e)
-        wk = _winK(e)
-        lk = _loseK(e)
-
-        ST.append(_val_pref_rc_then_ec_avgST(e))
-        cls.append(_to_float(rc.get("classNumber")))
-        age.append(_to_float(rc.get("age")))
-        late.append(_to_float(rc.get("lateCount")))
-        fly.append(_to_float(rc.get("flyingCount")))
-        natTop3.append(_to_float(rc.get("natTop3")))
-        locTop3.append(_to_float(rc.get("locTop3")))
-        starts.append(_to_float(ss.get("starts")))
-
-        if L == 1:
-            win_1_escape.append(wk["逃げ"])
-            lose1_sashi = _to_float((_loseK(e)).get("差し"))
-            lose1_makuri = _to_float((_loseK(e)).get("まくり"))
-            lose1_makurizashi = _to_float((_loseK(e)).get("まくり差し"))
-            starts1 = _to_float(ss.get("starts"))
-        if L == 2:
-            win_2_sashi.append(wk["差し"])
-        if L == 3:
-            win_3_makuri.append(wk["まくり"])
-        if L in (4,5,6):
-            win_makuri_outer.append(wk["まくり"])
-            win_makurizashi_outer.append(wk["まくり差し"])
-
-    # numpy 化（NaN安全）
-    ST = np.array(ST, dtype=float)
-    cls = np.array(cls, dtype=float)
-    age = np.array(age, dtype=float)
-    late = np.array(late, dtype=float)
-    fly = np.array(fly, dtype=float)
-    natTop3 = np.array(natTop3, dtype=float)
-    locTop3 = np.array(locTop3, dtype=float)
-
-    # 基本統計
-    ST_min = np.nanmin(ST) if np.isfinite(ST).any() else np.nan
-    ST_max = np.nanmax(ST) if np.isfinite(ST).any() else np.nan
-    ST_range = ST_max - ST_min if np.isfinite(ST_min) and np.isfinite(ST_max) else np.nan
-    ST_spread = np.nanstd(ST) if np.isfinite(ST).any() else np.nan
-
-    # 内外グループ
-    inner_idx = np.array([0,1,2])  # lanes 1-3
-    outer_idx = np.array([3,4,5])  # lanes 4-6
-
-    def _mean_safe(arr, idx):
-        v = arr[idx]
-        return float(np.nanmean(v)) if np.isfinite(v).any() else np.nan
-
-    ST_inner = _mean_safe(ST, inner_idx)
-    ST_outer = _mean_safe(ST, outer_idx)
-    # 平均STは小さいほど速いので「内有利を＋」にしたいなら outer - inner
-    inner_ST_adv = (ST_outer - ST_inner) if (np.isfinite(ST_inner) and np.isfinite(ST_outer)) else np.nan
-
-    cls_inner = _mean_safe(cls, inner_idx)
-    cls_outer = _mean_safe(cls, outer_idx)
-    class_inner_minus_outer = cls_inner - cls_outer if (np.isfinite(cls_inner) and np.isfinite(cls_outer)) else np.nan
-
-    proA_inner = _mean_safe(natTop3, inner_idx)
-    proA_outer = _mean_safe(natTop3, outer_idx)
-    proA_gap_inner_outer = proA_inner - proA_outer if (np.isfinite(proA_inner) and np.isfinite(proA_outer)) else np.nan
-
-    loc_inner = _mean_safe(locTop3, inner_idx)
-    loc_outer = _mean_safe(locTop3, outer_idx)
-    local_bias_inner = loc_inner - loc_outer if (np.isfinite(loc_inner) and np.isfinite(loc_outer)) else np.nan
-
-    # 率系（分母 starts）
-    in_win_trait = _ratio(sum(win_1_escape or [0]), starts1)
-    two_sashi_trait = _ratio(sum(win_2_sashi or [0]), starts[1] if len(starts)>1 else 0)
-    three_makuri_trait = _ratio(sum(win_3_makuri or [0]), starts[2] if len(starts)>2 else 0)
-
-    outer_makuri_pressure = _ratio(sum(win_makuri_outer)+sum(win_makurizashi_outer), np.nansum(starts[3:6]) if len(starts)>=6 else 0)
-
-    in_vulnerability = _ratio(
-        (lose1_sashi or 0) + (lose1_makuri or 0) + (lose1_makurizashi or 0),
-        starts1
+def build_c_features(integ: Dict[str, Any]) -> Dict[str, Any]:
+    # 基本メタ
+    meta = dict(
+        date=str(integ.get("date")),
+        pid=str(integ.get("pid")),
+        race=str(integ.get("race")),
     )
 
-    # 攻め要員・リスク
-    attackers_exist_outer = int(np.nansum((ST[3:6] <= 0.14).astype(int))) if len(ST)>=6 else 0
-    late_risk_inner = int(np.nansum(late[0:3])) if len(late)>=3 else 0
-    flying_risk_outer = int(np.nansum(fly[3:6])) if len(fly)>=6 else 0
+    # レーンごとの素性収集
+    lanes = {int(e["lane"]): _lane_stat(e) for e in integ.get("entries", [])}
 
-    # スタイル相性
-    style_match_2on1 = two_sashi_trait - in_win_trait
-    style_match_3on1 = three_makuri_trait - in_win_trait
+    # 相対量のために全レーン配列化
+    avgst_rc_list = [lanes.get(i, {}).get("avgST_rc") for i in range(1, 7)]
+    age_list      = [lanes.get(i, {}).get("age")      for i in range(1, 7)]
+    cls_list      = [lanes.get(i, {}).get("classNumber") for i in range(1, 7)]
 
-    # 荒れ/総合シグナル（係数は最初は1.0固定）
-    outer_takeover_signal = outer_makuri_pressure + (ST_spread if np.isfinite(ST_spread) else 0.0)
+    m_avgst = _mean(avgst_rc_list)
+    m_age   = _mean(age_list)
+    m_cls   = _mean(cls_list)
 
-    # 上位集中度
-    nat_sorted = np.sort(natTop3[~np.isnan(natTop3)])[::-1]
-    if len(nat_sorted) >= 3:
-        top2_mean = float(np.mean(nat_sorted[:2]))
-        rest_mean = float(np.mean(nat_sorted[2:])) if len(nat_sorted[2:]) > 0 else 0.0
-        top3_concentration = top2_mean - rest_mean
-    else:
-        top3_concentration = 0.0
+    # ランク（avgSTは小さいほど速い → asc=True）
+    r_avgst = _rank(avgst_rc_list, asc=True)
+    r_age   = _rank(age_list, asc=False)     # 年齢は大きいほどランク上位にしないので降順=Falseにするならasc=False
+    r_cls   = _rank(cls_list, asc=False)     # 級は数字小さいほど上位ではないため、相対序数として降順ランク
 
-    # 年齢の若手優位（下位=若手）
-    age_sorted = np.sort(age[~np.isnan(age)])
-    if len(age_sorted) >= 4:
-        youth_vs_experience = float(np.mean(age_sorted[:2]) - np.mean(age_sorted[-2:]))  # 若手優位ならマイナスに出やすい
-    else:
-        youth_vs_experience = 0.0
+    # 出力1行にフラット化
+    row = {}
+    row.update(meta)
 
-    # 代表的ペアのST差（3起点/4起点）
-    pair_ST_delta_13 = float(ST[2]-ST[0]) if len(ST)>=3 and np.isfinite(ST[2]) and np.isfinite(ST[0]) else np.nan
-    pair_ST_delta_14 = float(ST[3]-ST[0]) if len(ST)>=4 and np.isfinite(ST[3]) and np.isfinite(ST[0]) else np.nan
+    for i in range(1, 7):
+        li = lanes.get(i, {})
+        p = f"L{i}"
+        row[f"{p}_startCourse"] = _nan_to_none(li.get("startCourse"))
+        row[f"{p}_class"]       = _nan_to_none(li.get("classNumber"))
+        row[f"{p}_age"]         = _nan_to_none(li.get("age"))
+        row[f"{p}_avgST_rc"]    = _nan_to_none(li.get("avgST_rc"))
+        row[f"{p}_ec_avgST"]    = _nan_to_none(li.get("ec_avgST"))
+        row[f"{p}_flying"]      = _nan_to_none(li.get("flying"))
+        row[f"{p}_late"]        = _nan_to_none(li.get("late"))
+        row[f"{p}_ss_starts"]   = _nan_to_none(li.get("ss_starts"))
+        row[f"{p}_ss_first"]    = _nan_to_none(li.get("ss_first"))
+        row[f"{p}_ss_second"]   = _nan_to_none(li.get("ss_second"))
+        row[f"{p}_ss_third"]    = _nan_to_none(li.get("ss_third"))
+        row[f"{p}_ms_winRate"]  = _nan_to_none(li.get("ms_winRate"))
+        row[f"{p}_ms_top2Rate"] = _nan_to_none(li.get("ms_top2Rate"))
+        row[f"{p}_ms_top3Rate"] = _nan_to_none(li.get("ms_top3Rate"))
+        row[f"{p}_win_k"]       = _nan_to_none(li.get("win_k_count"))
+        row[f"{p}_lose_k"]      = _nan_to_none(li.get("lose_k_count"))
 
-    # カオス指数（暫定）
-    class_std = float(np.nanstd(cls)) if np.isfinite(cls).any() else 0.0
-    chaos_index = (ST_spread if np.isfinite(ST_spread) else 0.0) + class_std + (in_vulnerability or 0.0) - (proA_gap_inner_outer if (proA_gap_inner_outer is not None) else 0.0)
+        # 相対・ランク
+        row[f"{p}_d_avgST_rc"]  = _nan_to_none((li.get("avgST_rc") or 0) - m_avgst)
+        row[f"{p}_d_age"]       = _nan_to_none((li.get("age") or 0) - m_age)
+        row[f"{p}_d_class"]     = _nan_to_none((li.get("classNumber") or 0) - m_cls)
+        row[f"{p}_rank_avgST"]  = r_avgst[i-1]
+        row[f"{p}_rank_age"]    = r_age[i-1]
+        row[f"{p}_rank_class"]  = r_cls[i-1]
 
-    # lane別 natTop3 ランク（1=最強）
-    nat_valid = natTop3.copy()
-    order = np.argsort(-np.nan_to_num(nat_valid, nan=-1e9))
-    ranks = np.empty_like(order)
-    ranks[order] = np.arange(1, len(order)+1)
+    # レース全体の集約（平均）
+    row["mean_avgST_rc"] = m_avgst
+    row["mean_age"]      = m_age
+    row["mean_class"]    = m_cls
 
-    out = {
-        "date": date, "pid": pid, "race": race,
-
-        "c_ST_min": ST_min, "c_ST_max": ST_max, "c_ST_range": ST_range, "c_ST_spread": ST_spread,
-        "c_inner_ST_adv": inner_ST_adv,  # (+)で内が速い（outer - inner）
-
-        "c_class_inner_minus_outer": class_inner_minus_outer,
-        "c_proA_gap_inner_outer": proA_gap_inner_outer,
-        "c_local_bias_inner": local_bias_inner,
-
-        "c_in_win_trait": in_win_trait,
-        "c_two_sashi_trait": two_sashi_trait,
-        "c_three_makuri_trait": three_makuri_trait,
-        "c_outer_makuri_pressure": outer_makuri_pressure,
-        "c_in_vulnerability": in_vulnerability,
-
-        "c_attackers_exist_outer": attackers_exist_outer,
-        "c_late_risk_inner": late_risk_inner,
-        "c_flying_risk_outer": flying_risk_outer,
-
-        "c_style_match_2on1": style_match_2on1,
-        "c_style_match_3on1": style_match_3on1,
-        "c_outer_takeover_signal": outer_takeover_signal,
-
-        "c_top3_concentration": top3_concentration,
-        "c_youth_vs_experience": youth_vs_experience,
-        "c_pair_ST_delta_13": pair_ST_delta_13,
-        "c_pair_ST_delta_14": pair_ST_delta_14,
-        "c_chaos_index": chaos_index,
-    }
-
-    # lane別 natTop3 ランク
-    for i, r in enumerate(ranks, start=1):
-        out[f"c_natTop3_rank_L{i}"] = int(r) if np.isfinite(r) else 999
-
-    return out
+    return row
