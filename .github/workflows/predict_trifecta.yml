@@ -1,4 +1,3 @@
-# .github/workflows/predict.yml
 name: Predict trifecta
 
 on:
@@ -7,7 +6,7 @@ on:
       date:
         description: '対象日 (YYYYMMDD)'
         required: true
-      jcd:
+      pid:
         description: '場コード (例: 02)'
         required: true
       race:
@@ -47,7 +46,7 @@ jobs:
           fi
           python scripts/predict_trifecta.py \
             --date ${{ github.event.inputs.date }} \
-            --jcd  ${{ github.event.inputs.jcd }} \
+            --pid  ${{ github.event.inputs.pid }} \
             $RACE_OPT
 
       - name: Commit predictions
@@ -55,14 +54,12 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add public/preds/** || true
-          git diff --cached --quiet || git commit -m "Add trifecta predictions (${{ github.event.inputs.date }} ${{ github.event.inputs.jcd }} ${{ github.event.inputs.race }})"
-          # 競合回避（不要なら削除可）
-          git pull --rebase || true
-          git push || true
+          git diff --cached --quiet || git commit -m "Add trifecta predictions (${{ github.event.inputs.date }} ${{ github.event.inputs.pid }} ${{ github.event.inputs.race }})"
+          git push
 
       - name: Upload prediction artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: trifecta-preds-${{ github.event.inputs.date }}-${{ github.event.inputs.jcd }}${{ github.event.inputs.race && format('-{0}', github.event.inputs.race) || '' }}
+          name: trifecta-preds-${{ github.event.inputs.date }}-${{ github.event.inputs.pid }}${{ github.event.inputs.race && format('-{0}', github.event.inputs.race) || '' }}
           path: public/preds/**
           if-no-files-found: warn
