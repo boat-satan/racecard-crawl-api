@@ -32,7 +32,7 @@ def load_param_file(path: str) -> dict:
     if ext == ".toml":
         if tomllib is None:
             raise RuntimeError("tomlファイルを読むには Python 3.11 以上が必要です")
-        with open(p, "rb", encoding="utf-8") as f:
+        with open(p, "rb") as f:
             return tomllib.load(f)
     raise ValueError(f"Unsupported params file extension: {ext} (use .json or .toml)")
 
