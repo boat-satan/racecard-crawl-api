@@ -18,7 +18,7 @@ def safe_load(path):
         return json.load(f)
 
 def collect_entry_features(integ_json):
-    """出走表から基本特徴（選手名/レーンなど）を抜き出し"""
+    """出走表から基本特徴（選手名/レーン＋天候）を抜き出し"""
     entries = integ_json.get('entries', []) or []
     feat = {}
     for e in entries:
@@ -27,14 +27,14 @@ def collect_entry_features(integ_json):
         name = rc.get('name')
         if lane is not None and name is not None:
             feat[f'lane_{lane}_name'] = name
-    # 場・天候など（あれば）
+
     weather = (integ_json.get('weather') or {})
-    feat['weather'] = weather.get('weather')
-    feat['temperature'] = weather.get('temperature')
-    feat['windSpeed'] = weather.get('windSpeed')
-    feat['windDirection'] = weather.get('windDirection')
+    feat['weather']          = weather.get('weather')
+    feat['temperature']      = weather.get('temperature')
+    feat['windSpeed']        = weather.get('windSpeed')
+    feat['windDirection']    = weather.get('windDirection')
     feat['waterTemperature'] = weather.get('waterTemperature')
-    feat['waveHeight'] = weather.get('waveHeight')
+    feat['waveHeight']       = weather.get('waveHeight')
     return feat
 
 def main():
@@ -64,19 +64,15 @@ def main():
 
                 # 必須ファイルが無いケースはスキップ
                 if not (os.path.exists(odds_path) and os.path.exists(result_path)):
-                    # 必要ならログを出す
                     # print(f'Skip: odds/results missing for {date}/{jcd}/{race}')
                     continue
 
                 try:
                     integ = safe_load(integ_path)
-                except Exception:
-                    # 破損などはスキップ
-                    continue
-                try:
                     odds_data = safe_load(odds_path)
                     result = safe_load(result_path)
                 except Exception:
+                    # 壊れている/読み取れないファイルはスキップ
                     continue
 
                 # 出走表→特徴量
@@ -93,13 +89,13 @@ def main():
                 trifecta = odds_data.get('trifecta') or []
                 for item in trifecta:
                     combo = item.get('combo')
-                    if combo is None:
+                    if not combo:
                         continue
                     rec = {
-                        'date': date,          # YYYYMMDD
-                        'jcd': jcd,            # 場コード
-                        'race': race,          # '10R' など
-                        'combo': combo,        # '1-2-3'
+                        'date': date,                # YYYYMMDD
+                        'jcd': jcd,                  # 場コード
+                        'race': race,                # '10R' など
+                        'combo': combo,              # '1-2-3'
                         'F': item.get('F'),
                         'S': item.get('S'),
                         'T': item.get('T'),
@@ -115,8 +111,8 @@ def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     df.to_csv(OUT_PATH, index=False, encoding='utf-8-sig')
 
-    # ざっくりサマリ
-    print(f'rows={len(df)}  races={df[\"date\"].nunique()} dates x {df[\"jcd\"].nunique()} places')
+    # ざっくりサマリ（f-stringのクオート修正）
+    print(f"rows={len(df)}  races={df['date'].nunique()} dates x {df['jcd'].nunique()} places")
     print(f'output: {OUT_PATH}')
 
 if __name__ == '__main__':
