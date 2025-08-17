@@ -34,7 +34,9 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
+        shell: bash
         run: |
+          set -euo pipefail
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
@@ -43,11 +45,15 @@ jobs:
           fi
 
       - name: Sanity check
+        shell: bash
         run: |
+          set -euo pipefail
           test -f TENKAI/features_c.py || { echo "TENKAI/features_c.py がありません"; exit 1; }
 
       - name: Ensure TENKAI package
+        shell: bash
         run: |
+          set -euo pipefail
           mkdir -p TENKAI
           [ -f TENKAI/__init__.py ] || printf "" > TENKAI/__init__.py
 
@@ -57,7 +63,7 @@ jobs:
           set -eo pipefail
           RACE_OPT=""
           if [ -n "${{ github.event.inputs.race }}" ]; then
-            # クォートしないで渡す（'1R' → 1R）
+            # クォートを外して 1R → 1R のまま渡す
             RACE_OPT="--race ${{ github.event.inputs.race }}"
           fi
           echo ">>> 実行コマンド"
@@ -68,12 +74,27 @@ jobs:
             $RACE_OPT
 
       - name: Commit outputs
+        shell: bash
         run: |
+          set -euo pipefail
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # 生成物ステージ
           git add TENKAI/features_c/v1/** || true
-          git diff --cached --quiet || git commit -m "TENKAI C features: ${{ github.event.inputs.date }} pid=${{ github.event.inputs.pid }} ${{ github.event.inputs.race }}"
-          git push
+
+          # 変更なしなら終了
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          # リモートの更新を取り込んでから push（競合回避）
+          git fetch origin main
+          git pull --rebase origin main
+
+          git commit -m "TENKAI C features: ${{ github.event.inputs.date }} pid=${{ github.event.inputs.pid }} ${{ github.event.inputs.race }}"
+          git push origin HEAD:main
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
