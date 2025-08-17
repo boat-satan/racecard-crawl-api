@@ -5,7 +5,7 @@
   "engine": "SimS ver1.0 (E1)",
   "sims_per_race": 1200,
   "strategy": "trifecta_topN",
-  "topn": 40,
+  "topn": 60,
   "k": 2,
   "m": 4,
   "exclude_first1": false,
@@ -14,7 +14,7 @@
   "require_odds": true,
   "odds_bands": "",
   "buy_if_keyman_in_top3": false,
-  "buy_keyman_threshold": 0.9,
+  "buy_keyman_threshold": 0.95,
   "pass": "pass1",
   "keyman": {
     "trials": 1200,

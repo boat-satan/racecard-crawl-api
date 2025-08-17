@@ -1,13 +1,13 @@
 {
   "engine": "SimS ver1.0 (E1)",
   "races": 180,
-  "bets_total": 6558,
-  "stake_total": 655800,
-  "payout_total": 402550,
-  "hit_rate": 0.8333333333333334,
-  "roi": -0.3861695638914303,
+  "bets_total": 7878,
+  "stake_total": 787800,
+  "payout_total": 503770,
+  "hit_rate": 0.8777777777777778,
+  "roi": -0.3605356689515105,
   "strategy": "trifecta_topN",
-  "topn": 40,
+  "topn": 60,
   "k": 2,
   "m": 4,
   "sims_per_race": 1200,
@@ -21,5 +21,5 @@
   "odds_max": 0.0,
   "pass": "pass1",
   "buy_if_keyman_in_top3": false,
-  "buy_keyman_threshold": 0.9
+  "buy_keyman_threshold": 0.95
 }
