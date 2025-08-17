@@ -4,7 +4,7 @@
 integrated/v1 を走査して C(編成・相対)特徴を CSV に出力
 - 入力: --date YYYYMMDD, --pid 02 など、--race (例: 1R) は任意
 - 走査対象: public/integrated/v1/<date>/<pid>/<race or *.json>
-- 出力:  public/TENKAI/features_c/v1/features_c.csv
+- 出力:  TENKAI/features_c/v1/features_c.csv  （リポジトリ直下）
 """
 import os
 import glob
@@ -15,11 +15,10 @@ import argparse
 # 同ディレクトリの features_c.py を利用
 from features_c import build_c_features
 
-BASE = "public"
-INTEG = os.path.join(BASE, "integrated", "v1")
+BASE_INTEG = os.path.join("public", "integrated", "v1")
 
-# ✅ workflow と揃える（大文字の TENKAI）
-OUTDIR = os.path.join(BASE, "TENKAI", "features_c", "v1")
+# ✅ 出力先をリポジトリ直下に修正
+OUTDIR = os.path.join("TENKAI", "features_c", "v1")
 OUTCSV = os.path.join(OUTDIR, "features_c.csv")
 
 
@@ -37,7 +36,7 @@ def main():
 
     # 走査パスを組み立て
     race_pat = f"{args.race}.json" if args.race else "*.json"
-    glob_pat = os.path.join(INTEG, args.date, args.pid, race_pat)
+    glob_pat = os.path.join(BASE_INTEG, args.date, args.pid, race_pat)
     paths = sorted(glob.glob(glob_pat))
 
     if not paths:
@@ -62,7 +61,7 @@ def main():
         print("no rows.")
         return
 
-    # 列順は最初の行のキー順に合わせる（安定しない場合はここで並べ替え定義）
+    # 列順は最初の行のキー順に合わせる
     cols = list(rows[0].keys())
 
     with open(OUTCSV, "w", newline="", encoding="utf-8") as f:
