@@ -1,0 +1,119 @@
+{
+  "date": "20250817",
+  "pid": "10",
+  "race": "3R",
+  "source": {
+    "result": "https://www.boatrace.jp/owpc/pc/race/raceresult?rno=3&jcd=10&hd=20250817"
+  },
+  "generatedAt": "2025-08-17T15:07:34.045Z",
+  "order": [
+    {
+      "pos": 1,
+      "lane": 1,
+      "racerId": "4593",
+      "name": "小坂 宗司",
+      "time": "1'50\"6"
+    },
+    {
+      "pos": 2,
+      "lane": 5,
+      "racerId": "4391",
+      "name": "松田 祐季",
+      "time": "1'52\"7"
+    },
+    {
+      "pos": 3,
+      "lane": 6,
+      "racerId": "3572",
+      "name": "安田 政彦",
+      "time": "1'55\"0"
+    },
+    {
+      "pos": 4,
+      "lane": 4,
+      "racerId": "3922",
+      "name": "菅沼 佳昭",
+      "time": "1'56\"1"
+    },
+    {
+      "pos": 5,
+      "lane": 3,
+      "racerId": "5282",
+      "name": "中本 大樹",
+      "time": ""
+    }
+  ],
+  "start": [
+    {
+      "lane": 1,
+      "st": 0.26
+    },
+    {
+      "lane": 3,
+      "st": 0.45
+    },
+    {
+      "lane": 6,
+      "st": 0.39
+    },
+    {
+      "lane": 4,
+      "st": 0.39
+    },
+    {
+      "lane": 5,
+      "st": 0.32
+    }
+  ],
+  "decision": "逃げ",
+  "weather": {
+    "condition": "晴",
+    "airTemp": 30,
+    "windSpeed": 2,
+    "windDirCode": 12,
+    "waterTemp": 29,
+    "wave": 2
+  },
+  "refunds": [
+    2
+  ],
+  "payouts": {
+    "trifecta": {
+      "combo": "1-5-6",
+      "amount": 460,
+      "popularity": 1
+    },
+    "trio": {
+      "combo": "1=5=6",
+      "amount": 200,
+      "popularity": 1
+    },
+    "exacta": {
+      "combo": "1-5",
+      "amount": 310,
+      "popularity": 2
+    },
+    "quinella": {
+      "combo": "1=5",
+      "amount": 150,
+      "popularity": 1
+    },
+    "wide": [
+      {
+        "combo": "1=5",
+        "amount": 110,
+        "popularity": 2
+      }
+    ],
+    "win": {
+      "combo": "1",
+      "amount": 180
+    },
+    "place": [
+      {
+        "combo": "1",
+        "amount": 150
+      }
+    ]
+  }
+}
