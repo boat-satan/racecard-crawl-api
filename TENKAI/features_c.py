@@ -1,173 +1,191 @@
 # -*- coding: utf-8 -*-
 """
-integrated/v1 の1開催(=date,pid)から C(編成・相対)特徴を作成
-出力: TENKAI/features_c/v1/{date}/{pid}/{race}.csv  （race 未指定なら全Rを個別CSV）
-- ボート/モーター要素は使わない
-- exhibition が None でも落ちないように全取得は or {} で辞書保証
-- 勝ち/負けの決まり手は「抜き」「恵まれ」を除外
+C(編成・相対)特徴を 1レース=1CSV で出力
+出力先: TENKAI/features_c/v1/<date>/<pid>/<race>.csv
 """
-
 import os
 import json
-import argparse
 import pandas as pd
-from typing import Dict, Any, List
-
-BASE_INTEG = os.path.join("public", "integrated", "v1")
-OUT_BASE   = os.path.join("TENKAI", "features_c", "v1")
-
-ALLOW_K = ("逃げ", "差し", "まくり", "まくり差し")  # 抜き/恵まれは除外
+from typing import Any, Dict, List, Optional
 
 
-def _safe_load(path: str) -> Dict[str, Any]:
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+def _safe_mean(vals: List[Optional[float]]) -> Optional[float]:
+    arr = [v for v in vals if v is not None]
+    return (sum(arr) / len(arr)) if arr else None
 
 
-def _lane_row_prefixed(lane: int, e: Dict[str, Any]) -> Dict[str, Any]:
-    """単艇の特徴量（prefix=L{lane}_）を作る。欠損があっても落ちない。"""
-    rc = (e.get("racecard") or {})
-    st = (e.get("stats") or {})
-    ec = (st.get("entryCourse") or {})
-    # 決まり手集計
-    win_self: Dict[str, Any] = ec.get("winKimariteSelf") or {}
-    lose_all: Dict[str, Any] = ec.get("loseKimarite") or {}
-    win_k = sum(win_self.get(k, 0) or 0 for k in ALLOW_K)
-    lose_k = sum(lose_all.get(k, 0) or 0 for k in ALLOW_K)
-
-    # 自己サマリ
-    ss = (ec.get("selfSummary") or {})
-    starts = ss.get("starts")
-    first  = ss.get("firstCount")
-    second = ss.get("secondCount")
-    third  = ss.get("thirdCount")
-
-    pref = f"L{lane}_"
-    row = {
-        pref + "startCourse": e.get("startCourse"),
-        pref + "class":       rc.get("classNumber"),
-        pref + "age":         rc.get("age"),
-        pref + "avgST_rc":    rc.get("avgST"),
-        pref + "ec_avgST":    ec.get("avgST"),
-        pref + "flying":      rc.get("flyingCount"),
-        pref + "late":        rc.get("lateCount"),
-        pref + "ss_starts":   starts,
-        pref + "ss_first":    first,
-        pref + "ss_second":   second,
-        pref + "ss_third":    third,
-        pref + "ms_winRate":  (ec.get("matrixSelf") or {}).get("winRate"),
-        pref + "ms_top2Rate": (ec.get("matrixSelf") or {}).get("top2Rate"),
-        pref + "ms_top3Rate": (ec.get("matrixSelf") or {}).get("top3Rate"),
-        pref + "win_k":       win_k,
-        pref + "lose_k":      lose_k,
-        # Δは平均値からの差（後で race 全体平均を出してから埋め直す）
-        pref + "d_avgST_rc":  None,
-        pref + "d_age":       None,
-        pref + "d_class":     None,
-        # ランク（小さいほど良い=1位）。後で一括計算して埋める。
-        pref + "rank_avgST":  None,
-        pref + "rank_age":    None,
-        pref + "rank_class":  None,
-    }
-    return row
+def _rank_min_ties(vals: List[Optional[float]], asc: bool = True) -> Dict[int, Optional[int]]:
+    """同値は同順位（最小順位）。Noneは順位なし(None)"""
+    pairs = [(i, v) for i, v in enumerate(vals) if v is not None]
+    pairs.sort(key=lambda x: x[1], reverse=not asc)
+    ranks: Dict[int, Optional[int]] = {}
+    last_val = object()
+    last_rank = 0
+    for idx, (i, v) in enumerate(pairs, start=1):
+        if v != last_val:
+            last_rank = idx
+            last_val = v
+        ranks[i] = last_rank
+    # fill None for missing
+    for i, v in enumerate(vals):
+        if v is None:
+            ranks[i] = None
+    return ranks
 
 
-def _calc_group_means(row: Dict[str, Any], lanes: List[int]) -> Dict[str, Any]:
-    """レース平均（avgST_rc, age, class）の算出"""
-    st_vals   = [row.get(f"L{i}_avgST_rc") for i in lanes if row.get(f"L{i}_avgST_rc") is not None]
-    age_vals  = [row.get(f"L{i}_age")      for i in lanes if row.get(f"L{i}_age") is not None]
-    cls_vals  = [row.get(f"L{i}_class")    for i in lanes if row.get(f"L{i}_class") is not None]
+def _sum_dict_values(d: Optional[Dict[str, Any]]) -> int:
+    if not isinstance(d, dict):
+        return 0
+    s = 0
+    for _, v in d.items():
+        try:
+            s += int(v or 0)
+        except Exception:
+            continue
+    return s
 
-    row["mean_avgST_rc"] = sum(st_vals)/len(st_vals) if st_vals else None
-    row["mean_age"]      = sum(age_vals)/len(age_vals) if age_vals else None
-    row["mean_class"]    = sum(cls_vals)/len(cls_vals) if cls_vals else None
-    return row
 
-
-def _fill_deltas_and_ranks(row: Dict[str, Any], lanes: List[int]) -> Dict[str, Any]:
-    """平均からの差分とランクを埋める（ランクは昇順=小さい値が1位）"""
-    mean_st  = row.get("mean_avgST_rc")
-    mean_age = row.get("mean_age")
-    mean_cls = row.get("mean_class")
-
-    # 差分
-    for i in lanes:
-        st = row.get(f"L{i}_avgST_rc")
-        ag = row.get(f"L{i}_age")
-        cl = row.get(f"L{i}_class")
-        if st is not None and mean_st is not None:
-            row[f"L{i}_d_avgST_rc"] = st - mean_st
-        if ag is not None and mean_age is not None:
-            row[f"L{i}_d_age"] = ag - mean_age
-        if cl is not None and mean_cls is not None:
-            row[f"L{i}_d_class"] = cl - mean_cls
-
-    # ランク（None は除外して順位付け）
-    def rank_small_is_better(keys: List[str]) -> None:
-        vals = [(idx, row.get(k)) for idx, k in enumerate(keys)]
-        present = [(idx, v) for idx, v in vals if v is not None]
-        present.sort(key=lambda x: x[1])  # 小さい順
-        for rank, (idx, _) in enumerate(present, start=1):
-            row[keys[idx].replace("avgST_rc", "rank_avgST")
-                       .replace("age", "rank_age")
-                       .replace("class", "rank_class")] = rank
-
-    # それぞれの指標でキー配列を用意
-    rank_small_is_better([f"L{i}_avgST_rc" for i in lanes])
-    rank_small_is_better([f"L{i}_age"      for i in lanes])
-    rank_small_is_better([f"L{i}_class"    for i in lanes])
-    return row
+def _get(d: Dict[str, Any], path: List[str], default=None):
+    cur = d
+    try:
+        for k in path:
+            cur = cur.get(k, {})
+        return cur if cur != {} else default
+    except Exception:
+        return default
 
 
 def build_c_features(date: str, pid: str, race: str = ""):
     """
-    1開催(date,pid)の C 特徴を CSV 化。
-    race を指定すればその R のみ。それ以外は 1R..12R を個別CSVで出力。
+    C特徴量を生成し CSV を保存。
+    - 偏差 d_* は『各艇 − レース平均』
+    - 順位 rank_* は昇順（小さいほど上位）
+    - ec_avgST は stats.entryCourse.avgST を採用
     """
-    in_dir = os.path.join(BASE_INTEG, str(date), str(pid))
-    if not os.path.isdir(in_dir):
-        print(f"no dir: {in_dir}")
-        return
+    base_dir = f"public/integrated/v1/{date}/{pid}"
+    races = [race] if race else [f"{i}R" for i in range(1, 13)]
+    outputs: List[Dict[str, Any]] = []
 
-    targets = [race] if race else [f"{i}R" for i in range(1, 13)]
-    out_dir_root = os.path.join(OUT_BASE, str(date), str(pid))
-    os.makedirs(out_dir_root, exist_ok=True)
-
-    for r in targets:
-        integ_path = os.path.join(in_dir, f"{r}.json")
-        if not os.path.exists(integ_path):
-            print(f"skip: {integ_path} (not found)")
+    for r in races:
+        path = os.path.join(base_dir, f"{r}.json")
+        if not os.path.exists(path):
+            print(f"skip {path} (not found)")
             continue
 
-        data = _safe_load(integ_path)
-        entries = data.get("entries") or []
-        # 1..6のレーンで揃える（欠けていればスキップするだけでOK）
-        lanes = sorted({int(e.get("lane")) for e in entries if e.get("lane") is not None}) or [1,2,3,4,5,6]
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
 
-        row: Dict[str, Any] = {"date": str(date), "pid": str(pid), "race": str(r)}
+        entries: List[Dict[str, Any]] = data.get("entries", [])
+        if not entries:
+            print(f"skip {path} (no entries)")
+            continue
+
+        # まずレース内の配列（平均＆順位用）
+        avgst_list: List[Optional[float]] = []
+        age_list: List[Optional[float]] = []
+        class_list: List[Optional[float]] = []
+
         for e in entries:
-            lane = int(e.get("lane"))
-            row.update(_lane_row_prefixed(lane, e))
+            rc = e.get("racecard", {}) or {}
+            avgst_list.append(rc.get("avgST"))
+            age_list.append(rc.get("age"))
+            class_list.append(rc.get("classNumber"))
 
-        # 平均と差分・ランク
-        row = _calc_group_means(row, lanes)
-        row = _fill_deltas_and_ranks(row, lanes)
+        mean_avgst = _safe_mean(avgst_list)
+        mean_age = _safe_mean(age_list)
+        mean_class = _safe_mean(class_list)
 
-        # CSV 出力（1レース1行）
-        df = pd.DataFrame([row])
-        out_path = os.path.join(out_dir_root, f"{r}.csv")
-        df.to_csv(out_path, index=False, encoding="utf-8")
-        print(f"wrote: {out_path}")
+        rank_avgst = _rank_min_ties(avgst_list, asc=True)   # 速いSTほど上位
+        rank_age = _rank_min_ties(age_list, asc=True)       # 若いほど上位
+        rank_class = _rank_min_ties(class_list, asc=True)   # A1=1 が上位
 
+        # 1行に全艇分を詰める
+        row: Dict[str, Any] = {"date": date, "pid": pid, "race": r}
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--date", required=True)
-    ap.add_argument("--pid",  required=True)
-    ap.add_argument("--race", default="")
-    args = ap.parse_args()
-    build_c_features(args.date, args.pid, args.race)
+        for idx, e in enumerate(entries):
+            lane = e.get("lane")
+            if lane is None:
+                continue
+            rc = e.get("racecard", {}) or {}
+            ec_stats = _get(e, ["stats", "entryCourse"], {}) or {}
+
+            prefix = f"L{lane}_"
+
+            # selfSummary
+            ss = ec_stats.get("selfSummary") or {}
+            ss_starts = ss.get("starts")
+            ss_first = ss.get("firstCount")
+            ss_second = ss.get("secondCount")
+            ss_third = ss.get("thirdCount")
+
+            # matrixSelf
+            ms = ec_stats.get("matrixSelf") or {}
+            ms_win = ms.get("winRate")
+            ms_t2 = ms.get("top2Rate")
+            ms_t3 = ms.get("top3Rate")
+
+            # 勝ち数: firstCount、負け数: loseKimarite 合計
+            lose_k = _sum_dict_values(ec_stats.get("loseKimarite"))
+
+            avgst = rc.get("avgST")
+            age = rc.get("age")
+            cls = rc.get("classNumber")
+
+            feat = {
+                "startCourse": e.get("startCourse"),
+                "class": cls,
+                "age": age,
+                "avgST_rc": avgst,
+                "ec_avgST": ec_stats.get("avgST"),  # ← stats.entryCourse 由来
+                "flying": rc.get("flyingCount"),
+                "late": rc.get("lateCount"),
+                "ss_starts": ss_starts,
+                "ss_first": ss_first,
+                "ss_second": ss_second,
+                "ss_third": ss_third,
+                "ms_winRate": ms_win,
+                "ms_top2Rate": ms_t2,
+                "ms_top3Rate": ms_t3,
+                "win_k": (ss_first or 0),
+                "lose_k": lose_k,
+                # 偏差（各艇 − レース平均）
+                "d_avgST_rc": (avgst - mean_avgst) if (avgst is not None and mean_avgst is not None) else None,
+                "d_age": (age - mean_age) if (age is not None and mean_age is not None) else None,
+                "d_class": (cls - mean_class) if (cls is not None and mean_class is not None) else None,
+                # レース内順位（1=最上位）
+                "rank_avgST": rank_avgst.get(idx),
+                "rank_age": rank_age.get(idx),
+                "rank_class": rank_class.get(idx),
+            }
+
+            for k, v in feat.items():
+                row[f"{prefix}{k}"] = v
+
+        # レース平均値を末尾に
+        row["mean_avgST_rc"] = mean_avgst
+        row["mean_age"] = mean_age
+        row["mean_class"] = mean_class
+
+        # 出力（1レース=1CSV）
+        outdir = os.path.join("TENKAI", "features_c", "v1", date, pid)
+        os.makedirs(outdir, exist_ok=True)
+        outfile = os.path.join(outdir, f"{r}.csv")
+        pd.DataFrame([row]).to_csv(outfile, index=False, encoding="utf-8")
+        print(f"wrote {outfile}")
+
+        outputs.append(row)
+
+    if not outputs:
+        print("no outputs")
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--date", required=True)
+    ap.add_argument("--pid", required=True)
+    ap.add_argument("--race", default="")
+    args = ap.parse_args()
+
+    build_c_features(args.date, args.pid, args.race)
