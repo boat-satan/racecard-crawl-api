@@ -1,7 +1,6 @@
 name: Predict trifecta
 
 on:
-  # 手動トリガー（必要な入力だけ受け取る）
   workflow_dispatch:
     inputs:
       date:
@@ -16,7 +15,7 @@ on:
         default: ''
 
 permissions:
-  contents: write  # 予測CSV/Parquetをコミットするため
+  contents: write
 
 concurrency:
   group: predict-trifecta-${{ github.ref }}
@@ -37,7 +36,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install lightgbm pandas pyarrow joblib
+          pip install lightgbm pandas pyarrow joblib scikit-learn
 
       - name: Run prediction
         run: |
