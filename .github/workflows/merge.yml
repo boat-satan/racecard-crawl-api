@@ -1,31 +1,47 @@
-name: Merge race data
+name: Merge race data (integrated + odds + results)
 
 on:
-  workflow_dispatch:        # 手動実行も可能
+  workflow_dispatch: {}
   push:
     paths:
       - 'public/integrated/v1/**'
       - 'public/odds/v1/**'
       - 'public/results/v1/**'
+      - 'scripts/merge_races.py'
+    branches:
+      - main
+
+permissions:
+  contents: write   # ← CSV をコミットするために必須
 
 jobs:
-  build:
+  merge-and-commit:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
       - name: Install dependencies
-      - run: pip install pandas
-      - name: Merge race data
-        run: python scripts/merge_races.py
-      - name: Commit merged file
         run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email 'github-actions[bot]@users.noreply.github.com'
-          git add merged_trifecta_data.csv
-          git diff --cached --quiet || git commit -m 'Update merged data'
+          python -m pip install --upgrade pip
+          pip install pandas
+
+      - name: Run merge script
+        run: |
+          python scripts/merge_races.py
+
+      - name: Commit merged CSV
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add public/merged/merged_trifecta_data.csv
+          git diff --cached --quiet || git commit -m "Update merged CSV (auto)"
           git push
