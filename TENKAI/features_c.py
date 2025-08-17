@@ -1,115 +1,107 @@
-# TENKAI/features_c.py
-# 全差し替え版 (2025-08 修正版)
-# - Δ列: 平均との差分
-# - rank列: 本体値でランク付け (小さい=良い, 同値は最小ランク共有)
-
-import os
 import json
-import argparse
+import os
 import pandas as pd
-import numpy as np
 
-def load_integrated(path):
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
 
-def build_features(integrated):
-    date = integrated["date"]
-    pid  = integrated["pid"]
-    race = integrated["race"]
+def build_c_features(date: str, pid: str, race: str = ""):
+    """C特徴量を生成して CSV 出力"""
 
-    lanes = []
-    for e in integrated["entries"]:
-        lane = e["lane"]
-        rc   = e["racecard"]
-        ex   = e.get("exhibition", {})
-        stats = e.get("stats", {})
+    base_dir = f"public/integrated/v1/{date}/{pid}"
+    outputs = []
 
-        l = dict(
-            lane        = lane,
-            startCourse = e.get("startCourse"),
-            number      = rc["number"],
-            class       = rc["classNumber"],
-            age         = rc["age"],
-            avgST_rc    = rc.get("avgST", 0.0),
-            ec_avgST    = ex.get("avgST", 0.0),
-            flying      = rc.get("flyingCount", 0),
-            late        = rc.get("lateCount", 0),
-            ss_starts   = stats.get("ss_starts", 0),
-            ss_first    = stats.get("ss_first", 0),
-            ss_second   = stats.get("ss_second", 0),
-            ss_third    = stats.get("ss_third", 0),
-            ms_winRate  = stats.get("ms_winRate", 0.0),
-            ms_top2Rate = stats.get("ms_top2Rate", 0.0),
-            ms_top3Rate = stats.get("ms_top3Rate", 0.0),
-            win_k       = stats.get("win_k", 0),
-            lose_k      = stats.get("lose_k", 0),
-        )
-        lanes.append(l)
+    races = [race] if race else [f"{i}R" for i in range(1, 13)]
 
-    # 平均
-    mean_avgST = np.mean([l["avgST_rc"] for l in lanes])
-    mean_age   = np.mean([l["age"] for l in lanes])
-    mean_class = np.mean([l["class"] for l in lanes])
+    for r in races:
+        path = os.path.join(base_dir, f"{r}.json")
+        if not os.path.exists(path):
+            print(f"skip {path} (not found)")
+            continue
 
-    # 差分
-    for l in lanes:
-        l["d_avgST_rc"] = l["avgST_rc"] - mean_avgST
-        l["d_age"]      = l["age"]      - mean_age
-        l["d_class"]    = l["class"]    - mean_class
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
 
-    # ランク (小さい=良い)
-    df_rank = pd.DataFrame({
-        "avgST_rc": [l["avgST_rc"] for l in lanes],
-        "age":      [l["age"] for l in lanes],
-        "class":    [l["class"] for l in lanes],
-    })
-    r_avgst = df_rank["avgST_rc"].rank(method="min", ascending=True).astype(int).tolist()
-    r_age   = df_rank["age"].rank(method="min", ascending=True).astype(int).tolist()
-    r_class = df_rank["class"].rank(method="min", ascending=True).astype(int).tolist()
+        row = {
+            "date": date,
+            "pid": pid,
+            "race": r,
+        }
 
-    for i, l in enumerate(lanes):
-        l["rank_avgST"] = r_avgst[i]
-        l["rank_age"]   = r_age[i]
-        l["rank_class"] = r_class[i]
+        entries = data.get("entries", [])
+        for e in entries:
+            lane = e.get("lane")
+            rc = e.get("racecard", {})
+            ec = e.get("exhibition", {})
+            ss = rc.get("startStats", {})
+            ms = rc.get("motorStats", {})
 
-    # 出力行 (flat化)
-    row = dict(date=date, pid=pid, race=race)
-    for l in lanes:
-        prefix = f"L{l['lane']}"
-        for k, v in l.items():
-            if k == "lane": continue
-            row[f"{prefix}_{k}"] = v
+            prefix = f"L{lane}_"
 
-    # 平均も付ける
-    row["mean_avgST_rc"] = mean_avgST
-    row["mean_age"]      = mean_age
-    row["mean_class"]    = mean_class
+            feat = {
+                "startCourse": e.get("startCourse"),
+                "class": rc.get("classNumber"),
+                "age": rc.get("age"),
+                "avgST_rc": rc.get("avgST"),
+                "ec_avgST": ec.get("avgST"),
+                "flying": rc.get("flyingCount"),
+                "late": rc.get("lateCount"),
+                "ss_starts": ss.get("starts"),
+                "ss_first": ss.get("first"),
+                "ss_second": ss.get("second"),
+                "ss_third": ss.get("third"),
+                "ms_winRate": ms.get("winRate"),
+                "ms_top2Rate": ms.get("top2Rate"),
+                "ms_top3Rate": ms.get("top3Rate"),
+            }
 
-    return row
+            # 勝ち・負け補正値
+            feat["win_k"] = ms.get("wins", 0)
+            feat["lose_k"] = ms.get("loses", 0)
 
-def main():
+            # ダミー特徴量例
+            feat["d_avgST_rc"] = (rc.get("avgST") or 0) - 0.16
+            feat["d_age"] = (rc.get("age") or 0) - 40
+            feat["d_class"] = (rc.get("classNumber") or 0) - 3
+
+            # ランク（相対評価用ダミー）
+            feat["rank_avgST"] = 0
+            feat["rank_age"] = 0
+            feat["rank_class"] = 0
+
+            # prefix 付けて row に追加
+            for k, v in feat.items():
+                row[f"{prefix}{k}"] = v
+
+        # レース全体の平均特徴量（例）
+        avgSTs = [rc.get("avgST") for rc in (e.get("racecard", {}) for e in entries) if rc.get("avgST") is not None]
+        ages = [rc.get("age") for rc in (e.get("racecard", {}) for e in entries) if rc.get("age") is not None]
+        classes = [rc.get("classNumber") for rc in (e.get("racecard", {}) for e in entries) if rc.get("classNumber") is not None]
+
+        row["mean_avgST_rc"] = sum(avgSTs) / len(avgSTs) if avgSTs else None
+        row["mean_age"] = sum(ages) / len(ages) if ages else None
+        row["mean_class"] = sum(classes) / len(classes) if classes else None
+
+        outputs.append(row)
+
+    if not outputs:
+        print("no outputs")
+        return
+
+    outdir = f"TENKAI/features_c/v1/{date}/{pid}"
+    os.makedirs(outdir, exist_ok=True)
+    outfile = os.path.join(outdir, f"{race or 'all'}.csv")
+
+    df = pd.DataFrame(outputs)
+    df.to_csv(outfile, index=False, encoding="utf-8")
+    print(f"wrote {outfile}")
+
+
+if __name__ == "__main__":
+    import argparse
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--date", required=True)
     parser.add_argument("--pid", required=True)
-    parser.add_argument("--race", required=True)
-    parser.add_argument("--out", default="TENKAI/features_c.csv")
+    parser.add_argument("--race", default="")
     args = parser.parse_args()
 
-    in_path = f"public/integrated/v1/{args.date}/{args.pid}/{args.race}.json"
-    if not os.path.exists(in_path):
-        print(f"no targets: {in_path}")
-        return
-
-    integrated = load_integrated(in_path)
-    row = build_features(integrated)
-
-    # append-or-create
-    out_exists = os.path.exists(args.out)
-    df = pd.DataFrame([row])
-    df.to_csv(args.out, mode="a", header=not out_exists, index=False, encoding="utf-8-sig")
-
-    print(f"wrote → {args.out}")
-
-if __name__ == "__main__":
-    main()
+    build_c_features(args.date, args.pid, args.race)
