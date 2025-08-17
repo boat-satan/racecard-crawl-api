@@ -1,149 +1,115 @@
-# -*- coding: utf-8 -*-
-"""
-TENKAI C-features builder
-- integrated/v1 の 1レース分 dict を受け取り、編成・相対特徴の1行 dict を返す
-- ボート/モーターの素性は含めない（依頼どおり）
-- 決まり手カウントは「抜き」「恵まれ」を除外
-"""
+# TENKAI/features_c.py
+# 全差し替え版 (2025-08 修正版)
+# - Δ列: 平均との差分
+# - rank列: 本体値でランク付け (小さい=良い, 同値は最小ランク共有)
 
-from typing import Dict, Any, List
-import math
+import os
+import json
+import argparse
+import pandas as pd
+import numpy as np
 
-EXCLUDE_KIMARITE = {"抜き", "恵まれ"}
+def load_integrated(path):
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-def _nan_to_none(x):
-    # pandas未使用の軽い正規化
-    if x is None:
-        return None
-    try:
-        if isinstance(x, float) and math.isnan(x):
-            return None
-    except Exception:
-        pass
-    return x
+def build_features(integrated):
+    date = integrated["date"]
+    pid  = integrated["pid"]
+    race = integrated["race"]
 
-def _get(d: Dict, *keys, default=None):
-    cur = d
-    for k in keys:
-        if cur is None:
-            return default
-        cur = cur.get(k)
-    return default if cur is None else cur
+    lanes = []
+    for e in integrated["entries"]:
+        lane = e["lane"]
+        rc   = e["racecard"]
+        ex   = e.get("exhibition", {})
+        stats = e.get("stats", {})
 
-def _num(x):
-    try:
-        return float(x)
-    except Exception:
-        return None
+        l = dict(
+            lane        = lane,
+            startCourse = e.get("startCourse"),
+            number      = rc["number"],
+            class       = rc["classNumber"],
+            age         = rc["age"],
+            avgST_rc    = rc.get("avgST", 0.0),
+            ec_avgST    = ex.get("avgST", 0.0),
+            flying      = rc.get("flyingCount", 0),
+            late        = rc.get("lateCount", 0),
+            ss_starts   = stats.get("ss_starts", 0),
+            ss_first    = stats.get("ss_first", 0),
+            ss_second   = stats.get("ss_second", 0),
+            ss_third    = stats.get("ss_third", 0),
+            ms_winRate  = stats.get("ms_winRate", 0.0),
+            ms_top2Rate = stats.get("ms_top2Rate", 0.0),
+            ms_top3Rate = stats.get("ms_top3Rate", 0.0),
+            win_k       = stats.get("win_k", 0),
+            lose_k      = stats.get("lose_k", 0),
+        )
+        lanes.append(l)
 
-def _lane_stat(entry: Dict) -> Dict[str, Any]:
-    rc = entry.get("racecard", {}) or {}
-    ec = (_get(entry, "stats", "entryCourse") or {}) if entry.get("stats") else {}
+    # 平均
+    mean_avgST = np.mean([l["avgST_rc"] for l in lanes])
+    mean_age   = np.mean([l["age"] for l in lanes])
+    mean_class = np.mean([l["class"] for l in lanes])
 
-    # 決まり手（自艇勝ち/負け）から「抜き」「恵まれ」を除外して合計
-    win_k = {k: int(v) for k, v in (ec.get("winKimariteSelf") or {}).items()
-             if k not in EXCLUDE_KIMARITE}
-    lose_k = {k: int(v) for k, v in (ec.get("loseKimarite") or {}).items()
-              if k not in EXCLUDE_KIMARITE}
-    win_sum  = sum(win_k.values())
-    lose_sum = sum(lose_k.values())
+    # 差分
+    for l in lanes:
+        l["d_avgST_rc"] = l["avgST_rc"] - mean_avgST
+        l["d_age"]      = l["age"]      - mean_age
+        l["d_class"]    = l["class"]    - mean_class
 
-    ss = ec.get("selfSummary") or {}
-    ms = ec.get("matrixSelf") or {}
+    # ランク (小さい=良い)
+    df_rank = pd.DataFrame({
+        "avgST_rc": [l["avgST_rc"] for l in lanes],
+        "age":      [l["age"] for l in lanes],
+        "class":    [l["class"] for l in lanes],
+    })
+    r_avgst = df_rank["avgST_rc"].rank(method="min", ascending=True).astype(int).tolist()
+    r_age   = df_rank["age"].rank(method="min", ascending=True).astype(int).tolist()
+    r_class = df_rank["class"].rank(method="min", ascending=True).astype(int).tolist()
 
-    out = dict(
-        startCourse=_get(entry, "startCourse"),
-        classNumber=_get(rc, "classNumber"),
-        age=_get(rc, "age"),
-        avgST_rc=_num(_get(rc, "avgST")),
-        flying=_get(rc, "flyingCount"),
-        late=_get(rc, "lateCount"),
-        ec_avgST=_num(_get(ec, "avgST")),
-        ss_starts=_get(ss, "starts"),
-        ss_first=_get(ss, "firstCount"),
-        ss_second=_get(ss, "secondCount"),
-        ss_third=_get(ss, "thirdCount"),
-        ms_winRate=_num(_get(ms, "winRate")),
-        ms_top2Rate=_num(_get(ms, "top2Rate")),
-        ms_top3Rate=_num(_get(ms, "top3Rate")),
-        win_k_count=win_sum,
-        lose_k_count=lose_sum,
-    )
-    return out
+    for i, l in enumerate(lanes):
+        l["rank_avgST"] = r_avgst[i]
+        l["rank_age"]   = r_age[i]
+        l["rank_class"] = r_class[i]
 
-def _mean(values: List[float]) -> float:
-    xs = [float(v) for v in values if v is not None]
-    return sum(xs) / len(xs) if xs else 0.0
+    # 出力行 (flat化)
+    row = dict(date=date, pid=pid, race=race)
+    for l in lanes:
+        prefix = f"L{l['lane']}"
+        for k, v in l.items():
+            if k == "lane": continue
+            row[f"{prefix}_{k}"] = v
 
-def _rank(values: List[float], asc=True) -> List[int]:
-    # Noneは末尾に
-    arr = [(i, v) for i, v in enumerate(values)]
-    arr.sort(key=lambda t: (t[1] is None, t[1]), reverse=not asc)
-    rank = [0]*len(values)
-    for r, (i, _) in enumerate(arr, start=1):
-        rank[i] = r
-    return rank
-
-def build_c_features(integ: Dict[str, Any]) -> Dict[str, Any]:
-    # 基本メタ
-    meta = dict(
-        date=str(integ.get("date")),
-        pid=str(integ.get("pid")),
-        race=str(integ.get("race")),
-    )
-
-    # レーンごとの素性収集
-    lanes = {int(e["lane"]): _lane_stat(e) for e in integ.get("entries", [])}
-
-    # 相対量のために全レーン配列化
-    avgst_rc_list = [lanes.get(i, {}).get("avgST_rc") for i in range(1, 7)]
-    age_list      = [lanes.get(i, {}).get("age")      for i in range(1, 7)]
-    cls_list      = [lanes.get(i, {}).get("classNumber") for i in range(1, 7)]
-
-    m_avgst = _mean(avgst_rc_list)
-    m_age   = _mean(age_list)
-    m_cls   = _mean(cls_list)
-
-    # ランク（avgSTは小さいほど速い → asc=True）
-    r_avgst = _rank(avgst_rc_list, asc=True)
-    r_age   = _rank(age_list, asc=False)     # 年齢は大きいほどランク上位にしないので降順=Falseにするならasc=False
-    r_cls   = _rank(cls_list, asc=False)     # 級は数字小さいほど上位ではないため、相対序数として降順ランク
-
-    # 出力1行にフラット化
-    row = {}
-    row.update(meta)
-
-    for i in range(1, 7):
-        li = lanes.get(i, {})
-        p = f"L{i}"
-        row[f"{p}_startCourse"] = _nan_to_none(li.get("startCourse"))
-        row[f"{p}_class"]       = _nan_to_none(li.get("classNumber"))
-        row[f"{p}_age"]         = _nan_to_none(li.get("age"))
-        row[f"{p}_avgST_rc"]    = _nan_to_none(li.get("avgST_rc"))
-        row[f"{p}_ec_avgST"]    = _nan_to_none(li.get("ec_avgST"))
-        row[f"{p}_flying"]      = _nan_to_none(li.get("flying"))
-        row[f"{p}_late"]        = _nan_to_none(li.get("late"))
-        row[f"{p}_ss_starts"]   = _nan_to_none(li.get("ss_starts"))
-        row[f"{p}_ss_first"]    = _nan_to_none(li.get("ss_first"))
-        row[f"{p}_ss_second"]   = _nan_to_none(li.get("ss_second"))
-        row[f"{p}_ss_third"]    = _nan_to_none(li.get("ss_third"))
-        row[f"{p}_ms_winRate"]  = _nan_to_none(li.get("ms_winRate"))
-        row[f"{p}_ms_top2Rate"] = _nan_to_none(li.get("ms_top2Rate"))
-        row[f"{p}_ms_top3Rate"] = _nan_to_none(li.get("ms_top3Rate"))
-        row[f"{p}_win_k"]       = _nan_to_none(li.get("win_k_count"))
-        row[f"{p}_lose_k"]      = _nan_to_none(li.get("lose_k_count"))
-
-        # 相対・ランク
-        row[f"{p}_d_avgST_rc"]  = _nan_to_none((li.get("avgST_rc") or 0) - m_avgst)
-        row[f"{p}_d_age"]       = _nan_to_none((li.get("age") or 0) - m_age)
-        row[f"{p}_d_class"]     = _nan_to_none((li.get("classNumber") or 0) - m_cls)
-        row[f"{p}_rank_avgST"]  = r_avgst[i-1]
-        row[f"{p}_rank_age"]    = r_age[i-1]
-        row[f"{p}_rank_class"]  = r_cls[i-1]
-
-    # レース全体の集約（平均）
-    row["mean_avgST_rc"] = m_avgst
-    row["mean_age"]      = m_age
-    row["mean_class"]    = m_cls
+    # 平均も付ける
+    row["mean_avgST_rc"] = mean_avgST
+    row["mean_age"]      = mean_age
+    row["mean_class"]    = mean_class
 
     return row
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--date", required=True)
+    parser.add_argument("--pid", required=True)
+    parser.add_argument("--race", required=True)
+    parser.add_argument("--out", default="TENKAI/features_c.csv")
+    args = parser.parse_args()
+
+    in_path = f"public/integrated/v1/{args.date}/{args.pid}/{args.race}.json"
+    if not os.path.exists(in_path):
+        print(f"no targets: {in_path}")
+        return
+
+    integrated = load_integrated(in_path)
+    row = build_features(integrated)
+
+    # append-or-create
+    out_exists = os.path.exists(args.out)
+    df = pd.DataFrame([row])
+    df.to_csv(args.out, mode="a", header=not out_exists, index=False, encoding="utf-8-sig")
+
+    print(f"wrote → {args.out}")
+
+if __name__ == "__main__":
+    main()
