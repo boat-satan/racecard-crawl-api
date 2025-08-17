@@ -1,4 +1,4 @@
-name: Merge race data (integrated + odds + results)
+name: Merge race data (by date)
 
 on:
   workflow_dispatch: {}
@@ -12,7 +12,7 @@ on:
       - main
 
 permissions:
-  contents: write   # ← CSV をコミットするために必須
+  contents: write   # CSVをコミットするために必要
 
 jobs:
   merge-and-commit:
@@ -38,10 +38,22 @@ jobs:
         run: |
           python scripts/merge_races.py
 
-      - name: Commit merged CSV
+      # 生成物をコミット（by_date と index）
+      - name: Commit by-date CSVs
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add public/merged/merged_trifecta_data.csv
-          git diff --cached --quiet || git commit -m "Update merged CSV (auto)"
+          git add public/merged/by_date/*.csv || true
+          git add public/merged/index_by_date.csv || true
+          git diff --cached --quiet || git commit -m "Update by-date CSVs (auto)"
           git push
+
+      # 任意：Artifactsにもアップロード（必要なければ削除OK）
+      - name: Upload CSV artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: merged-by-date-csvs
+          path: |
+            public/merged/by_date/*.csv
+            public/merged/index_by_date.csv
+          if-no-files-found: ignore
