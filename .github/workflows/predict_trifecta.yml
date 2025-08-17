@@ -1,0 +1,32 @@
+# .github/workflows/predict_trifecta.yml
+name: Predict trifecta
+
+on:
+  workflow_dispatch:
+    inputs:
+      date: { description: 'YYYYMMDD', required: true }
+      jcd:  { description: '場コード(例 02)', required: true }
+      race: { description: '例 10R', required: false }
+permissions: { contents: write }
+
+jobs:
+  predict:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: |
+          python -m pip install --upgrade pip
+          pip install lightgbm pandas pyarrow joblib
+      - run: |
+          python scripts/predict_trifecta.py \
+            --date ${{ github.event.inputs.date }} \
+            --jcd  ${{ github.event.inputs.jcd }} \
+            ${ { github.event.inputs.race && format('--race {0}', github.event.inputs.race) } }
+      - run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add public/preds/** || true
+          git diff --cached --quiet || git commit -m "Add preds"
+          git push
