@@ -1,26 +1,27 @@
-# scripts/predict_trifecta.py
-# 使い方例:
-#   python scripts/predict_trifecta.py --date 20250815 --jcd 02 --race 10R
-#   python scripts/predict_trifecta.py --date 20250815 --jcd 02           # その日の全R
-#   python scripts/predict_trifecta.py --date 20250815                    # その日の全場・全R
-# 出力: public/preds/{date}/{jcd}/{race}_trifecta_preds.parquet と .csv
-
-import os, re, json, glob, argparse
+# -*- coding: utf-8 -*-
+"""
+推論スクリプト（オッズの有無どちらでもOK）
+- 統合JSONと（あれば）オッズJSONを読む
+- 3連単120通り（またはオッズ側の候補）を展開
+- 学習モデルの raw_score → レース内softmax で確率化
+- あればEV（= p * odds）も計算
+- 出力CSV: outputs/trifecta_pred_<date>_<jcd>_<race>.csv
+"""
+import os, json, glob, re
 import numpy as np
 import pandas as pd
 import joblib
+from itertools import permutations
 
-BASE = "public"
-INTEG = os.path.join(BASE, "integrated", "v1")
-ODDS  = os.path.join(BASE, "odds",       "v1")
+BASE   = "public"
+INTEG  = os.path.join(BASE, "integrated", "v1")
+ODDS   = os.path.join(BASE, "odds",       "v1")
+OUTDIR = "outputs"
 
-MODEL_PATH = "models/trifecta_lgbm.pkl"
-
-# ===== shared helpers (train と同じ前処理) =====
 def to_float(x):
     if x is None: return None
     s = str(x).strip().replace("kg","")
-    s = s.lstrip("F")  # "F.02" -> ".02"
+    s = s.lstrip("F")
     s = re.sub(r"[^\d\.\-]", "", s)
     try:
         return float(s) if s else None
@@ -79,9 +80,7 @@ def lane_feats(entry):
     rc = entry.get("racecard", {}) or {}
     ex = entry.get("exhibition", {}) or {}
     ec = (entry.get("stats") or {}).get("entryCourse") or {}
-
     feat = {
-        # racecard
         "num": rc.get("number"),
         "classNumber": rc.get("classNumber"),
         "age": rc.get("age"),
@@ -99,7 +98,6 @@ def lane_feats(entry):
         "locTop1":   to_float(rc.get("locTop1")),
         "locTop2":   to_float(rc.get("locTop2")),
         "locTop3":   to_float(rc.get("locTop3")),
-        # exhibition
         "tenji": to_float(ex.get("tenjiTime")),
         "exST":  to_float(ex.get("st")),
         "exF":   ex_flag(ex.get("st")),
@@ -107,8 +105,7 @@ def lane_feats(entry):
     feat.update(flatten_entry_course(ec))
     return feat
 
-def build_rows_for_race(integ, odds):
-    """結果は使わず、予測用に1レース分の行（オッズ掲載の全組み合わせ）を作る"""
+def expand_trifecta_rows(integ, odds):
     date = integ["date"]; jcd = integ["pid"]; race = integ["race"]
 
     w = integ.get("weather") or {}
@@ -122,20 +119,19 @@ def build_rows_for_race(integ, odds):
         waveHeight=to_float(w.get("waveHeight")),
     )
 
-    # lane -> features
     lane_map = {}
     for e in integ.get("entries", []):
         lane_map[int(e["lane"])] = lane_feats(e)
 
     trifecta_list = (odds or {}).get("trifecta") or []
     if len(trifecta_list) == 0:
-        # オッズがない場合は予測不能（出力なし）にする
-        return []
+        combos = ["-".join(map(str, p)) for p in permutations([1,2,3,4,5,6], 3)]
+        trifecta_list = [{"combo": c} for c in combos]
 
     rows = []
     for item in trifecta_list:
         combo = item.get("combo")
-        if not combo:
+        if not combo: 
             continue
         try:
             F, S, T = map(int, [item.get("F"), item.get("S"), item.get("T")] if item.get("F") is not None else combo.split("-"))
@@ -155,83 +151,67 @@ def build_rows_for_race(integ, odds):
         row["odds"] = to_float(item.get("odds"))
         row["popularity_rank"] = item.get("popularityRank")
         rows.append(row)
+    return pd.DataFrame(rows)
 
-    return rows
+def softmax_by_group(scores: pd.Series, keys: pd.Series) -> pd.Series:
+    def _sm(s):
+        a = s.values
+        m = np.max(a)
+        e = np.exp(a - m)
+        return pd.Series(e / e.sum(), index=s.index)
+    return scores.groupby(keys).apply(_sm)
 
-# ===== prediction =====
-
-def collect_targets(date: str|None, jcd: str|None, race: str|None):
-    """予測対象の (integ_path, odds_path) の組を列挙"""
-    pairs = []
-    date_glob = date if date else "*"
-    for ddir in sorted(glob.glob(os.path.join(INTEG, date_glob))):
-        d = os.path.basename(ddir)
-        jcd_glob = jcd if jcd else "*"
-        for jdir in sorted(glob.glob(os.path.join(ddir, jcd_glob))):
-            jj = os.path.basename(jdir)
-            race_glob = f"{race}.json" if race else "*.json"
-            for ipath in sorted(glob.glob(os.path.join(jdir, race_glob))):
-                rfile = os.path.basename(ipath)
-                opath = os.path.join(ODDS, d, jj, rfile)
-                if os.path.exists(opath):
-                    pairs.append((ipath, opath))
-    return pairs
-
-def predict_for_pair(model, integ_path, odds_path, save=True):
+def predict_one(model_pack, integ_path, odds_path=None, outdir=OUTDIR):
+    os.makedirs(outdir, exist_ok=True)
     integ = safe_load(integ_path)
-    odds  = safe_load(odds_path)
-    rows = build_rows_for_race(integ, odds)
-    if not rows:
+    odds  = safe_load(odds_path) if odds_path and os.path.exists(odds_path) else {}
+
+    df = expand_trifecta_rows(integ, odds)
+    if df.empty:
         return None
 
-    df = pd.DataFrame(rows)
+    feature_cols = model_pack["feature_cols"]
+    clf = model_pack["model"]
 
-    # 学習時と同じ feature 選択
-    drop_cols = {"combo","date","jcd","race","weather","windDir","odds","popularity_rank"}
-    feature_cols = [c for c in df.columns if c not in drop_cols and df[c].dtype != "object"]
+    # 特徴構築
+    drop_cols = {"combo","odds","popularity_rank","date","jcd","race","weather","windDir"}
+    # 念のため列を揃える
+    for c in feature_cols:
+        if c not in df.columns:
+            df[c] = 0.0
     X = df[feature_cols].copy().fillna(0.0).astype(float)
 
-    df["p_raw"] = model.predict_proba(X)[:,1]
-    # レース内正規化（合計=1.0／ゼロ除算ガード）
-    denom = df["p_raw"].sum()
-    denom = denom if denom and denom > 0 else 1e-12
-    df["p_norm"] = df["p_raw"] / max(denom, 1e-12)
-    df["EV"] = df["p_norm"] * df["odds"]
+    # 予測 → softmax
+    df["race_key"] = df["date"].astype(str) + "-" + df["jcd"].astype(str) + "-" + df["race"]
+    z = clf.predict(X, raw_score=True)
+    df["score"] = z
+    df["p"] = softmax_by_group(df["score"], df["race_key"])
 
-    # 保存
-    if save:
-        date = df.loc[0, "date"]; jcd = df.loc[0, "jcd"]; race = df.loc[0, "race"]
-        outdir = os.path.join("public", "preds", str(date), str(jcd))
-        os.makedirs(outdir, exist_ok=True)
-        base = f"{race}_trifecta_preds"
-        df_out = df.sort_values("EV", ascending=False)
-        df_out.to_parquet(os.path.join(outdir, base + ".parquet"), index=False)
-        df_out.to_csv    (os.path.join(outdir, base + ".csv"),     index=False, encoding="utf-8")
-        print(f"saved: {outdir}/{base}.parquet  and  .csv")
+    # EV（オッズがある行のみ）
+    has_odds = df["odds"].notna()
+    df.loc[has_odds, "EV"] = df.loc[has_odds, "p"] * df.loc[has_odds, "odds"]
 
-    return df
+    # 出力
+    date = df.iloc[0]["date"]; jcd = df.iloc[0]["jcd"]; race = df.iloc[0]["race"]
+    out = df[["date","jcd","race","combo","F","S","T","odds","p","EV","popularity_rank"]].copy()
+    out = out.sort_values("p", ascending=False)
+    out_path = os.path.join(outdir, f"trifecta_pred_{date}_{jcd}_{race}.csv")
+    out.to_csv(out_path, index=False, encoding="utf-8")
+    print(f"Saved: {out_path}")
+    return out_path
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--date", help="YYYYMMDD（未指定なら全日）")
-    ap.add_argument("--jcd",  help="場コード（未指定なら全場）")
-    ap.add_argument("--race", help="例: 10R（未指定なら全R）")
-    ap.add_argument("--model", default=MODEL_PATH, help="モデルpklのパス")
-    args = ap.parse_args()
-
-    if not os.path.exists(args.model):
-        raise FileNotFoundError(f"model not found: {args.model}")
-
-    model = joblib.load(args.model)
-
-    pairs = collect_targets(args.date, args.jcd, args.race)
-    if not pairs:
-        print("No targets matched.")
-        return
-
-    for ipath, opath in pairs:
-        print(f"predict: {ipath}  +  {opath}")
-        predict_for_pair(model, ipath, opath, save=True)
+    model_pack = joblib.load("models/trifecta_lgbm.pkl")
+    # 例: 全日全場走査（オッズはあれば読む）
+    for integ_path in sorted(glob.glob(os.path.join(INTEG, "*", "*", "*.json"))):
+        fname = os.path.basename(integ_path)
+        date  = os.path.basename(os.path.dirname(os.path.dirname(integ_path)))
+        jcd   = os.path.basename(os.path.dirname(integ_path))
+        odds_path = os.path.join(ODDS, date, jcd, fname)
+        try:
+            predict_one(model_pack, integ_path, odds_path if os.path.exists(odds_path) else None)
+        except Exception as e:
+            print("skip:", integ_path, e)
 
 if __name__ == "__main__":
     main()
