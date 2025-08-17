@@ -27,6 +27,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -55,7 +57,8 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add public/preds/** || true
           git diff --cached --quiet || git commit -m "Add trifecta predictions (${{ github.event.inputs.date }} ${{ github.event.inputs.jcd }} ${{ github.event.inputs.race }})"
-          git push
+          git pull --rebase || true
+          git push || true
 
       - name: Upload prediction artifacts
         uses: actions/upload-artifact@v4
