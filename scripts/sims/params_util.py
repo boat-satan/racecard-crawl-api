@@ -1,12 +1,18 @@
 # scripts/sims/params_util.py
-import os, json, tomllib
+import os
+import json
+import tomllib
 
 def load_param_file(path: str) -> dict:
+    """
+    JSON または TOML のパラメータファイルを読み込み dict を返す。
+    """
     if not path:
         return {}
     p = os.path.expanduser(path)
     if not os.path.isfile(p):
         raise FileNotFoundError(p)
+
     ext = os.path.splitext(p)[1].lower()
     if ext == ".json":
         with open(p, "r", encoding="utf-8") as f:
@@ -19,11 +25,14 @@ def load_param_file(path: str) -> dict:
 def parse_set_overrides(expr: str) -> dict:
     """
     expr 例: "b_dt=17,cK=1.05,base_wake=0.15"
-    右辺は float として解釈できれば数値、ダメなら文字列のまま。
+    - 数値は int/float に変換
+    - true/false は bool に変換
+    - それ以外は文字列
     """
     out = {}
     if not expr:
         return out
+
     parts = [p.strip() for p in expr.split(",") if p.strip()]
     for kv in parts:
         if "=" not in kv:
@@ -32,8 +41,8 @@ def parse_set_overrides(expr: str) -> dict:
         k = k.strip()
         v = v.strip()
         try:
-            if v.lower() in ("true","false"):
-                out[k] = (v.lower()=="true")
+            if v.lower() in ("true", "false"):
+                out[k] = (v.lower() == "true")
             else:
                 out[k] = float(v) if ("." in v or "e" in v.lower()) else int(v)
         except Exception:
@@ -41,6 +50,9 @@ def parse_set_overrides(expr: str) -> dict:
     return out
 
 def apply_overrides_to_class(cls, over: dict):
+    """
+    クラスの属性に対して overrides を適用する。
+    """
     for k, v in over.items():
         if hasattr(cls, k):
             setattr(cls, k, v)
