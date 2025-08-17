@@ -1,0 +1,94 @@
+name: Keyman Search
+
+on:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: "Path to public (repo root からの相対 or 絶対)"
+        required: false
+        default: "public"
+      keyman_dir:
+        description: "pass1 の keyman JSON ルート"
+        required: false
+        default: "scripts/sims/pass1/keyman"
+      dates:
+        description: "YYYYMMDD カンマ区切り（例: 20250811,20250812）"
+        required: false
+        default: ""
+      pids:
+        description: "場コード（カンマ区切り。例: 05,10）"
+        required: false
+        default: ""
+      races:
+        description: "レース名（カンマ区切り。例: 1R,12R）"
+        required: false
+        default: ""
+      threshold:
+        description: "KEYMAN_RANK の閾値（以上を採用）"
+        required: false
+        default: "0.70"
+      out:
+        description: "出力CSVパス"
+        required: false
+        default: "scripts/sims/keyman_search_result.csv"
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TZ: Asia/Tokyo
+      PY: scripts/sims/keyman_search.py
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps (none needed, stdlib only)
+        run: |
+          python -V
+
+      - name: Run keyman_search
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BASE="${{ github.event.inputs.base || 'public' }}"
+          KEYMAN_DIR="${{ github.event.inputs.keyman_dir || 'scripts/sims/pass1/keyman' }}"
+          DATES="${{ github.event.inputs.dates || '' }}"
+          PIDS="${{ github.event.inputs.pids || '' }}"
+          RACES="${{ github.event.inputs.races || '' }}"
+          THRESHOLD="${{ github.event.inputs.threshold || '0.70' }}"
+          OUT="${{ github.event.inputs.out || 'scripts/sims/keyman_search_result.csv' }}"
+
+          ARGS=( --base "$BASE" --keyman-dir "$KEYMAN_DIR" --threshold "$THRESHOLD" --out "$OUT" )
+          [ -n "$DATES" ] && ARGS+=( --dates "$DATES" )
+          [ -n "$PIDS" ]  && ARGS+=( --pids "$PIDS" )
+          [ -n "$RACES" ] && ARGS+=( --races "$RACES" )
+
+          echo "[debug] base=$BASE  keyman_dir=$KEYMAN_DIR"
+          echo "[debug] dates=${DATES:-'(all)'}  pids=${PIDS:-'(all)'}  races=${RACES:-'(all)'}"
+          echo "[debug] threshold=$THRESHOLD  out=$OUT"
+          python "$PY" "${ARGS[@]}"
+
+      - name: Commit CSV into repo
+        run: |
+          set -eux
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add -A scripts/sims/keyman_search_result.csv || true
+          git commit -m "keyman_search: $(date +'%Y-%m-%d %H:%M:%S %Z')" || true
+          git push || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: keyman-search-result
+          path: scripts/sims/keyman_search_result.csv
+          if-no-files-found: warn
