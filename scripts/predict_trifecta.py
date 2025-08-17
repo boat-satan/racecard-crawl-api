@@ -1,18 +1,28 @@
-# scripts/predict_trifecta.py
 # -*- coding: utf-8 -*-
+"""
+推論スクリプト（オッズの有無どちらでもOK）
+- 統合JSONと（あれば）オッズJSONを読む
+- 3連単120通り（またはオッズ側の候補）を展開
+- LGBMの raw_score → レース内softmax で確率化
+- EV(= p * odds) はオッズがあるときのみ
+- 出力: public/preds/v1/<date>/<pid>/trifecta_pred_<date>_<pid>_<race>.csv
+"""
 import os, json, glob, re, argparse
 import numpy as np
 import pandas as pd
 import joblib
 from itertools import permutations
 
+# ---- パス設定（既存構成に合わせる） ----
 BASE   = "public"
 INTEG  = os.path.join(BASE, "integrated", "v1")
 ODDS   = os.path.join(BASE, "odds",       "v1")
-OUTDIR = os.path.join(BASE, "preds", "v1")
+OUTDIR = os.path.join(BASE, "preds",      "v1")
 
-MODEL_PKL = "models/trifecta_lgbm.pkl"
+MODEL_PKL  = os.path.join("models", "trifecta_lgbm.pkl")
+FEATS_JSON = os.path.join("models", "trifecta_feature_cols.json")  # あれば優先使用
 
+# ---- ユーティリティ ----
 def to_float(x):
     if x is None: return None
     s = str(x).strip().replace("kg","")
@@ -23,7 +33,7 @@ def to_float(x):
     except:
         return None
 
-def ex_flag(st_raw):
+def ex_flag(st_raw):  # Fスタートフラグ
     return 1 if (st_raw and str(st_raw).strip().startswith("F")) else 0
 
 def safe_load(path):
@@ -101,11 +111,12 @@ def lane_feats(entry):
     return feat
 
 def expand_trifecta_rows(integ, odds):
-    date = integ["date"]; pid = integ["pid"]; race = integ["race"]
+    # NOTE: 統合JSONは pid キー（場コード）を使う
+    date = integ["date"]; pid = integ["pid"]; race = str(integ["race"])
 
     w = integ.get("weather") or {}
     global_cols = dict(
-        date=date, pid=pid, race=race,
+        date=str(date), pid=str(pid), race=str(race),
         weather=w.get("weather"),
         temperature=to_float(w.get("temperature")),
         windSpeed=to_float(w.get("windSpeed")),
@@ -154,52 +165,79 @@ def softmax_by_group(scores: pd.Series, keys: pd.Series) -> pd.Series:
         m = np.max(a)
         e = np.exp(a - m)
         return pd.Series(e / e.sum(), index=s.index)
-    return scores.groupby(keys).apply(_sm)
+    return scores.groupby(keys, group_keys=False).apply(_sm)
 
-def get_model_feature_names(model):
-    # 学習時の特徴名が残っていればそれを使う
-    try:
-        return list(model.booster_.feature_name())
-    except Exception:
-        pass
-    try:
-        return list(getattr(model, "feature_name_", None) or [])
-    except Exception:
-        return []
+# ---- モデルと特徴量列のロード（安全策込み） ----
+def load_model_and_features():
+    model = joblib.load(MODEL_PKL)
 
-def build_X(df, model):
-    # モデルの特徴名があればそれを優先。無ければ数値列を自動採用。
-    drop_cols = {"combo","odds","popularity_rank","date","pid","race","weather","windDir"}
-    model_feats = get_model_feature_names(model)
-    if model_feats:
-        for c in model_feats:
-            if c not in df.columns:
-                df[c] = 0.0
-        X = df[model_feats].copy()
-    else:
-        cand = [c for c in df.columns if c not in drop_cols and df[c].dtype != "object"]
-        X = df[cand].copy()
+    # 1) pklが dict 形式（model + feature_cols）
+    if isinstance(model, dict) and "model" in model and "feature_cols" in model:
+        return model["model"], list(model["feature_cols"])
+
+    # 2) pklがモデル単体 + feature_cols.json が存在
+    if os.path.exists(FEATS_JSON):
+        with open(FEATS_JSON, "r", encoding="utf-8") as f:
+            feats = json.load(f)
+        return model, list(feats)
+
+    # 3) pklがLGBMで feature_name_ を持っている
+    feat_names = getattr(model, "feature_name_", None)
+    if feat_names:
+        # 将来のエラー回避用に保存しておく
+        try:
+            os.makedirs(os.path.dirname(FEATS_JSON), exist_ok=True)
+            with open(FEATS_JSON, "w", encoding="utf-8") as f:
+                json.dump(list(feat_names), f, ensure_ascii=False, indent=2)
+            print(f"[info] feature_cols を自動推定して保存しました -> {FEATS_JSON}")
+        except Exception:
+            pass
+        return model, list(feat_names)
+
+    # 4) それでもダメなら明示的にエラー
+    raise RuntimeError(
+        "モデルは読み込めたが feature_cols が見つからない。"
+        "train 時に feature_cols を保存するか、models/trifecta_feature_cols.json を用意して。"
+    )
+
+def build_X_by_feature_cols(df: pd.DataFrame, feature_cols: list) -> pd.DataFrame:
+    # 欠けている列は 0.0 を入れて補完、余剰列は捨てる
+    for c in feature_cols:
+        if c not in df.columns:
+            df[c] = 0.0
+    X = df[feature_cols].copy()
+    # 将来のpandas変更に備えて明示キャスト
     return X.fillna(0.0).astype(float)
 
-def predict_one(model, integ_path, odds_path, outdir):
+# ---- 1レース分の推論 ----
+def predict_one(model, feat_cols, integ_path, odds_path, outdir):
     integ = safe_load(integ_path)
     odds  = safe_load(odds_path) if (odds_path and os.path.exists(odds_path)) else {}
+
     df = expand_trifecta_rows(integ, odds)
     if df.empty:
         return None
 
-    X = build_X(df, model)
+    # 型の揃え（race/date/pid は文字列で統一）
+    df["race"] = df["race"].astype(str)
+    df["date"] = df["date"].astype(str)
+    df["pid"]  = df["pid"].astype(str)
 
-    # 予測（raw_score→softmax）
-    df["race_key"] = df["date"].astype(str) + "-" + df["pid"].astype(str) + "-" + df["race"]
-    z = model.predict(X, raw_score=True, pred_disable_shape_check=True)
-    df["score"] = z
-    df["p"] = softmax_by_group(df["score"], df["race_key"])
+    # 学習時特徴に合わせて行列を構築
+    X = build_X_by_feature_cols(df, feat_cols)
+
+    # 予測（raw_score→レース内softmax）
+    raw = model.predict(X, raw_score=True)
+    df["score"]    = raw
+    df["race_key"] = df["date"] + "-" + df["pid"] + "-" + df["race"]
+    df["p"]        = softmax_by_group(df["score"], df["race_key"])
+
+    # EV（オッズがある行のみ）
     has_odds = df["odds"].notna()
     df.loc[has_odds, "EV"] = df.loc[has_odds, "p"] * df.loc[has_odds, "odds"]
 
     # 保存
-    date = str(df.iloc[0]["date"]); pid = str(df.iloc[0]["pid"]); race = str(df.iloc[0]["race"])
+    date = df.iloc[0]["date"]; pid = df.iloc[0]["pid"]; race = df.iloc[0]["race"]
     outdir2 = os.path.join(outdir, date, pid)
     os.makedirs(outdir2, exist_ok=True)
     out = df[["date","pid","race","combo","F","S","T","odds","p","EV","popularity_rank"]].sort_values("p", ascending=False)
@@ -208,23 +246,26 @@ def predict_one(model, integ_path, odds_path, outdir):
     print("Saved:", out_path)
     return out_path
 
+# ---- メイン ----
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--date", required=True)
-    ap.add_argument("--pid",  required=True)           # ★ jcd → pid
-    ap.add_argument("--race", default="")              # 例: 10R
+    ap.add_argument("--date", required=True, help="YYYYMMDD")
+    ap.add_argument("--pid",  required=True, help="場コード（例: 02）")
+    ap.add_argument("--race", default="",  help="レース名（例: 10R）省略可")
     args = ap.parse_args()
 
-    model = joblib.load(MODEL_PKL)
+    model, feat_cols = load_model_and_features()
 
-    race_pat = f"{args.race}.json" if args.race else "*.json"
+    race_pat   = f"{args.race}.json" if args.race else "*.json"
     integ_glob = os.path.join(INTEG, args.date, args.pid, race_pat)
+
     for integ_path in sorted(glob.glob(integ_glob)):
-        fname = os.path.basename(integ_path)
+        fname     = os.path.basename(integ_path)           # 例: 1R.json
         odds_path = os.path.join(ODDS, args.date, args.pid, fname)
         try:
-            predict_one(model, integ_path, odds_path, OUTDIR)
+            predict_one(model, feat_cols, integ_path, odds_path, OUTDIR)
         except Exception as e:
+            # 1件エラーでも全体は止めない
             print("skip:", integ_path, e)
 
 if __name__ == "__main__":
