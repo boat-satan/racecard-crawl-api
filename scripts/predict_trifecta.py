@@ -11,8 +11,8 @@ INTEG  = os.path.join(BASE, "integrated", "v1")
 ODDS   = os.path.join(BASE, "odds",       "v1")
 OUTDIR = os.path.join(BASE, "preds", "v1")
 
-MODEL_PKL = "models/trifecta_lgbm.pkl"
-FEATS_JSON = "models/trifecta_feature_cols.json"  # 予備
+MODEL_PKL  = "models/trifecta_lgbm.pkl"
+FEATS_JSON = "models/trifecta_feature_cols.json"  # ここに列情報を保存/参照
 
 def to_float(x):
     if x is None: return None
@@ -65,7 +65,7 @@ def flatten_entry_course(stats_entry_course: dict) -> dict:
 
     for item in (stats_entry_course.get("exTimeRank") or []):
         r = item.get("rank")
-        if r is None: 
+        if r is None:
             continue
         out[f"exRank{r}_winRate"]  = to_float(item.get("winRate"))
         out[f"exRank{r}_top2Rate"] = to_float(item.get("top2Rate"))
@@ -157,20 +157,19 @@ def softmax_by_group(scores: pd.Series, keys: pd.Series) -> pd.Series:
         return pd.Series(e / e.sum(), index=s.index)
     return scores.groupby(keys).apply(_sm)
 
+# --- 最小修正：feature_cols が無い場合は None を返す ---
 def load_model_and_features():
     obj = joblib.load(MODEL_PKL)
-    # dict 形式（model + feature_cols）ならそのまま
-    if isinstance(obj, dict) and "model" in obj and "feature_cols" in obj:
-        return obj["model"], obj["feature_cols"]
-    # モデル単体なら feature_cols を別ファイルから
+    if isinstance(obj, dict) and "model" in obj:
+        # feature_cols は無くてもOK（後で推定）
+        return obj["model"], obj.get("feature_cols")
+    # モデル単体保存のとき
     if os.path.exists(FEATS_JSON):
         with open(FEATS_JSON, "r", encoding="utf-8") as f:
             feats = json.load(f)
         return obj, feats
-    raise RuntimeError(
-        "モデルは読み込めたが feature_cols が見つからない。"
-        "train 時に feature_cols を保存するか、models/trifecta_feature_cols.json を用意して。"
-    )
+    # 列情報が無いがモデルは返す（列は予測時に推定）
+    return obj, None
 
 def predict_one(model, feat_cols, integ_path, odds_path, outdir):
     integ = safe_load(integ_path)
@@ -178,6 +177,16 @@ def predict_one(model, feat_cols, integ_path, odds_path, outdir):
     df = expand_trifecta_rows(integ, odds)
     if df.empty:
         return None
+
+    # ▼最小修正：feature_cols が無ければ自動推定して保存
+    drop_cols = {"combo","odds","popularity_rank","date","jcd","race","weather","windDir"}
+    if feat_cols is None:
+        auto_cols = [c for c in df.columns if c not in drop_cols and df[c].dtype != "object"]
+        feat_cols = sorted(auto_cols)
+        os.makedirs(os.path.dirname(FEATS_JSON), exist_ok=True)
+        with open(FEATS_JSON, "w", encoding="utf-8") as f:
+            json.dump(feat_cols, f, ensure_ascii=False)
+        print(f"[info] feature_cols を自動推定して保存しました -> {FEATS_JSON}")
 
     # 列揃え
     for c in feat_cols:
@@ -190,6 +199,8 @@ def predict_one(model, feat_cols, integ_path, odds_path, outdir):
     z = model.predict(X, raw_score=True)
     df["score"] = z
     df["p"] = softmax_by_group(df["score"], df["race_key"])
+
+    # EV（オッズがある行のみ）
     has_odds = df["odds"].notna()
     df.loc[has_odds, "EV"] = df.loc[has_odds, "p"] * df.loc[has_odds, "odds"]
 
