@@ -40,8 +40,8 @@ jobs:
 
       - name: Sanity check
         run: |
-          test -f scripts/tenkai/features_c.py || { echo "scripts/tenkai/features_c.py がありません"; exit 1; }
-          test -f scripts/tenkai/build_c_features.py || { echo "scripts/tenkai/build_c_features.py がありません"; exit 1; }
+          test -f scripts/TENKAI/features_c.py || { echo "scripts/tenkai/features_c.py がありません"; exit 1; }
+          test -f scripts/TENKAI/build_c_features.py || { echo "scripts/tenkai/build_c_features.py がありません"; exit 1; }
 
       - name: Build C features
         shell: bash
@@ -51,8 +51,8 @@ jobs:
           if [ -n "${{ github.event.inputs.race }}" ]; then
             RACE_OPT="--race '${{ github.event.inputs.race }}'"
           fi
-          echo "python scripts/tenkai/build_c_features.py --date '${{ github.event.inputs.date }}' --pid '${{ github.event.inputs.pid }}' $RACE_OPT"
-          python scripts/tenkai/build_c_features.py \
+          echo "python scripts/TENKAI/build_c_features.py --date '${{ github.event.inputs.date }}' --pid '${{ github.event.inputs.pid }}' $RACE_OPT"
+          python scripts/TENKAI/build_c_features.py \
             --date "${{ github.event.inputs.date }}" \
             --pid  "${{ github.event.inputs.pid }}" \
             ${RACE_OPT}
@@ -61,7 +61,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add public/tenkai/features_c/v1/** || true
+          git add public/TENKAI/features_c/v1/** || true
           git diff --cached --quiet || git commit -m "TENKAI C features: ${{ github.event.inputs.date }} pid=${{ github.event.inputs.pid }} ${{ github.event.inputs.race }}"
           git push
 
