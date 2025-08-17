@@ -1,12 +1,10 @@
-# -*- coding: utf-8 -*-
-"""
-統合JSON/オッズ/結果の直読み → 3連単データ展開 → LightGBM学習
-- stats.entryCourse を広く展開
-- オッズは学習に使わず、学習後のEV計算のみで利用（ある場合）
-- レース内softmaxで確率正規化
-- class_weightは学習データの陽性比に合わせて動的設定
-- 学習済みを models/trifecta_lgbm.pkl（model+feature_cols）に保存
-"""
+# scripts/train_trifecta.py
+# 統合JSON/結果の直読み（オッズは任意） → 3連単データ展開 → LightGBM学習
+# ・stats.entryCourse を広く展開
+# ・オッズは学習に使わず、学習後のEV計算のみで利用（存在すれば）
+# ・学習済みモデルを models/trifecta_lgbm.pkl に保存
+# ・pandas clip は min= を使用
+
 import os, json, glob, re
 import numpy as np
 import pandas as pd
@@ -16,7 +14,7 @@ import joblib
 
 BASE = "public"
 INTEG = os.path.join(BASE, "integrated", "v1")
-ODDS  = os.path.join(BASE, "odds",       "v1")
+ODDS  = os.path.join(BASE, "odds",       "v1")      # ← 任意
 RES   = os.path.join(BASE, "results",    "v1")
 
 def to_float(x):
@@ -131,6 +129,7 @@ def build_rows_for_race(integ, odds, result):
 
     trifecta_list = (odds or {}).get("trifecta") or []
     if len(trifecta_list) == 0:
+        # オッズが無い場合は全120通りを自動生成（odds/popularityは欠損のまま）
         from itertools import permutations
         combos = ["-".join(map(str, p)) for p in permutations([1,2,3,4,5,6], 3)]
         trifecta_list = [{"combo": c} for c in combos]
@@ -156,8 +155,8 @@ def build_rows_for_race(integ, odds, result):
         row.update(role_prefix("S", S))
         row.update(role_prefix("T", T))
         row["is_win"] = 1 if (hit_combo and combo == hit_combo) else 0
-        row["odds"] = to_float(item.get("odds"))
-        row["popularity_rank"] = item.get("popularityRank")
+        row["odds"] = to_float(item.get("odds")) if item is not None else None
+        row["popularity_rank"] = item.get("popularityRank") if item is not None else None
         rows.append(row)
 
     return rows
@@ -170,28 +169,18 @@ def load_dataset(date_glob="*", jcd_glob="*"):
             jcd = os.path.basename(jcd_dir)
             for integ_path in sorted(glob.glob(os.path.join(jcd_dir, "*.json"))):
                 race_file = os.path.basename(integ_path)
-                odds_path = os.path.join(ODDS, date, jcd, race_file)
-                res_path  = os.path.join(RES,  date, jcd, race_file)
-                # 結果が無いレースは学習不可（正解ラベルなし）
+                odds_path = os.path.join(ODDS, date, jcd, race_file)   # ← あれば読む
+                res_path  = os.path.join(RES,  date, jcd, race_file)   # ← 必須
                 if not os.path.exists(res_path):
-                    continue
+                    continue  # 結果が無いと正解ラベルが付かないのでスキップ
                 try:
                     integ  = safe_load(integ_path)
-                    odds   = safe_load(odds_path) if os.path.exists(odds_path) else {}
+                    odds   = safe_load(odds_path) if os.path.exists(odds_path) else None
                     result = safe_load(res_path)
                 except Exception:
                     continue
                 records.extend(build_rows_for_race(integ, odds, result))
     return pd.DataFrame(records)
-
-def softmax_by_group(scores: pd.Series, keys: pd.Series) -> pd.Series:
-    # レース内softmax（数値安定化）
-    def _sm(s):
-        a = s.values
-        m = np.max(a)
-        e = np.exp(a - m)
-        return pd.Series(e / e.sum(), index=s.index)
-    return scores.groupby(keys).apply(_sm)
 
 def main():
     df = load_dataset("*", "*")
@@ -205,6 +194,7 @@ def main():
     X_all = df[feature_cols].copy().fillna(0.0).astype(float)
     y_all = df["is_win"].astype(int)
 
+    # レース単位で分割
     df["race_key"] = df["date"].astype(str) + "-" + df["jcd"].astype(str) + "-" + df["race"]
     races = df["race_key"].unique()
     train_races, test_races = train_test_split(races, test_size=0.2, random_state=42, shuffle=True)
@@ -215,46 +205,32 @@ def main():
     X_te, y_te = X_all[tst], y_all[tst]
     df_te = df[tst].copy()
 
-    # 動的 class_weight
-    pos = int(y_tr.sum()); neg = len(y_tr) - pos
-    scale_pos = neg / max(pos, 1)
-    class_w = {0:1.0, 1:scale_pos}
-
     clf = LGBMClassifier(
         n_estimators=700, learning_rate=0.05,
         max_depth=-1, num_leaves=95,
         subsample=0.9, colsample_bytree=0.9,
-        class_weight=class_w, random_state=42
+        class_weight={0:1.0, 1:120.0}, random_state=42
     )
     clf.fit(X_tr, y_tr)
 
-    # 保存：モデル＋特徴量列
+    # モデル保存
     os.makedirs("models", exist_ok=True)
-    joblib.dump({"model": clf, "feature_cols": feature_cols}, "models/trifecta_lgbm.pkl")
+    joblib.dump(clf, "models/trifecta_lgbm.pkl")
     print("Saved model: models/trifecta_lgbm.pkl")
 
-    # ===== レース内 softmax 確率 =====
-    z = clf.predict(X_te, raw_score=True)
-    df_te["score"] = z
-    df_te["p_norm"] = softmax_by_group(df_te["score"], df_te["race_key"])
+    # 参考: レース内確率正規化（clipはmin=を使用）
+    df_te["p_raw"] = clf.predict_proba(X_te)[:,1]
+    denom = df_te.groupby("race_key")["p_raw"].transform(lambda s: s.sum().clip(min=1e-12))
+    df_te["p_norm"] = df_te["p_raw"] / denom
 
-    # 評価（レース単位）
-    g = df_te.sort_values(["race_key","p_norm"], ascending=[True, False])
-    top = g.groupby("race_key").head(1)
-    top1_acc = top["is_win"].mean()
+    # EVはオッズがある行のみ（ない場合はNaNのまま）
+    if "odds" in df_te.columns:
+        df_te["EV"] = df_te["p_norm"] * df_te["odds"]
 
-    # 勝ち行だけのlogloss（キャリブ確認）
-    win = df_te[df_te["is_win"]==1]
-    eps = 1e-12
-    logloss = -np.log(np.clip(win["p_norm"].values, eps, 1.0)).mean() if len(win) else np.nan
-
-    # EV（オッズがある行のみ）
-    has_odds = df_te["odds"].notna()
-    df_te.loc[has_odds, "EV"] = df_te.loc[has_odds, "p_norm"] * df_te.loc[has_odds, "odds"]
-    ev_mean = df_te.loc[has_odds, "EV"].mean() if has_odds.any() else np.nan
-
-    print(f"Test races: {df_te['race_key'].nunique()}, Top1={top1_acc:.3f}, LogLoss={logloss:.3f}, EV_mean={ev_mean:.3f}")
-    print("Eval sample:\n", df_te[["race_key","combo","is_win","odds","p_norm","EV"]].head(8).to_string(index=False))
+    cols_show = ["race_key","combo","is_win","odds","p_norm"]
+    if "EV" in df_te.columns:
+        cols_show.append("EV")
+    print("Eval sample:", df_te[cols_show].head(5).to_string(index=False))
 
 if __name__ == "__main__":
     main()
