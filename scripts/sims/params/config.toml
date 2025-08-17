@@ -1,0 +1,33 @@
+# config.toml
+# SimS ver1.0 (E1) 調整パラメータセット
+# 目的: 的中率 ≈50%、平均配当↑、ROI改善
+
+[engine]
+name = "SimS ver1.0 (E1)"
+sims_per_race = 1200
+unit = 100
+
+[strategy]
+type = "trifecta_topN"
+topn = 30
+require_odds = true
+odds_min = 10.0
+odds_max = 0.0   # 上限なし
+
+[filters]
+exclude_first1 = false
+only_first1 = false
+buy_if_keyman_in_top3 = false
+buy_keyman_threshold = 0.95
+
+[keyman]
+threshold = 0.8
+boost = 1.0
+aggr = 1.0
+
+[params]
+delta_first = 0.35
+delta_lineblock = 0.30
+cK = 1.40
+p_backoff = 0.15
+decision_bias_mult = 0.90
