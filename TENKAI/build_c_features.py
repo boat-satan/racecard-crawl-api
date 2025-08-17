@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """
 integrated/v1 を走査して C(編成・相対)特徴CSVを作る
-出力: tenkai/outputs/features_c.csv
+出力: TENKAI/outputs/features_c.csv
 """
 import os, glob, json, csv
 from features_c import build_c_features
 
 BASE = "public"
 INTEG = os.path.join(BASE, "integrated", "v1")
-OUTDIR = os.path.join("tenkai", "outputs")
+OUTDIR = os.path.join("TENKAI", "outputs")
 OUTCSV = os.path.join(OUTDIR, "features_c.csv")
 
 def _safe_load(p):
