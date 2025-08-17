@@ -1,7 +1,4 @@
 # scripts/merge_races.py
-# 統合データ(integrated)・オッズ(odds)・結果(results)を突合し、
-# 3連単の組み合わせごとに1行で出力するCSVを public/merged/ 配下に生成します。
-
 import os
 import json
 import pandas as pd
@@ -18,7 +15,6 @@ def safe_load(path):
         return json.load(f)
 
 def collect_entry_features(integ_json):
-    """出走表から基本特徴（選手名/レーン＋天候）を抜き出し"""
     entries = integ_json.get('entries', []) or []
     feat = {}
     for e in entries:
@@ -62,9 +58,7 @@ def main():
                 odds_path   = os.path.join(ODDS_ROOT,       date, jcd, filename)
                 result_path = os.path.join(RESULTS_ROOT,    date, jcd, filename)
 
-                # 必須ファイルが無いケースはスキップ
                 if not (os.path.exists(odds_path) and os.path.exists(result_path)):
-                    # print(f'Skip: odds/results missing for {date}/{jcd}/{race}')
                     continue
 
                 try:
@@ -72,46 +66,39 @@ def main():
                     odds_data = safe_load(odds_path)
                     result = safe_load(result_path)
                 except Exception:
-                    # 壊れている/読み取れないファイルはスキップ
                     continue
 
-                # 出走表→特徴量
                 entry_info = collect_entry_features(integ)
 
-                # 結果の確定3連単
-                winning_combo = (
-                    (result.get('payouts') or {})
-                    .get('trifecta', {})
-                    .get('combo')
-                )
+                # 結果の確定3連単（安全に取得）
+                payouts = result.get('payouts') or {}
+                trifecta_info = payouts.get('trifecta') or {}
+                winning_combo = trifecta_info.get('combo')
 
-                # オッズ（3連単）を展開
                 trifecta = odds_data.get('trifecta') or []
                 for item in trifecta:
                     combo = item.get('combo')
                     if not combo:
                         continue
                     rec = {
-                        'date': date,                # YYYYMMDD
-                        'jcd': jcd,                  # 場コード
-                        'race': race,                # '10R' など
-                        'combo': combo,              # '1-2-3'
+                        'date': date,
+                        'jcd': jcd,
+                        'race': race,
+                        'combo': combo,
                         'F': item.get('F'),
                         'S': item.get('S'),
                         'T': item.get('T'),
                         'odds': item.get('odds'),
                         'popularity_rank': item.get('popularityRank'),
-                        'is_win': 1 if combo == winning_combo else 0,
+                        'is_win': 1 if winning_combo and combo == winning_combo else 0,
                     }
                     rec.update(entry_info)
                     records.append(rec)
 
-    # DataFrame & 出力
     df = pd.DataFrame.from_records(records)
     os.makedirs(OUT_DIR, exist_ok=True)
     df.to_csv(OUT_PATH, index=False, encoding='utf-8-sig')
 
-    # ざっくりサマリ（f-stringのクオート修正）
     print(f"rows={len(df)}  races={df['date'].nunique()} dates x {df['jcd'].nunique()} places")
     print(f'output: {OUT_PATH}')
 
