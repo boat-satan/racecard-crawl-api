@@ -1,91 +1,14 @@
-name: Build TENKAI C features
+# -*- coding: utf-8 -*-
+"""
+CLI ラッパー（ワークフローからこれを叩く）
+"""
+import argparse
+from TENKAI.features_c import build_c_features
 
-on:
-  workflow_dispatch:
-    inputs:
-      date:
-        description: '対象日 (YYYYMMDD)'
-        required: true
-      pid:
-        description: '場コード pid (例: 02)'
-        required: true
-      race:
-        description: 'レース (例: 1R) 空なら全R'
-        required: false
-        default: ''
-
-permissions:
-  contents: write
-
-concurrency:
-  group: tenkai-c-${{ github.ref }}
-  cancel-in-progress: true
-
-jobs:
-  build-c-features:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pandas
-
-      - name: Sanity check
-        run: |
-          test -f TENKAI/features_c.py || { echo "TENKAI/features_c.py がありません"; exit 1; }
-          mkdir -p TENKAI
-          [ -f TENKAI/__init__.py ] || printf "" > TENKAI/__init__.py
-
-      - name: Build C features
-        shell: bash
-        run: |
-          set -euxo pipefail
-          RACE_OPT=""
-          if [ -n "${{ github.event.inputs.race }}" ]; then
-            # 引用符なしで渡す（'1R' → 1R）
-            RACE_OPT="--race ${{ github.event.inputs.race }}"
-          fi
-
-          echo ">>> 実行コマンド"
-          echo python TENKAI/features_c.py --date ${{ github.event.inputs.date }} --pid ${{ github.event.inputs.pid }} $RACE_OPT
-
-          PYTHONPATH="." python TENKAI/features_c.py \
-            --date ${{ github.event.inputs.date }} \
-            --pid  ${{ github.event.inputs.pid }} \
-            $RACE_OPT
-
-          echo ">>> 生成物一覧"
-          ls -alR TENKAI || true
-
-          # 出力先を正規パスに束ねる
-          OUT_DIR="TENKAI/features_c/v1/${{ github.event.inputs.date }}/${{ github.event.inputs.pid }}"
-          echo "OUT_DIR=${OUT_DIR}"
-
-          # 何も生成されてなければ失敗させて原因をすぐ掴む
-          if [ ! -d "${OUT_DIR}" ] || ! compgen -G "${OUT_DIR}/*.csv" > /dev/null; then
-            echo "ERROR: 出力CSVが見つかりません: ${OUT_DIR}/*.csv"
-            exit 1
-          fi
-
-      - name: Commit outputs
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add TENKAI/features_c/v1/** || true
-          git diff --cached --quiet || git commit -m "TENKAI C features: ${{ github.event.inputs.date }} pid=${{ github.event.inputs.pid }} ${{ github.event.inputs.race }}"
-          git push
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: tenkai-c-${{ github.event.inputs.date }}-${{ github.event.inputs.pid }}${{ github.event.inputs.race && format('-{0}', github.event.inputs.race) || '' }}
-          path: TENKAI/features_c/v1/${{ github.event.inputs.date }}/${{ github.event.inputs.pid }}/*.csv
-          if-no-files-found: error
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--date", required=True)
+    ap.add_argument("--pid", required=True)
+    ap.add_argument("--race", default="")
+    args = ap.parse_args()
+    build_c_features(args.date, args.pid, args.race)
