@@ -11,7 +11,7 @@ on:
       - 'public/results/v1/**'
 
 permissions:
-  contents: write   # 予測ファイルをコミットするために必要
+  contents: write
 
 concurrency:
   group: train-trifecta-${{ github.ref }}
@@ -25,11 +25,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # ※ cache指定や requirements 検出は一切しない（ここが失敗原因）
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
 
       - name: Install dependencies
         run: |
@@ -37,8 +37,7 @@ jobs:
           pip install lightgbm scikit-learn pandas pyarrow
 
       - name: Run training
-        run: |
-          python scripts/train_trifecta.py
+        run: python scripts/train_trifecta.py
 
       - name: Commit predictions
         run: |
@@ -48,7 +47,7 @@ jobs:
           git diff --cached --quiet || git commit -m "Update trifecta predictions (auto)"
           git push
 
-      # 任意: 実行結果をArtifactsでも保存（必要なければ削除OK）
+      # Optional: Artifactsにも保存（不要なら削除可）
       - name: Upload prediction artifacts
         uses: actions/upload-artifact@v4
         with:
