@@ -38,6 +38,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas python-dateutil
 
+      # ── ここがA方式のポイント：TENKAIをパッケージとして扱う ──
+      - name: Ensure TENKAI is a package
+        run: |
+          mkdir -p TENKAI
+          [ -f TENKAI/__init__.py ] || touch TENKAI/__init__.py
+
       - name: Sanity check
         run: |
           test -f TENKAI/features_c.py        || { echo "TENKAI/features_c.py がありません"; exit 1; }
@@ -49,18 +55,19 @@ jobs:
           set -euo pipefail
           RACE_OPT=""
           if [ -n "${{ github.event.inputs.race }}" ]; then
-            RACE_OPT="--race ${{ github.event.inputs.race }}"
+            RACE_OPT="--race '${{ github.event.inputs.race }}'"
           fi
-          echo "python TENKAI/build_c_features.py --date ${{ github.event.inputs.date }} --pid ${{ github.event.inputs.pid }} $RACE_OPT"
+          echo "python TENKAI/build_c_features.py --date '${{ github.event.inputs.date }}' --pid '${{ github.event.inputs.pid }}' $RACE_OPT"
           python TENKAI/build_c_features.py \
             --date "${{ github.event.inputs.date }}" \
             --pid  "${{ github.event.inputs.pid }}" \
-            $RACE_OPT
+            ${RACE_OPT}
 
       - name: Commit outputs
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          # 出力先は リポジトリ直下 TENKAI/features_c/v1/** を想定
           git add TENKAI/features_c/v1/** || true
           git diff --cached --quiet || git commit -m "TENKAI C features: ${{ github.event.inputs.date }} pid=${{ github.event.inputs.pid }} ${{ github.event.inputs.race }}"
           git push
