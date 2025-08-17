@@ -32,7 +32,7 @@ def load_param_file(path: str) -> dict:
     if ext == ".toml":
         if tomllib is None:
             raise RuntimeError("tomlファイルを読むには Python 3.11 以上が必要です")
-        with open(p, "rb") as f:
+        with open(p, "rb", encoding="utf-8") as f:
             return tomllib.load(f)
     raise ValueError(f"Unsupported params file extension: {ext} (use .json or .toml)")
 
@@ -224,7 +224,6 @@ def one_pass(entry, T1M, A, Ap, env, lineblocks, first_right, aggr_map=None):
         dt = T1M[chase] - T1M[lead]
         dK = (A[chase] + Ap[chase]) - (A[lead] + Ap[lead])
         delta = (Params.delta_lineblock if (lead, chase) in lineblocks else 0.0)
-        # 先行がキー艇ならブロック寄与を微増
         if str(lead) in aggr_map:
             delta += 0.10 * float(aggr_map[str(lead)])
         if lead in first_right: delta += Params.delta_first
@@ -232,7 +231,6 @@ def one_pass(entry, T1M, A, Ap, env, lineblocks, first_right, aggr_map=None):
         if used: safe_used_count += 1
         dt_eff = dt + Params.gamma_wall + Params.k_turn_err * turn_err
         logit = Params.a0 + Params.b_dt*(theta_eff - dt_eff) + Params.cK*dK + delta
-        # 追走がキー艇なら入替ロジットを押し上げ（攻撃ボーナス）
         if str(chase) in aggr_map:
             a = float(aggr_map[str(chase)])
             logit += 0.45 * a
@@ -249,7 +247,6 @@ def one_pass(entry, T1M, A, Ap, env, lineblocks, first_right, aggr_map=None):
 def simulate_one(integrated_json: dict, sims: int = 600,
                  boost_map: dict | None = None,
                  aggr_map: dict | None = None):
-    # boost_map: {"1":0.15, "4":0.15} → A/Ap を (1+0.15) 倍
     inp = build_input_from_integrated(integrated_json)
     if boost_map:
         for l in list(inp["A"].keys()):
@@ -258,23 +255,19 @@ def simulate_one(integrated_json: dict, sims: int = 600,
                 inp["A"][l]  *= (1.0 + b)
                 inp["Ap"][l] *= (1.0 + b)
 
-    # aggr_map: {"3":0.8, ...} → 挙動改変（キー艇のみ）
     aggr_map = aggr_map or {}
     if aggr_map:
         for l in list(inp["ST_model"].keys()):
             a = float(aggr_map.get(str(l), 0.0))
             if a <= 0: continue
-            # ST 分布：平均を前倒し（小さく）、分散を縮小
             inp["ST_model"][str(l)]["mu"]    = max(0.05, inp["ST_model"][str(l)]["mu"] - 0.006*a)
             inp["ST_model"][str(l)]["sigma"] = max(0.005, inp["ST_model"][str(l)]["sigma"] * (1.0 - 0.35*a))
 
     lanes = inp["lanes"]; env = inp["env"]; _, st_gain = wind_adjustments(env)
 
-    # 既存集計
     trifecta = Counter(); kimarite = Counter()
     pair_counts = Counter(); third_counts = Counter()
 
-    # キーマン用集計
     first_counts = Counter(); second_counts = Counter(); third_only = Counter()
     wake_hits = Counter(); backoff_hits = Counter(); cav_hits = Counter()
     swap_pair = Counter(); block_pair = Counter()
@@ -294,7 +287,6 @@ def simulate_one(integrated_json: dict, sims: int = 600,
 
         entry = sorted(lanes, key=lambda x: T1M[x])
 
-        # ウェイク（キー艇は被弾確率を低減、非キー艇は極小増でバランス）
         for i in lanes:
             p = wake_loss_probability(i, entry)
             if aggr_map:
@@ -311,7 +303,6 @@ def simulate_one(integrated_json: dict, sims: int = 600,
         )
         safe_used_total += safe_used_cnt
 
-        # 既存集計
         lead = exit_order[0]
         dt_lead = T1M[exit_order[1]] - T1M[lead]
         kim = "逃げ" if lead == 1 else ("まくり" if dt_lead >= Params.tau_k else "まくり差し")
@@ -321,7 +312,6 @@ def simulate_one(integrated_json: dict, sims: int = 600,
         pair_counts[(exit_order[0], exit_order[1])] += 1
         third_counts[exit_order[2]] += 1
 
-        # キーマン
         if len(exit_order) >= 3:
             first_counts[exit_order[0]]  += 1
             second_counts[exit_order[1]] += 1
@@ -401,6 +391,18 @@ def attach_keyman_rank(keyman: dict) -> dict:
     except Exception:
         pass
     return keyman
+
+# ---------- ★NEW: キーマン買い目フィルター ----------
+def filter_tickets_by_keyman(tickets, keyman: dict, thr: float):
+    """tickets: List[( (F,S,T), score )] を、KEYMAN_RANK>=thr の艇が1-3着どこかに入るものだけ残す"""
+    km = (keyman or {}).get("KEYMAN_RANK", {}) or {}
+    if not km:
+        return tickets
+    kept = []
+    for (key, prob) in tickets:
+        if any(float(km.get(str(lane), 0.0)) >= thr for lane in key):
+            kept.append((key, prob))
+    return kept
 
 # ---------- データ収集 ----------
 def collect_files(base_dir: str, kind: str, dates: set):
@@ -593,7 +595,10 @@ def evaluate_one(int_path: str, res_path: str, sims: int, unit: int,
                  outdir: str = "./SimS_v1.0_eval",
                  boost_map: dict | None = None,
                  aggr_map: dict | None = None,
-                 meta_extra: dict | None = None):
+                 meta_extra: dict | None = None,
+                 # ★NEW:
+                 buy_if_keyman_in_top3: bool=False,
+                 buy_keyman_threshold: float=0.7):
     # 予測
     with open(int_path, "r", encoding="utf-8") as f:
         d_int = json.load(f)
@@ -608,6 +613,10 @@ def evaluate_one(int_path: str, res_path: str, sims: int, unit: int,
     tickets = generate_tickets(strategy, tri_probs, exacta_probs, third_probs,
                                topn=topn, k=k, m=m,
                                exclude_first1=exclude_first1, only_first1=only_first1)
+
+    # ★NEW: キーマン・フィルター
+    if buy_if_keyman_in_top3:
+        tickets = filter_tickets_by_keyman(tickets, keyman, buy_keyman_threshold)
 
     # オッズ（EV/帯 用）
     date = pid = race = None
@@ -674,6 +683,9 @@ def evaluate_one(int_path: str, res_path: str, sims: int, unit: int,
             "min_ev": float(min_ev),
             "require_odds": bool(require_odds),
             "odds_bands": "",
+            # ★NEW: メタに記録
+            "buy_if_keyman_in_top3": bool(buy_if_keyman_in_top3),
+            "buy_keyman_threshold": float(buy_keyman_threshold),
         }
         if meta_extra:
             meta.update(meta_extra)
@@ -737,6 +749,12 @@ def main():
     ap.add_argument("--keyman-threshold", type=float, default=0.7, help="KEYMAN_RANK 閾値")
     ap.add_argument("--keyman-boost", type=float, default=0.15, help="A/Ap 乗算の増分 (例 0.15→1.15倍)")
     ap.add_argument("--keyman-aggr",  type=float, default=0.0, help="pass2のみ: 挙動改変の強さ(0〜1)")
+
+    # ★NEW: 購入時キーマン・フィルタ
+    ap.add_argument("--buy-if-keyman-in-top3", action="store_true",
+                    help="KEYMAN_RANK>=閾値の艇が1-3着のどこかに含まれる買い目のみ購入")
+    ap.add_argument("--buy-keyman-threshold", type=float, default=0.7,
+                    help="上のフィルターに使う KEYMAN_RANK 閾値")
 
     args = ap.parse_args()
 
@@ -816,6 +834,10 @@ def main():
                                        exclude_first1=args.exclude_first1,
                                        only_first1=args.only_first1)
 
+            # ★NEW: キーマン・フィルター
+            if args.buy_if_keyman_in_top3:
+                tickets = filter_tickets_by_keyman(tickets, keyman, args.buy_keyman_threshold)
+
             odds_map = {}
             if (args.min_ev > 0) or args.require_odds or bands:
                 odds_map = load_trifecta_odds(args.odds_base, date, pid, race)
@@ -854,7 +876,10 @@ def main():
                            "require_odds": bool(args.require_odds),
                            "odds_bands": args.odds_bands or "",
                            "odds_min": float(args.odds_min),
-                           "odds_max": float(args.odds_max)},
+                           "odds_max": float(args.odds_max),
+                           # ★NEW: 出力にも反映
+                           "buy_if_keyman_in_top3": bool(args.buy_if_keyman_in_top3),
+                           "buy_keyman_threshold": float(args.buy_keyman_threshold)},
                           f, ensure_ascii=False, indent=2)
 
             save_keyman(target_dir, date, pid, race, keyman, {
@@ -867,6 +892,9 @@ def main():
                 "min_ev": float(args.min_ev),
                 "require_odds": bool(args.require_odds),
                 "odds_bands": args.odds_bands or "",
+                # ★NEW: メタ
+                "buy_if_keyman_in_top3": bool(args.buy_if_keyman_in_top3),
+                "buy_keyman_threshold": float(args.buy_keyman_threshold),
             })
 
             for i, t in enumerate(out_list, 1):
@@ -891,7 +919,10 @@ def main():
                           odds_base=args.odds_base, min_ev=args.min_ev, require_odds=args.require_odds,
                           odds_bands=bands, outdir=target_dir,
                           boost_map=None, aggr_map=None,
-                          meta_extra={"pass":"pass1"})
+                          meta_extra={"pass":"pass1"},
+                          # ★NEW:
+                          buy_if_keyman_in_top3=args.buy_if_keyman_in_top3,
+                          buy_keyman_threshold=args.buy_keyman_threshold)
         total_stake += ev["stake"]; total_payout += ev["payout"]
         per_rows.append({"date": date, "pid": pid, "race": race,
                          "bets": len(ev["bets"]), "stake": ev["stake"],
@@ -918,6 +949,9 @@ def main():
         "odds_min": float(args.odds_min),
         "odds_max": float(args.odds_max),
         "pass": "pass1",
+        # ★NEW: 設定の写し
+        "buy_if_keyman_in_top3": bool(args.buy_if_keyman_in_top3),
+        "buy_keyman_threshold": float(args.buy_keyman_threshold),
     }
 
     df.to_csv(os.path.join(pass1_dir, "per_race_results.csv"), index=False)
@@ -982,7 +1016,6 @@ def main():
     print(f"[eval pass2] keyman_threshold={keyman_threshold}, boost={keyman_boost}, aggr={keyman_aggr}")
 
     for (date, pid, race) in keys:
-        # pass1の KEYMAN_RANK≥threshold を対象に、boostとaggrを構成
         boost_map = load_keyman_boost_map(pass1_dir, date, pid, race,
                                           threshold=keyman_threshold, boost=keyman_boost)
         aggr_map  = load_keyman_boost_map(pass1_dir, date, pid, race,
@@ -999,7 +1032,10 @@ def main():
                                        "boost_map":boost_map,
                                        "keyman_threshold": keyman_threshold,
                                        "keyman_boost": keyman_boost,
-                                       "keyman_aggr": keyman_aggr})
+                                       "keyman_aggr": keyman_aggr},
+                           # ★NEW:
+                           buy_if_keyman_in_top3=args.buy_if_keyman_in_top3,
+                           buy_keyman_threshold=args.buy_keyman_threshold)
         total_stake2 += ev2["stake"]; total_payout2 += ev2["payout"]
         per_rows2.append({"date": date, "pid": pid, "race": race,
                           "bets": len(ev2["bets"]), "stake": ev2["stake"],
@@ -1029,6 +1065,9 @@ def main():
         "keyman_threshold": keyman_threshold,
         "keyman_boost": keyman_boost,
         "keyman_aggr": keyman_aggr,
+        # ★NEW:
+        "buy_if_keyman_in_top3": bool(args.buy_if_keyman_in_top3),
+        "buy_keyman_threshold": float(args.buy_keyman_threshold),
     }
 
     df2.to_csv(os.path.join(pass2_dir, "per_race_results.csv"), index=False)
