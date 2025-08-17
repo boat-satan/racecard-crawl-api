@@ -40,8 +40,8 @@ jobs:
 
       - name: Sanity check
         run: |
-          test -f scripts/TENKAI/features_c.py || { echo "scripts/tenkai/features_c.py がありません"; exit 1; }
-          test -f scripts/TENKAI/build_c_features.py || { echo "scripts/tenkai/build_c_features.py がありません"; exit 1; }
+          test -f scripts/TENKAI/features_c.py || { echo "scripts/TENKAI/features_c.py がありません"; exit 1; }
+          test -f scripts/TENKAI/build_c_features.py || { echo "scripts/TENKAI/build_c_features.py がありません"; exit 1; }
 
       - name: Build C features
         shell: bash
@@ -68,6 +68,6 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: tenkai-c-${{ github.event.inputs.date }}-${{ github.event.inputs.pid }}${{ github.event.inputs.race && format('-{0}', github.event.inputs.race) || '' }}
-          path: public/tenkai/features_c/v1/**
+          name: TENKAI-c-${{ github.event.inputs.date }}-${{ github.event.inputs.pid }}${{ github.event.inputs.race && format('-{0}', github.event.inputs.race) || '' }}
+          path: public/TENKAI/features_c/v1/**
           if-no-files-found: warn
