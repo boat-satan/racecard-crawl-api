@@ -1,20 +1,20 @@
+# TENKAI/build_labels.py
 # -*- coding: utf-8 -*-
 """
 results/v1 を読み、レースごとの教師ラベルCSVを作成
 - 入力: public/results/v1/{date}/{pid}/{race}.json
 - 出力:
   TENKAI/labels/v1/{date}/{pid}/{race}.csv  … レース単位（6行）
-  TENKAI/labels/v1/{date}/{pid}/all.csv     … pid配下まとめ（winがある行のみ）
+  TENKAI/labels/v1/{date}/{pid}/all.csv     … pid配下まとめ（上書き）
 CSV列:
   date,pid,race,lane,rank,st,decision,win
-    win = 1(着順=1) else 0（rankが欠損なら None）
+    win = 1(着順=1) else 0（順位欠損は None）
 """
-from __future__ import annotations
 
 import os
 import json
-import pandas as pd
 import argparse
+import pandas as pd
 from typing import List, Dict, Any
 
 DEFAULT_INBASE = os.path.join("public", "results", "v1")
@@ -26,13 +26,13 @@ def _safe(v, default=None):
 
 
 def json_to_rows(res_obj: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """results JSON → 行リスト（各lane 1行）"""
+    """results JSON → 行リスト（各lane 1行, 欠けた枠も None で埋める）"""
     date = str(res_obj.get("date"))
     pid = str(res_obj.get("pid"))
     race = str(res_obj.get("race"))
 
-    # map: lane -> rank
-    ranks: Dict[int, int | None] = {}
+    # lane -> rank
+    ranks: Dict[int, Any] = {}
     for x in (res_obj.get("order") or []):
         lane = _safe(x.get("lane"))
         pos = _safe(x.get("pos"))
@@ -43,8 +43,8 @@ def json_to_rows(res_obj: Dict[str, Any]) -> List[Dict[str, Any]]:
         except Exception:
             ranks[int(lane)] = None
 
-    # map: lane -> st
-    sts: Dict[int, float | None] = {}
+    # lane -> st
+    sts: Dict[int, Any] = {}
     for x in (res_obj.get("start") or []):
         lane = _safe(x.get("lane"))
         st = _safe(x.get("st"))
@@ -57,8 +57,7 @@ def json_to_rows(res_obj: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     decision = _safe(res_obj.get("decision"))
 
-    rows: List[Dict[str, Any]] = []
-    # 1〜6枠を必ず出す（欠けても空行を置く）
+    rows = []
     for lane in range(1, 7):
         rank = ranks.get(lane)
         st = sts.get(lane)
@@ -75,80 +74,85 @@ def json_to_rows(res_obj: Dict[str, Any]) -> List[Dict[str, Any]]:
     return rows
 
 
-def _race_names(race: str) -> List[str]:
-    """race 引数を 1R..12R のリストに正規化（空 or 'ALL' は全レース）。"""
-    if not race:
-        return [f"{i}R" for i in range(1, 13)]
-    r = race.strip()
-    if r.lower() == "all":
-        return [f"{i}R" for i in range(1, 13)]
-    return [r]
+def _pid_list(pid: str, date: str, inbase: str) -> List[str]:
+    """pid='ALL' のときはその日の全場を列挙"""
+    if pid and pid.lower() == "all":
+        base = os.path.join(inbase, date)
+        if not os.path.isdir(base):
+            return []
+        return sorted([d for d in os.listdir(base)
+                       if os.path.isdir(os.path.join(base, d))])
+    return [pid]
+
+
+def _race_list(race: str) -> List[str]:
+    """race 未指定 or 'ALL' なら 1R..12R"""
+    if race and race.lower() != "all":
+        return [race]
+    return [f"{i}R" for i in range(1, 13)]
+
+
+def _is_blank(rows: List[Dict[str, Any]]) -> bool:
+    """全行 rank も st も None → ブランクとみなし出力しない"""
+    if not rows:
+        return True
+    for r in rows:
+        if r.get("rank") is not None or r.get("st") is not None:
+            return False
+    return True
 
 
 def build_labels(date: str, pid: str, race: str = "", inbase: str = DEFAULT_INBASE):
-    """
-    指定キーで results JSON → ラベルCSV を出力
-    - race 未指定/ALL なら 1R..12R を探索し、存在するJSONのみ処理
-    - ブランク結果（全レーン rank/st とも欠損）はスキップ
-    - all.csv には win が 0/1 の行のみ蓄積
-    """
-    targets = _race_names(race)
-    outdir = os.path.join(OUTBASE, date, pid)
-    os.makedirs(outdir, exist_ok=True)
+    any_output = False
 
-    all_rows: List[Dict[str, Any]] = []
+    for pid_one in _pid_list(pid, date, inbase):
+        targets = _race_list(race)
+        outdir = os.path.join(OUTBASE, date, pid_one)
+        os.makedirs(outdir, exist_ok=True)
 
-    for r in targets:
-        path = os.path.join(inbase, date, pid, f"{r}.json")
-        if not os.path.exists(path):
-            print(f"skip (not found): {path}")
-            continue
+        all_rows: List[Dict[str, Any]] = []
 
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                obj = json.load(f)
-        except Exception as e:
-            print(f"skip (json load error): {path}  {e}")
-            continue
-
-        try:
-            rows = json_to_rows(obj)
-            if not rows:
-                print(f"skip (empty json): {path}")
+        for r in targets:
+            path = os.path.join(inbase, date, pid_one, f"{r}.json")
+            if not os.path.exists(path):
+                print(f"skip (not found): {path}")
                 continue
 
-            # ★ ブランク結果（全レーン rank も st も欠損）は丸ごとスキップ
-            if all((row["rank"] is None and row["st"] is None) for row in rows):
-                print(f"skip (blank result): {path}")
-                continue
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    obj = json.load(f)
+                rows = json_to_rows(obj)
 
-            # レース単位 CSV（確認用に6行そのまま保存）
-            race_name = rows[0]["race"] or r
-            df = pd.DataFrame(rows)
-            outfile = os.path.join(outdir, f"{race_name}.csv")
-            df.to_csv(outfile, index=False, encoding="utf-8")
-            print(f"wrote {outfile}")
+                # ブランク（順位・ST全欠損）はスキップ
+                if _is_blank(rows):
+                    print(f"skip (blank): {path}")
+                    continue
 
-            # all.csv には win が 0/1 の行だけ積む
-            all_rows.extend([row for row in rows if row["win"] is not None])
+                df = pd.DataFrame(rows)
+                outfile = os.path.join(outdir, f"{rows[0]['race']}.csv")
+                df.to_csv(outfile, index=False, encoding="utf-8")
+                print(f"wrote {outfile}")
+                all_rows.extend(rows)
+                any_output = True
+            except Exception as e:
+                print(f"skip (error): {path}  {e}")
 
-        except Exception as e:
-            print(f"skip (error): {path}  {e}")
+        # その場で1件以上あれば all.csv を上書き
+        if all_rows:
+            df_all = pd.DataFrame(all_rows)
+            outfile_all = os.path.join(outdir, "all.csv")
+            df_all.to_csv(outfile_all, index=False, encoding="utf-8")
+            print(f"wrote {outfile_all}")
 
-    if all_rows:
-        df_all = pd.DataFrame(all_rows)
-        outfile_all = os.path.join(outdir, "all.csv")
-        df_all.to_csv(outfile_all, index=False, encoding="utf-8")
-        print(f"wrote {outfile_all}")
-    else:
+    if not any_output:
         print("no outputs")
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", required=True)
-    ap.add_argument("--pid", required=True)
-    ap.add_argument("--race", default="", help="'' or ALL = 1R..12R")
+    ap.add_argument("--pid", required=True, help="場コード or ALL")
+    ap.add_argument("--race", default="", help="例: 1R / 2R / ... / ALL（空でもALLと同義）")
     ap.add_argument("--inbase", default=DEFAULT_INBASE, help="results JSON base dir")
     args = ap.parse_args()
     build_labels(args.date, args.pid, args.race, args.inbase)
