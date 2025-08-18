@@ -7,10 +7,10 @@ on:
         description: '対象日 (YYYYMMDD)'
         required: true
       pid:
-        description: '場コード pid (例: 02)'
+        description: '場コード pid (例: 02) ※ALLで全場'
         required: true
       race:
-        description: 'レース (例: 1R) 空/ALL/全部なら1R..12R全部'
+        description: 'レース (例: 1R) 空/ALLで1R..12R全部'
         required: false
         default: ''
 
@@ -45,47 +45,53 @@ jobs:
       - name: Ensure TENKAI package dir
         run: |
           mkdir -p TENKAI
-          [ -f TENKAI/__init__.py ] || : > TENKAI/__init__.py
+          [ -f TENKAI/__init__.py ] || printf "" > TENKAI/__init__.py
 
       - name: Build labels (supports ALL)
         shell: bash
         run: |
           set -euo pipefail
-          DATE="${{ github.event.inputs.date }}"
-          PID="${{ github.event.inputs.pid }}"
-          RACE="${{ github.event.inputs.race }}"
-          # 空欄 / ALL / 全部 → 全R
-          if [[ -z "${RACE}" || "${RACE,,}" == "all" || "${RACE}" == "全部" ]]; then
-            RACE_OPT=""
-            echo ">>> race: ALL (1R..12R を処理)"
-          else
-            RACE_OPT="--race ${RACE}"
-            echo ">>> race: ${RACE}"
+          RACE_OPT=""
+          if [ -n "${{ github.event.inputs.race }}" ]; then
+            RACE_OPT="--race ${{ github.event.inputs.race }}"
           fi
-          echo ">>> cmd: python TENKAI/build_labels.py --date ${DATE} --pid ${PID} ${RACE_OPT}"
-          PYTHONPATH="." python TENKAI/build_labels.py --date "${DATE}" --pid "${PID}" ${RACE_OPT}
+          echo ">>> cmd:"
+          echo PYTHONPATH=. python TENKAI/build_labels.py --date ${{ github.event.inputs.date }} --pid ${{ github.event.inputs.pid }} $RACE_OPT
+          PYTHONPATH="." python TENKAI/build_labels.py \
+            --date "${{ github.event.inputs.date }}" \
+            --pid  "${{ github.event.inputs.pid }}" \
+            $RACE_OPT
 
       - name: Commit outputs
         shell: bash
         run: |
           set -euo pipefail
-          OUTDIR="TENKAI/labels/v1/${{ github.event.inputs.date }}/${{ github.event.inputs.pid }}"
-          echo ">>> OUTDIR=${OUTDIR}"
-          if [ -d "${OUTDIR}" ]; then
+          DATE="${{ github.event.inputs.date }}"
+          PID="${{ github.event.inputs.pid }}"
+          if [ "$PID" = "ALL" ]; then
+            OUTGLOB="TENKAI/labels/v1/${DATE}/*/**"
+          else
+            OUTGLOB="TENKAI/labels/v1/${DATE}/${PID}/**"
+          fi
+          echo ">>> add path: ${OUTGLOB}"
+          shopt -s nullglob
+          FILES=( $OUTGLOB )
+          if [ ${#FILES[@]} -gt 0 ]; then
             git config user.name  "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
-            git fetch --all --prune || true
-            git pull --rebase || true
-            git add "${OUTDIR}/"** || true
-            git diff --cached --quiet || git commit -m "TENKAI labels: ${{ github.event.inputs.date }} pid=${{ github.event.inputs.pid }} ${{ github.event.inputs.race || 'ALL' }}"
-            git push || git push --force-with-lease
+            git fetch origin
+            git pull --rebase origin "${GITHUB_REF_NAME:-main}" || true
+            git add "${FILES[@]}" || true
+            git diff --cached --quiet || git commit -m "TENKAI labels: ${DATE} pid=${PID} ${{ github.event.inputs.race }}"
+            git push || true
           else
-            echo "no outputs under ${OUTDIR}; skip commit"
+            echo "nothing to commit."
           fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: tenkai-labels-${{ github.event.inputs.date }}-${{ github.event.inputs.pid }}${{ github.event.inputs.race && format('-{0}', github.event.inputs.race) || '-ALL' }}
-          path: TENKAI/labels/v1/${{ github.event.inputs.date }}/${{ github.event.inputs.pid }}/**
+          name: tenkai-labels-${{ github.event.inputs.date }}-${{ github.event.inputs.pid }}${{ github.event.inputs.race && format('-{0}', github.event.inputs.race) || '' }}
+          path: |
+            TENKAI/labels/v1/${{ github.event.inputs.date }}/*/**
           if-no-files-found: warn
