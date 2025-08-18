@@ -10,7 +10,7 @@ on:
         description: '場コード pid (例: 02)'
         required: true
       race:
-        description: 'レース (例: 2R) 空 or ALL で全R'
+        description: 'レース (例: 2R) 空/ALL なら全R'
         required: false
         default: ''
 
@@ -24,6 +24,7 @@ concurrency:
 jobs:
   build-train:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -38,10 +39,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas
 
-      - name: Sanity check
-        run: |
-          test -f TENKAI/build_training_table.py || { echo "TENKAI/build_training_table.py がありません"; exit 1; }
-
       - name: Ensure TENKAI package
         run: |
           mkdir -p TENKAI
@@ -51,27 +48,32 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          RACE_IN="${{ github.event.inputs.race }}"
-          # 空 or "ALL" は全R扱い
-          if [ -z "${RACE_IN}" ] || [ "${RACE_IN}" = "ALL" ]; then
-            echo ">>> race: ALL (1R..12R を処理)"
-            RACE_OPT=""
-          else
-            echo ">>> race: ${RACE_IN}"
-            RACE_OPT="--race ${RACE_IN}"
+          DATE="${{ github.event.inputs.date }}"
+          PID="${{ github.event.inputs.pid }}"
+          RACE="${{ github.event.inputs.race }}"
+          RACE_OPT=""
+          if [ -n "${RACE}" ] && [ "${RACE}" != "ALL" ]; then
+            RACE_OPT="--race ${RACE}"
           fi
-          echo ">>> cmd:"
-          echo PYTHONPATH=. python TENKAI/build_training_table.py --date ${{ github.event.inputs.date }} --pid ${{ github.event.inputs.pid }} ${RACE_OPT}
-          PYTHONPATH="." python TENKAI/build_training_table.py \
-            --date ${{ github.event.inputs.date }} \
-            --pid  ${{ github.event.inputs.pid }} \
-            ${RACE_OPT}
+
+          echo ">>> run: python TENKAI/build_training_table.py --date ${DATE} --pid ${PID} ${RACE_OPT}"
+          PYTHONPATH="." python TENKAI/build_training_table.py --date "${DATE}" --pid "${PID}" ${RACE_OPT}
 
       - name: Commit outputs
         shell: bash
         run: |
           set -euo pipefail
-          OUTDIR="TENKAI/datasets/v1/${{ github.event.inputs.date }}/${{ github.event.inputs.pid }}"
+          DATE="${{ github.event.inputs.date }}"
+          PID="${{ github.event.inputs.pid }}"
+          RACE="${{ github.event.inputs.race }}"
+
+          # ALL/空 なら pid配下全体、それ以外は特定レースのファイルのみ
+          if [ -z "${RACE}" ] || [ "${RACE}" = "ALL" ]; then
+            OUTDIR="TENKAI/datasets/v1/${DATE}/${PID}"
+          else
+            OUTDIR="TENKAI/datasets/v1/${DATE}/${PID}/${RACE}"
+          fi
+
           echo ">>> OUTDIR=${OUTDIR}"
           if [ -d "${OUTDIR}" ]; then
             git config user.name  "github-actions[bot]"
@@ -79,7 +81,7 @@ jobs:
             git fetch origin
             git pull --rebase origin "${GITHUB_REF_NAME:-main}" || true
             git add "${OUTDIR}"/** || true
-            git diff --cached --quiet || git commit -m "TENKAI training: ${{ github.event.inputs.date }} pid=${{ github.event.inputs.pid }} ${{ github.event.inputs.race }}"
+            git diff --cached --quiet || git commit -m "TENKAI training: ${DATE} pid=${PID} ${RACE}"
             git push || true
           else
             echo "OUTDIR not found, nothing to commit."
@@ -89,5 +91,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: tenkai-train-${{ github.event.inputs.date }}-${{ github.event.inputs.pid }}${{ github.event.inputs.race && format('-{0}', github.event.inputs.race) || '' }}
-          path: TENKAI/datasets/v1/${{ github.event.inputs.date }}/${{ github.event.inputs.pid }}/**
+          path: ${{ (github.event.inputs.race == '' || github.event.inputs.race == 'ALL')
+                    && format('TENKAI/datasets/v1/{0}/{1}/**', github.event.inputs.date, github.event.inputs.pid)
+                    || format('TENKAI/datasets/v1/{0}/{1}/{2}/**', github.event.inputs.date, github.event.inputs.pid, github.event.inputs.race) }}
           if-no-files-found: warn
