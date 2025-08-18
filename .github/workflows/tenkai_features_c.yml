@@ -7,10 +7,11 @@ on:
         description: '対象日 (YYYYMMDD)'
         required: true
       pid:
-        description: '場コード pid (例: 02)'
-        required: true
+        description: '場コード pid (例: 02) ー ALLで全場'
+        required: false
+        default: 'ALL'
       race:
-        description: 'レース (例: 1R) 空なら全R'
+        description: 'レース (例: 1R)。空 or ALL で全R'
         required: false
         default: ''
 
@@ -27,15 +28,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Pull fast-forward (avoid push reject)
-        run: |
-          set -Eeuo pipefail
-          git fetch origin "${{ github.ref_name }}"
-          git checkout "${{ github.ref_name }}"
-          git merge --ff-only "origin/${{ github.ref_name }}" || true
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -45,49 +37,75 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          else
-            pip install pandas
-          fi
+          pip install -r requirements.txt || pip install pandas
+
+      - name: Sanity check
+        run: |
+          test -f TENKAI/build_c_features.py || { echo "TENKAI/build_c_features.py がありません"; exit 1; }
 
       - name: Ensure TENKAI package
         run: |
           mkdir -p TENKAI
           [ -f TENKAI/__init__.py ] || printf "" > TENKAI/__init__.py
 
-      - name: Sanity check
+      - name: Build C features (supports ALL)
+        shell: bash
         run: |
-          test -f TENKAI/features_c.py || { echo "TENKAI/features_c.py がありません"; exit 1; }
+          set -eo pipefail
 
-      - name: Build C features
-        run: |
-          set -Eeuo pipefail
-          RACE_OPT=""
-          if [ -n "${{ github.event.inputs.race }}" ]; then
-            RACE_OPT="--race ${{ github.event.inputs.race }}"
+          DATE='${{ github.event.inputs.date }}'
+          PID_IN='${{ github.event.inputs.pid }}'
+          RACE_IN='${{ github.event.inputs.race }}'
+
+          # race オプション（空 or ALL は全R）
+          if [[ -z "$RACE_IN" || "$RACE_IN" == "ALL" ]]; then
+            RACE_OPT=""
+            echo "→ race: ALL (全R)"
+          else
+            RACE_OPT="--race $RACE_IN"
+            echo "→ race: $RACE_IN"
           fi
-          echo ">>> 実行: python TENKAI/features_c.py --date ${{ github.event.inputs.date }} --pid ${{ github.event.inputs.pid }} $RACE_OPT"
-          PYTHONPATH="." python TENKAI/features_c.py --date ${{ github.event.inputs.date }} --pid ${{ github.event.inputs.pid }} $RACE_OPT
+
+          # pid リスト
+          if [[ "$PID_IN" == "ALL" ]]; then
+            PIDS=(01 02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24)
+            echo "→ pid: ALL (${#PIDS[@]}場)"
+          else
+            PIDS=("$PID_IN")
+            echo "→ pid: ${PID_IN}"
+          fi
+
+          for pid in "${PIDS[@]}"; do
+            echo ">>> run: python TENKAI/build_c_features.py --date ${DATE} --pid ${pid} ${RACE_OPT}"
+            PYTHONPATH="." python TENKAI/build_c_features.py --date "${DATE}" --pid "${pid}" ${RACE_OPT}
+          done
 
       - name: Commit outputs
+        shell: bash
         run: |
-          set -Eeuo pipefail
+          set -eo pipefail
+          DATE='${{ github.event.inputs.date }}'
+          PID_IN='${{ github.event.inputs.pid }}'
+          RACE_IN='${{ github.event.inputs.race }}'
+
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add TENKAI/features_c/v1/** || true
+
+          # 先に最新を取り込んで衝突で落ちないようにする
+          git fetch origin
+          git pull --rebase || true
+
+          git add TENKAI/features_c/v1/"${DATE}"/** || true
           if git diff --cached --quiet; then
-            echo "no changes; skip commit."
+            echo "no changes to commit"
           else
-            git commit -m "TENKAI C features: ${{ github.event.inputs.date }} pid=${{ github.event.inputs.pid }} ${{ github.event.inputs.race }}"
-            # rebase 一回だけ試してから push
-            git pull --rebase --autostash origin "${{ github.ref_name }}" || true
-            git push origin "${{ github.ref_name }}"
+            git commit -m "TENKAI C features: ${DATE} pid=${PID_IN} race=${RACE_IN:-ALL}"
+            git push
           fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: tenkai-c-${{ github.event.inputs.date }}-${{ github.event.inputs.pid }}${{ github.event.inputs.race && format('-{0}', github.event.inputs.race) || '' }}
-          path: TENKAI/features_c/v1/**
+          name: tenkai-c-${{ github.event.inputs.date }}-${{ github.event.inputs.pid }}${{ github.event.inputs.race && format('-{0}', github.event.inputs.race) || '-ALLR' }}
+          path: TENKAI/features_c/v1/${{ github.event.inputs.date }}/**
           if-no-files-found: warn
