@@ -68,8 +68,8 @@ jobs:
             DATES_OPT="--date ${{ github.event.inputs.date }}"
           fi
 
-          echo ">>> RUN: python TENKAI/train_win.py $DATES_OPT $PID_OPT $RACE_OPT"
-          PYTHONPATH="." python TENKAI/train_win.py $DATES_OPT $PID_OPT $RACE_OPT
+          echo ">>> RUN: python TENKAI/train_win_model.py $DATES_OPT $PID_OPT $RACE_OPT"
+          PYTHONPATH="." python TENKAI/train_win_model.py $DATES_OPT $PID_OPT $RACE_OPT
 
       - name: Commit artifacts
         shell: bash
