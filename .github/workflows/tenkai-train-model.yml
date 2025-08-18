@@ -4,8 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       date:
-        description: '対象日 (YYYYMMDD)'
+        description: '対象日 (YYYYMMDD)  ※--dates未指定のときに使用'
         required: true
+      dates:
+        description: '学習対象日(カンマ区切り) or ALL（例: 20250801,20250802 / ALL）'
+        required: false
+        default: ''
       pid:
         description: '場コード pid (例: 02 空=ALL場まとめ)'
         required: false
@@ -44,20 +48,28 @@ jobs:
           mkdir -p TENKAI
           [ -f TENKAI/__init__.py ] || printf "" > TENKAI/__init__.py
 
-      - name: Train model (pid/race 空=ALL対応)
+      - name: Train model (supports --dates / ALL)
         shell: bash
         run: |
           set -euo pipefail
           PID_OPT=""
           RACE_OPT=""
+          DATES_OPT=""
           if [ -n "${{ github.event.inputs.pid }}" ]; then
             PID_OPT="--pid ${{ github.event.inputs.pid }}"
           fi
           if [ -n "${{ github.event.inputs.race }}" ]; then
             RACE_OPT="--race ${{ github.event.inputs.race }}"
           fi
-          echo ">>> RUN: python TENKAI/train_win_model.py --date ${{ github.event.inputs.date }} $PID_OPT $RACE_OPT"
-          PYTHONPATH="." python TENKAI/train_win_model.py --date ${{ github.event.inputs.date }} $PID_OPT $RACE_OPT
+          if [ -n "${{ github.event.inputs.dates }}" ]; then
+            DATES_OPT="--dates ${{ github.event.inputs.dates }}"
+          else
+            # dates未指定時は従来通り --date を使う
+            DATES_OPT="--date ${{ github.event.inputs.date }}"
+          fi
+
+          echo ">>> RUN: python TENKAI/train_win.py $DATES_OPT $PID_OPT $RACE_OPT"
+          PYTHONPATH="." python TENKAI/train_win.py $DATES_OPT $PID_OPT $RACE_OPT
 
       - name: Commit artifacts
         shell: bash
@@ -66,12 +78,19 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add TENKAI/models/v1/** || true
-          git diff --cached --quiet || git commit -m "TENKAI model: ${{ github.event.inputs.date }} pid=${{ github.event.inputs.pid || 'ALL' }} race=${{ github.event.inputs.race || 'ALL' }}"
-          git push || true
+          if ! git diff --cached --quiet; then
+            # ログに dates / date を見やすく残す
+            COMMIT_DATES="${{ github.event.inputs.dates }}"
+            if [ -z "$COMMIT_DATES" ]; then COMMIT_DATES="${{ github.event.inputs.date }}"; fi
+            git commit -m "TENKAI model: dates=${COMMIT_DATES} pid=${{ github.event.inputs.pid || 'ALL' }} race=${{ github.event.inputs.race || 'ALL' }}"
+            git push || true
+          else
+            echo "No model changes to commit."
+          fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: tenkai-model-${{ github.event.inputs.date }}-${{ github.event.inputs.pid && github.event.inputs.pid || 'ALL' }}-${{ github.event.inputs.race && github.event.inputs.race || 'ALL' }}
+          name: tenkai-model-${{ github.event.inputs.dates && github.event.inputs.dates || github.event.inputs.date }}-${{ github.event.inputs.pid && github.event.inputs.pid || 'ALL' }}-${{ github.event.inputs.race && github.event.inputs.race || 'ALL' }}
           path: TENKAI/models/v1/**
           if-no-files-found: warn
