@@ -10,7 +10,7 @@ on:
         description: '場コード pid (例: 02)'
         required: true
       race:
-        description: 'レース (例: 2R) 空なら全R'
+        description: 'レース (例: 1R) 空なら1R..12R全部'
         required: false
         default: ''
 
@@ -38,36 +38,51 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas
 
-      - name: Ensure TENKAI package
+      - name: Sanity check
+        run: |
+          test -f TENKAI/build_labels.py || { echo "TENKAI/build_labels.py がありません"; exit 1; }
+
+      - name: Ensure TENKAI package dir
         run: |
           mkdir -p TENKAI
           [ -f TENKAI/__init__.py ] || printf "" > TENKAI/__init__.py
 
-      - name: Build labels
+      - name: Build labels (supports ALL)
         shell: bash
         run: |
-          set -eo pipefail
+          set -euo pipefail
           RACE_OPT=""
           if [ -n "${{ github.event.inputs.race }}" ]; then
             RACE_OPT="--race ${{ github.event.inputs.race }}"
           fi
-          echo "python TENKAI/build_labels.py --date ${{ github.event.inputs.date }} --pid ${{ github.event.inputs.pid }} $RACE_OPT"
+          echo ">>> 実行コマンド"
+          echo python TENKAI/build_labels.py --date ${{ github.event.inputs.date }} --pid ${{ github.event.inputs.pid }} $RACE_OPT
           PYTHONPATH="." python TENKAI/build_labels.py \
             --date ${{ github.event.inputs.date }} \
             --pid  ${{ github.event.inputs.pid }} \
             $RACE_OPT
 
       - name: Commit outputs
+        shell: bash
         run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add TENKAI/labels/v1/** || true
-          git diff --cached --quiet || git commit -m "TENKAI labels: ${{ github.event.inputs.date }} pid=${{ github.event.inputs.pid }} ${{ github.event.inputs.race }}"
-          git push
+          set -euo pipefail
+          OUTDIR="TENKAI/labels/v1/${{ github.event.inputs.date }}/${{ github.event.inputs.pid }}"
+          echo ">>> OUTDIR=${OUTDIR}"
+          if [ -d "$OUTDIR" ]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git fetch origin
+            git pull --rebase origin "${GITHUB_REF_NAME:-main}" || true
+            git add "$OUTDIR"/** || true
+            git diff --cached --quiet || git commit -m "TENKAI labels: ${{ github.event.inputs.date }} pid=${{ github.event.inputs.pid }} ${{ github.event.inputs.race }}"
+            git push || true
+          else
+            echo "OUTDIR not found, nothing to commit."
+          fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: tenkai-labels-${{ github.event.inputs.date }}-${{ github.event.inputs.pid }}${{ github.event.inputs.race && format('-{0}', github.event.inputs.race) || '' }}
-          path: TENKAI/labels/v1/**
+          path: TENKAI/labels/v1/${{ github.event.inputs.date }}/${{ github.event.inputs.pid }}/**
           if-no-files-found: warn
