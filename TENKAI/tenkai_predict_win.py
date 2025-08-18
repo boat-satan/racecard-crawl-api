@@ -1,32 +1,70 @@
+# TENKAI/tenkai_predict_win.py
 # -*- coding: utf-8 -*-
 """
-Predict win probability from integrated JSON (no features_c required).
+勝利確率 予測スクリプト（全差し替え版）
+- モデルは未指定なら TENKAI/models/v1 の "最新日付" を自動採用
+- 予測用特徴は integrated を直接読み出してオンザフライ生成（features_c 不要）
+- 出力:
+    TENKAI/predictions/v1/<date>/<pid>/<race>.csv   … 枠番6行
+    TENKAI/predictions/v1/<date>/<pid>/all.csv     … （race未指定時）全R結合
 
-Input:
-  public/integrated/v1/{date}/{pid}/{race}.json     (race omitted => 1R..12R)
-Model:
-  TENKAI/models/v1/{model_date}/ALL/ALL/
-  -> fallback: {model_date}/{pid}/ALL/ -> {model_date}/{pid}/{race}/
-Output:
-  TENKAI/predictions/v1/{date}/{pid}/{race}.json
-  TENKAI/predictions/v1/{date}/{pid}/{race}.csv
-  (race omitted => also TENKAI/predictions/v1/{date}/{pid}/all.json)
+使い方例:
+  # pid単場・全R
+  python TENKAI/tenkai_predict_win.py --date 20250814 --pid 02
+
+  # pid単場・レース指定
+  python TENKAI/tenkai_predict_win.py --date 20250814 --pid 02 --race 2R
+
+  # （必要なら）モデル日付を固定
+  python TENKAI/tenkai_predict_win.py --date 20250814 --pid 02 --model_date 20250810
 """
 
 from __future__ import annotations
-import os, json, argparse, sys
-from typing import Any, Dict, List
-import pandas as pd
+import os
+import json
+import argparse
+from typing import Any, Dict, List, Tuple
+
 import numpy as np
+import pandas as pd
 import joblib
 
-INTEGRATED_BASE = os.path.join("public", "integrated", "v1")
-MODEL_BASE      = os.path.join("TENKAI", "models",      "v1")
-OUT_BASE        = os.path.join("TENKAI", "predictions", "v1")
+# === パス定義 ===
+INTEG_BASE = os.path.join("public", "integrated", "v1")
+MODEL_BASE = os.path.join("TENKAI", "models", "v1")
+OUT_BASE   = os.path.join("TENKAI", "predictions", "v1")
 
-LANES = [1,2,3,4,5,6]
+# === ユーティリティ ===
+def _is_yyyymmdd(name: str) -> bool:
+    return len(name) == 8 and name.isdigit()
 
-# ---------- utils ----------
+def _latest_model_date() -> str:
+    if not os.path.isdir(MODEL_BASE):
+        raise FileNotFoundError(f"model base not found: {MODEL_BASE}")
+    dates = [d for d in os.listdir(MODEL_BASE) if _is_yyyymmdd(d)]
+    if not dates:
+        raise FileNotFoundError(f"no model dates under: {MODEL_BASE}")
+    return sorted(dates)[-1]
+
+def _pick_model_dir(model_date: str, pid: str | None) -> str:
+    """
+    優先度:
+      1) <date>/ALL/ALL
+      2) <date>/<pid>/ALL   （pid指定時）
+      3) <date> 配下の最初の model.pkl
+    """
+    cands = [os.path.join(MODEL_BASE, model_date, "ALL", "ALL")]
+    if pid:
+        cands.append(os.path.join(MODEL_BASE, model_date, pid, "ALL"))
+    for d in cands:
+        if os.path.exists(os.path.join(d, "model.pkl")):
+            return d
+    # フォールバック
+    for root, _, files in os.walk(os.path.join(MODEL_BASE, model_date)):
+        if "model.pkl" in files:
+            return root
+    raise FileNotFoundError(f"no model.pkl under {os.path.join(MODEL_BASE, model_date)}")
+
 def _safe_get(d: Dict[str, Any], *keys, default=None):
     cur = d
     for k in keys:
@@ -36,12 +74,11 @@ def _safe_get(d: Dict[str, Any], *keys, default=None):
     return cur
 
 def _to_float(x):
-    try:
-        return float(x)
-    except Exception:
-        return None
+    try: return float(x)
+    except Exception: return None
 
 def _rank(values: List[float]) -> List[int]:
+    # None は最下位扱い（= +inf）
     pairs = [(i, v if v is not None else float("inf")) for i, v in enumerate(values)]
     pairs.sort(key=lambda t: t[1])
     ranks = [0]*len(values)
@@ -51,31 +88,39 @@ def _rank(values: List[float]) -> List[int]:
         r += 1
     return ranks
 
-def _mean(xs):
+def _mean(xs: List[float]) -> float | None:
     xs = [x for x in xs if x is not None]
-    return sum(xs)/len(xs) if xs else None
+    return float(sum(xs)/len(xs)) if xs else None
 
-# ---------- feature builder from integrated ----------
-def build_c_features_from_integrated(obj: Dict[str, Any]) -> pd.DataFrame:
-    """integrated JSON -> wide C features row (same layout as features_c.py)"""
-    date = str(obj.get("date"))
-    pid  = str(obj.get("pid"))
-    race = str(obj.get("race"))
-    entries = obj.get("entries", []) or []
+# === 特徴抽出（integrated → Cワイド互換 → レーン縦持ち） ===
+LANES = [1,2,3,4,5,6]
 
+def _extract_features_from_integrated(date: str, pid: str, race: str) -> pd.DataFrame:
+    """
+    integrated/v1/<date>/<pid>/<race>.json を読み込み、
+    features_c と同じ構造の「ワイド1行」を作ってから、レーン縦持ちに展開して返す
+    """
+    path = os.path.join(INTEG_BASE, date, pid, f"{race}.json")
+    if not os.path.exists(path):
+        raise FileNotFoundError(path)
+
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    entries = data.get("entries", []) or []
+
+    # 相対用ベクトル
     rc_avgSTs, ages, classes = [], [], []
     for e in entries:
         rc = e.get("racecard", {}) or {}
         rc_avgSTs.append(_to_float(rc.get("avgST")))
         ages.append(_to_float(rc.get("age")))
         classes.append(_to_float(rc.get("classNumber")))
+    r_avgST = _rank(rc_avgSTs)
+    r_age   = _rank(ages)
+    r_class = _rank(classes)
 
-    rank_avgST = _rank(rc_avgSTs) if entries else []
-    rank_age   = _rank(ages)      if entries else []
-    rank_class = _rank(classes)   if entries else []
-
-    row: Dict[str, Any] = {"date": date, "pid": pid, "race": race}
-
+    # ワイド1行
+    wide: Dict[str, Any] = {"date": date, "pid": pid, "race": race}
     for idx, e in enumerate(entries):
         lane = int(e.get("lane"))
         rc = e.get("racecard", {}) or {}
@@ -84,11 +129,14 @@ def build_c_features_from_integrated(obj: Dict[str, Any]) -> pd.DataFrame:
         ms = _safe_get(e, "stats", "entryCourse", "matrixSelf", default={}) or {}
 
         prefix = f"L{lane}_"
+        avgST_rc = _to_float(rc.get("avgST"))
+        age      = _to_float(rc.get("age"))
+        cls      = _to_float(rc.get("classNumber"))
         feat = {
             "startCourse": e.get("startCourse"),
-            "class": rc.get("classNumber"),
-            "age": rc.get("age"),
-            "avgST_rc": _to_float(rc.get("avgST")),
+            "class": cls,
+            "age": age,
+            "avgST_rc": avgST_rc,
             "ec_avgST": _to_float(ec.get("avgST")),
             "flying": rc.get("flyingCount"),
             "late": rc.get("lateCount"),
@@ -101,143 +149,135 @@ def build_c_features_from_integrated(obj: Dict[str, Any]) -> pd.DataFrame:
             "ms_top3Rate": _to_float(ms.get("top3Rate")),
             "win_k": ss.get("firstCount", 0),
             "lose_k": (_safe_get(e, "stats", "entryCourse", "loseKimarite", default={}) or {}).get("まくり", 0),
+            "d_avgST_rc": (avgST_rc if avgST_rc is not None else 0.16) - 0.16,
+            "d_age":      (age if age is not None else 40) - 40,
+            "d_class":    (cls if cls is not None else 3) - 3,
+            "rank_avgST": r_avgST[idx],
+            "rank_age":   r_age[idx],
+            "rank_class": r_class[idx],
         }
-        feat["d_avgST_rc"] = (feat["avgST_rc"] if feat["avgST_rc"] is not None else 0.16) - 0.16
-        feat["d_age"]      = (feat["age"] if feat["age"] is not None else 40) - 40
-        feat["d_class"]    = (feat["class"] if feat["class"] is not None else 3) - 3
-
-        feat["rank_avgST"] = rank_avgST[idx]
-        feat["rank_age"]   = rank_age[idx]
-        feat["rank_class"] = rank_class[idx]
-
         for k, v in feat.items():
-            row[f"{prefix}{k}"] = v
+            wide[prefix+k] = v
 
-    row["mean_avgST_rc"] = _mean(rc_avgSTs)
-    row["mean_age"]      = _mean(ages)
-    row["mean_class"]    = _mean(classes)
+    # レース平均
+    wide["mean_avgST_rc"] = _mean(rc_avgSTs)
+    wide["mean_age"]      = _mean(ages)
+    wide["mean_class"]    = _mean(classes)
 
-    return pd.DataFrame([row])
-
-def wide_to_long_per_lane(df_wide: pd.DataFrame) -> pd.DataFrame:
+    # ワイド→レーン縦持ち
+    df_wide = pd.DataFrame([wide])
     rows = []
-    commons = [c for c in df_wide.columns if not c.startswith("L")]
     for _, r in df_wide.iterrows():
-        base = {c: r[c] for c in commons if c in r.index}
-        by_lane = {lane:{} for lane in LANES}
+        base = {c: r[c] for c in ["date","pid","race","mean_avgST_rc","mean_age","mean_class"] if c in r.index}
+        by_lane = {lane: {} for lane in LANES}
         for c in df_wide.columns:
             if not c.startswith("L"): continue
+            # L{lane}_key
             try:
                 lane = int(c[1])
-            except Exception:
-                continue
-            key = c.split("_",1)[1] if "_" in c else None
-            if key:
+                key = c.split("_", 1)[1]
                 by_lane[lane][key] = r[c]
+            except Exception:
+                pass
         for lane in LANES:
-            row = dict(base); row["lane"] = lane
-            for k,v in by_lane.get(lane, {}).items(): row[k]=v
+            row = dict(base)
+            row["lane"] = lane
+            for k, v in by_lane.get(lane, {}).items():
+                row[k] = v
             rows.append(row)
-    df = pd.DataFrame(rows)
-    # numeric cast
-    for c in df.columns:
+    df_long = pd.DataFrame(rows)
+    # 数値化（できるもののみ）
+    for c in df_long.columns:
         if c in ("date","pid","race"): continue
-        df[c] = pd.to_numeric(df[c], errors="coerce")
-    return df
+        df_long[c] = pd.to_numeric(df_long[c], errors="ignore")
+    return df_long
 
-# ---------- model/feature loader ----------
-def load_model_bundle(model_date: str, pid: str, race: str):
-    # priority: ALL/ALL -> pid/ALL -> pid/race
-    cands = [
-        os.path.join(MODEL_BASE, model_date, "ALL", "ALL"),
-        os.path.join(MODEL_BASE, model_date, pid, "ALL") if pid else "",
-        os.path.join(MODEL_BASE, model_date, pid, race)  if pid and race else "",
-    ]
-    cands = [p for p in cands if p]
-    for d in cands:
-        if os.path.exists(os.path.join(d, "model.pkl")) and os.path.exists(os.path.join(d, "features.json")):
-            model = joblib.load(os.path.join(d, "model.pkl"))
-            with open(os.path.join(d, "features.json"), "r", encoding="utf-8") as f:
-                feats = json.load(f)["features"]
-            return d, model, feats
-    raise FileNotFoundError("model not found under: " + " | ".join(cands))
+# === 推論本体 ===
+def _load_model(model_date: str | None, pid: str | None) -> Tuple[object, List[str], str]:
+    use_date = model_date or _latest_model_date()
+    mdir = _pick_model_dir(use_date, pid)
+    model = joblib.load(os.path.join(mdir, "model.pkl"))
+    fjson = os.path.join(mdir, "features.json")
+    if not os.path.exists(fjson):
+        raise FileNotFoundError(f"features.json not found in {mdir}")
+    with open(fjson, "r", encoding="utf-8") as f:
+        feats = json.load(f).get("features", [])
+    if not feats:
+        raise ValueError("empty features in features.json")
+    return model, feats, mdir
 
-# ---------- prediction ----------
-def predict(date: str, pid: str, race: str, model_date: str):
-    model_dir, model, feat_cols = load_model_bundle(model_date, pid, race if race else "ALL")
+def _predict_one_race(df_feat_long: pd.DataFrame, model, feat_cols: List[str]) -> pd.DataFrame:
+    # 説明変数の整形：不足列は追加（NaN）、余剰列は無視
+    X = df_feat_long.copy()
+    for c in feat_cols:
+        if c not in X.columns:
+            X[c] = np.nan
+    X = X[feat_cols]
+    # 数値化
+    for c in X.columns:
+        X[c] = pd.to_numeric(X[c], errors="coerce")
+    # 単純な中央値補完（列ごと）
+    X = X.copy()
+    for c in X.columns:
+        col = X[c]
+        med = col.median() if col.notna().any() else 0.0
+        X[c] = col.fillna(med)
+    # 予測
+    if hasattr(model, "predict_proba"):
+        prob = model.predict_proba(X)[:, 1]
+    else:
+        # フォールバック（確率がないモデルの場合）
+        pred = model.predict(X)
+        prob = pred.astype(float)
+    out = df_feat_long[["date","pid","race","lane"]].copy()
+    out["win_prob"] = prob
+    out["pred_win"] = (out["win_prob"] >= 0.5).astype(int)
+    # 1着想定の並び（高→低）
+    out = out.sort_values(["date","pid","race","win_prob"], ascending=[True, True, True, False]).reset_index(drop=True)
+    # レース内順位（予測順位）
+    out["pred_rank_in_race"] = out.groupby(["date","pid","race"])["win_prob"].rank(ascending=False, method="first").astype(int)
+    return out
 
-    # input files
+def predict(date: str, pid: str, race: str = "", model_date: str | None = None):
+    model, feat_cols, model_dir = _load_model(model_date, pid or None)
+    print(f"[model] date={model_date or _latest_model_date()} dir={model_dir}")
+    out_dir = os.path.join(OUT_BASE, date, pid)
+    os.makedirs(out_dir, exist_ok=True)
+
     targets = [race] if race else [f"{i}R" for i in range(1,13)]
     outs = []
-
     for r in targets:
-        in_path = os.path.join(INTEGRATED_BASE, date, pid, f"{r}.json")
-        if not os.path.exists(in_path):
-            print(f"skip (not found): {in_path}")
+        integ_path = os.path.join(INTEG_BASE, date, pid, f"{r}.json")
+        if not os.path.exists(integ_path):
+            print(f"skip (not found): {integ_path}")
             continue
-        with open(in_path, "r", encoding="utf-8") as f:
-            obj = json.load(f)
+        try:
+            df_feat = _extract_features_from_integrated(date, pid, r)
+            df_pred = _predict_one_race(df_feat, model, feat_cols)
+            out_path = os.path.join(out_dir, f"{r}.csv")
+            df_pred.to_csv(out_path, index=False, encoding="utf-8")
+            print(f"wrote {out_path} (rows={len(df_pred)})")
+            outs.append(df_pred)
+        except Exception as e:
+            print(f"skip (error): {integ_path}  {e}")
 
-        df_wide = build_c_features_from_integrated(obj)
-        df_long = wide_to_long_per_lane(df_wide)
-
-        # align features
-        X = pd.DataFrame()
-        for c in feat_cols:
-            if c in df_long.columns:
-                X[c] = pd.to_numeric(df_long[c], errors="coerce")
-            else:
-                # missing feature -> fill 0
-                print(f"warn: feature '{c}' missing in integrated; filled 0")
-                X[c] = 0.0
-        # impute NaN to 0 (学習時は中央値埋めだったが保存していないので0で近似)
-        X = X.fillna(0.0)
-
-        proba = model.predict_proba(X)[:,1]
-        df_out = df_long[["date","pid","race","lane"]].copy()
-        df_out["proba_win"] = proba
-        df_out = df_out.sort_values("lane")
-        outs.append(df_out)
-
-        # write per-race
-        out_dir = os.path.join(OUT_BASE, date, pid)
-        os.makedirs(out_dir, exist_ok=True)
-        out_json = os.path.join(out_dir, f"{r}.json")
-        out_csv  = os.path.join(out_dir, f"{r}.csv")
-        records = [
-            {"lane": int(int(x.lane)), "proba_win": float(x.proba_win)}
-            for x in df_out.itertuples(index=False)
-        ]
-        with open(out_json, "w", encoding="utf-8") as f:
-            json.dump({
-                "date": date, "pid": pid, "race": r,
-                "model_date": model_date,
-                "model_dir": os.path.relpath(model_dir).replace("\\","/"),
-                "predictions": records
-            }, f, ensure_ascii=False, indent=2)
-        df_out.to_csv(out_csv, index=False, encoding="utf-8")
-        print(f"wrote {out_json}")
-
-    if outs and not race:
+    if outs:
         df_all = pd.concat(outs, ignore_index=True)
-        out_dir = os.path.join(OUT_BASE, date, pid)
-        with open(os.path.join(out_dir, "all.json"), "w", encoding="utf-8") as f:
-            json.dump({
-                "date": date, "pid": pid, "race": "ALL",
-                "model_date": model_date,
-                "predictions": df_all.to_dict(orient="records")
-            }, f, ensure_ascii=False, indent=2)
-        print(f"wrote {os.path.join(out_dir, 'all.json')}")
+        all_path = os.path.join(out_dir, "all.csv")
+        df_all.to_csv(all_path, index=False, encoding="utf-8")
+        print(f"wrote {all_path} (rows={len(df_all)})")
+    else:
+        print("no outputs")
 
+# === CLI ===
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--date", required=True, help="YYYYMMDD (予測対象)")
-    ap.add_argument("--pid",  required=True, help="場コード (例: 02)")
-    ap.add_argument("--race", default="", help="例: 9R（空=1R..12R）")
-    ap.add_argument("--model_date", default="", help="学習モデルの日付（空=--date と同じ）")
+    ap.add_argument("--date", required=True, help="対象日 YYYYMMDD")
+    ap.add_argument("--pid",  required=True, help="場コード（例: 02）")
+    ap.add_argument("--race", default="", help="レース（例: 2R）空なら1R..12R全部")
+    ap.add_argument("--model_date", default="", help="モデル日付（空=最新を自動採用）")
     args = ap.parse_args()
-    model_date = args.model_date or args.date
-    predict(args.date, args.pid, args.race, model_date)
+    predict(args.date, args.pid, args.race, args.model_date or None)
 
 if __name__ == "__main__":
     main()
