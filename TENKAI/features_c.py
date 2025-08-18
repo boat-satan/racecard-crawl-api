@@ -8,7 +8,7 @@ integrated/v1 から C(編成・相対)特徴を抽出して CSV 出力
 from __future__ import annotations
 import os, json, argparse
 import pandas as pd
-from typing import Any, Dict, List, Optional, Iterable
+from typing import Any, Dict, List, Optional
 
 BASE = "public/integrated/v1"
 
@@ -41,7 +41,7 @@ def _rank(values: List[Optional[float]]) -> List[int]:
 
 def build_c_features(date: str, pid: str, race: str = ""):
     base_dir = os.path.join(BASE, date, pid)
-    targets = [race] if race else [f"{i}R" for i in range(1, 13)]
+    targets = [race] if race else [f"{i}R" for i in range(1, 12 + 1)]
 
     rows: List[Dict[str, Any]] = []
 
@@ -74,7 +74,7 @@ def build_c_features(date: str, pid: str, race: str = ""):
         for idx, e in enumerate(entries):
             lane = int(e.get("lane"))
             rc = e.get("racecard", {}) or {}
-            # ★ exhibition ではなく stats.entryCourse を ec として使う
+            # exhibition ではなく stats.entryCourse を ec として使う
             ec = _safe_get(e, "stats", "entryCourse", default={}) or {}
             ss = _safe_get(e, "stats", "entryCourse", "selfSummary", default={}) or {}
             ms = _safe_get(e, "stats", "entryCourse", "matrixSelf", default={}) or {}
@@ -99,7 +99,7 @@ def build_c_features(date: str, pid: str, race: str = ""):
                 "ms_top2Rate": _to_float(ms.get("top2Rate")),
                 "ms_top3Rate": _to_float(ms.get("top3Rate")),
 
-                # 勝敗近似（firstCount を win、負けは loseKimarite の一部を参考値）
+                # 勝敗近似（firstCount を win、負けは loseKimarite の「まくり」を参考値）
                 "win_k": ss.get("firstCount", 0),
                 "lose_k": (_safe_get(e, "stats", "entryCourse", "loseKimarite", default={}) or {}).get("まくり", 0),
             }
@@ -128,16 +128,20 @@ def build_c_features(date: str, pid: str, race: str = ""):
 
         rows.append(row)
 
-    if not rows:
-        print("no outputs")
-        return
-
+    # === 出力（0件でも必ず CSV を作る） ===
     outdir = os.path.join("TENKAI", "features_c", "v1", date, pid)
     os.makedirs(outdir, exist_ok=True)
     outfile = os.path.join(outdir, f"{race or 'all'}.csv")
-    pd.DataFrame(rows).to_csv(outfile, index=False, encoding="utf-8")
-    print("wrote", outfile)
 
+    if rows:
+        df = pd.DataFrame(rows)
+        df.to_csv(outfile, index=False, encoding="utf-8")
+        print(f"wrote {outfile} ({len(df)} rows)")
+    else:
+        # ヘッダだけの空CSV（最低限の3列）
+        df = pd.DataFrame(columns=["date", "pid", "race"])
+        df.to_csv(outfile, index=False, encoding="utf-8")
+        print(f"wrote {outfile} (0 rows; no integrated files found under {base_dir})")
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
