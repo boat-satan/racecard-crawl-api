@@ -29,16 +29,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # push衝突を避けるため履歴を取得
+          fetch-depth: 0
 
-      # 先にリモートを取り込んでおく（後段のpush衝突回避）
-      - name: Sync with remote (ff-only if possible)
+      - name: Sync with remote
         run: |
           set -Eeuo pipefail
           git fetch --prune origin "+refs/heads/*:refs/remotes/origin/*"
-          # main 以外でも ref_name を使って同期
           git checkout "${{ github.ref_name }}"
-          # 可能なら fast-forward のみ、無理なら rebase + autostash
           if ! git merge --ff-only "origin/${{ github.ref_name }}"; then
             git pull --rebase --autostash origin "${{ github.ref_name }}"
           fi
@@ -51,7 +48,6 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # requirements.txt が無ければ最低限だけ
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           else
@@ -67,45 +63,21 @@ jobs:
           mkdir -p TENKAI
           [ -f TENKAI/__init__.py ] || printf "" > TENKAI/__init__.py
 
-      # JSONのキー読み取りをログに出す（回帰チェック用）
-      - name: Sanity: echo essentials from JSON (if race specified)
+      - name: Sanity: echo essentials from JSON
         if: ${{ github.event.inputs.race != '' }}
         run: |
-          set -Eeuo pipefail
           target="public/integrated/v1/${{ github.event.inputs.date }}/${{ github.event.inputs.pid }}/${{ github.event.inputs.race }}.json"
           if [ -f "$target" ]; then
-            echo ">>> $target"
-            jq -r '
-              .entries[]
-              | {
-                  lane:.lane,
-                  ec_avgST:(.stats.entryCourse.avgST),
-                  class:(.racecard.classNumber),
-                  win_k:((.stats.entryCourse.winKimariteSelf // {})
-                         | to_entries
-                         | map(select(.key=="逃げ" or .key=="差し" or .key=="まくり" or .key=="まくり差し")|.value)
-                         | add // 0),
-                  lose_k:((.stats.entryCourse.loseKimarite // {})
-                          | to_entries
-                          | map(select(.key=="逃げ" or .key=="差し" or .key=="まくり" or .key=="まくり差し")|.value)
-                          | add // 0)
-                }
-              | @json
-            ' "$target"
-          else
-            echo "no targets: $target"
+            jq -r '.entries[] | {lane:.lane, ec_avgST:(.stats.entryCourse.avgST)} | @json' "$target"
           fi
 
       - name: Build C features
-        shell: bash
         run: |
           set -Eeuo pipefail
           RACE_OPT=""
           if [ -n "${{ github.event.inputs.race }}" ]; then
             RACE_OPT="--race ${{ github.event.inputs.race }}"
           fi
-          echo ">>> 実行コマンド"
-          echo python TENKAI/features_c.py --date ${{ github.event.inputs.date }} --pid ${{ github.event.inputs.pid }} $RACE_OPT
           PYTHONPATH="." python TENKAI/features_c.py \
             --date ${{ github.event.inputs.date }} \
             --pid  ${{ github.event.inputs.pid }} \
@@ -117,14 +89,11 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add TENKAI/features_c/v1/** || true
-          # 何も変更が無いときはスキップ
           if git diff --cached --quiet; then
             echo "no changes; skip commit."
           else
             git commit -m "TENKAI C features: ${{ github.event.inputs.date }} pid=${{ github.event.inputs.pid }} ${{ github.event.inputs.race }}"
-            # push 失敗時は rebase して再試行（自動スタッシュ）
             if ! git push origin "${{ github.ref_name }}"; then
-              echo "push rejected; rebasing..."
               git pull --rebase --autostash origin "${{ github.ref_name }}"
               git push origin "${{ github.ref_name }}"
             fi
@@ -133,6 +102,6 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: tenkai-c-${{ github.event.inputs.date }}-${{ github.event.inputs.pid }}${{ github.event.inputs.race && format('-{0}', github.event.inputs.race) || '' }}
+          name: tenkai-c-${{ github.event.inputs.date }}-${{ github.event.inputs.pid }}
           path: TENKAI/features_c/v1/**
           if-no-files-found: warn
