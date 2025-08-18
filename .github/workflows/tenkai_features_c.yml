@@ -49,13 +49,8 @@ jobs:
         run: |
           set -euo pipefail
           test -f TENKAI/features_c.py || { echo "TENKAI/features_c.py がありません"; exit 1; }
-
-      - name: Ensure TENKAI package
-        shell: bash
-        run: |
-          set -euo pipefail
           mkdir -p TENKAI
-          [ -f TENKAI/__init__.py ] || printf "" > TENKAI/__init__.py
+          [ -f TENKAI/__init__.py ] || : > TENKAI/__init__.py
 
       - name: Build C features
         shell: bash
@@ -63,7 +58,6 @@ jobs:
           set -eo pipefail
           RACE_OPT=""
           if [ -n "${{ github.event.inputs.race }}" ]; then
-            # クォートを外して 1R → 1R のまま渡す
             RACE_OPT="--race ${{ github.event.inputs.race }}"
           fi
           echo ">>> 実行コマンド"
@@ -80,8 +74,8 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # 生成物ステージ
-          git add TENKAI/features_c/v1/** || true
+          # 生成物をステージ
+          git add -A TENKAI/features_c/v1/** || true
 
           # 変更なしなら終了
           if git diff --cached --quiet; then
@@ -89,12 +83,20 @@ jobs:
             exit 0
           fi
 
-          # リモートの更新を取り込んでから push（競合回避）
+          # 先にリモートを取り込む（未コミットがあっても自動退避）
           git fetch origin main
-          git pull --rebase origin main
+          git pull --rebase --autostash origin main
+
+          # autostashで戻った変更を再度ステージ
+          git add -A TENKAI/features_c/v1/**
 
           git commit -m "TENKAI C features: ${{ github.event.inputs.date }} pid=${{ github.event.inputs.pid }} ${{ github.event.inputs.race }}"
-          git push origin HEAD:main
+
+          # 競合しがちな場合のリトライ付き push
+          git push origin HEAD:main || (
+            git pull --rebase --autostash origin main &&
+            git push origin HEAD:main
+          )
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
