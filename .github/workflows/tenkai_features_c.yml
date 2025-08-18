@@ -24,21 +24,18 @@ concurrency:
 jobs:
   build-c-features:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Sync with remote
+      - name: Pull fast-forward (avoid push reject)
         run: |
           set -Eeuo pipefail
-          git fetch --prune origin "+refs/heads/*:refs/remotes/origin/*"
+          git fetch origin "${{ github.ref_name }}"
           git checkout "${{ github.ref_name }}"
-          if ! git merge --ff-only "origin/${{ github.ref_name }}"; then
-            git pull --rebase --autostash origin "${{ github.ref_name }}"
-          fi
+          git merge --ff-only "origin/${{ github.ref_name }}" || true
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -54,22 +51,14 @@ jobs:
             pip install pandas
           fi
 
-      - name: Sanity check
-        run: |
-          test -f TENKAI/features_c.py || { echo "TENKAI/features_c.py がありません"; exit 1; }
-
       - name: Ensure TENKAI package
         run: |
           mkdir -p TENKAI
           [ -f TENKAI/__init__.py ] || printf "" > TENKAI/__init__.py
 
-      - name: Sanity: echo essentials from JSON
-        if: ${{ github.event.inputs.race != '' }}
+      - name: Sanity check
         run: |
-          target="public/integrated/v1/${{ github.event.inputs.date }}/${{ github.event.inputs.pid }}/${{ github.event.inputs.race }}.json"
-          if [ -f "$target" ]; then
-            jq -r '.entries[] | {lane:.lane, ec_avgST:(.stats.entryCourse.avgST)} | @json' "$target"
-          fi
+          test -f TENKAI/features_c.py || { echo "TENKAI/features_c.py がありません"; exit 1; }
 
       - name: Build C features
         run: |
@@ -78,10 +67,8 @@ jobs:
           if [ -n "${{ github.event.inputs.race }}" ]; then
             RACE_OPT="--race ${{ github.event.inputs.race }}"
           fi
-          PYTHONPATH="." python TENKAI/features_c.py \
-            --date ${{ github.event.inputs.date }} \
-            --pid  ${{ github.event.inputs.pid }} \
-            $RACE_OPT
+          echo ">>> 実行: python TENKAI/features_c.py --date ${{ github.event.inputs.date }} --pid ${{ github.event.inputs.pid }} $RACE_OPT"
+          PYTHONPATH="." python TENKAI/features_c.py --date ${{ github.event.inputs.date }} --pid ${{ github.event.inputs.pid }} $RACE_OPT
 
       - name: Commit outputs
         run: |
@@ -93,15 +80,14 @@ jobs:
             echo "no changes; skip commit."
           else
             git commit -m "TENKAI C features: ${{ github.event.inputs.date }} pid=${{ github.event.inputs.pid }} ${{ github.event.inputs.race }}"
-            if ! git push origin "${{ github.ref_name }}"; then
-              git pull --rebase --autostash origin "${{ github.ref_name }}"
-              git push origin "${{ github.ref_name }}"
-            fi
+            # rebase 一回だけ試してから push
+            git pull --rebase --autostash origin "${{ github.ref_name }}" || true
+            git push origin "${{ github.ref_name }}"
           fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: tenkai-c-${{ github.event.inputs.date }}-${{ github.event.inputs.pid }}
+          name: tenkai-c-${{ github.event.inputs.date }}-${{ github.event.inputs.pid }}${{ github.event.inputs.race && format('-{0}', github.event.inputs.race) || '' }}
           path: TENKAI/features_c/v1/**
           if-no-files-found: warn
