@@ -8,12 +8,12 @@ integrated/v1 から C(編成・相対)特徴を抽出して CSV 出力
 from __future__ import annotations
 import os, json, argparse
 import pandas as pd
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Iterable
 
 BASE = "public/integrated/v1"
 
-def _safe_get(d: Dict[str, Any], *keys, default=None):
-    cur = d
+def _safe_get(d: Optional[Dict[str, Any]], *keys, default=None):
+    cur: Any = d or {}
     for k in keys:
         if not isinstance(cur, dict) or k not in cur:
             return default
@@ -22,12 +22,14 @@ def _safe_get(d: Dict[str, Any], *keys, default=None):
 
 def _to_float(x):
     try:
+        if x is None:
+            return None
         return float(x)
     except Exception:
         return None
 
-def _rank(values: List[float]) -> List[int]:
-    """小さい方が良い指標(例: avgST)は昇順＝1が最良。Noneは末尾扱い。"""
+def _rank(values: List[Optional[float]]) -> List[int]:
+    """小さい方が良い指標(例: avgST)は昇順＝1が最良。Noneは最下位相当。"""
     pairs = [(i, v if v is not None else float("inf")) for i, v in enumerate(values)]
     pairs.sort(key=lambda t: t[1])
     ranks = [0] * len(values)
@@ -53,10 +55,10 @@ def build_c_features(date: str, pid: str, race: str = ""):
             data = json.load(f)
 
         entries = data.get("entries", []) or []
-        # 先にレース内の相対値用ベクトルを作る
-        rc_avgSTs = []
-        ages = []
-        classes = []
+        # レース内の相対値用ベクトル
+        rc_avgSTs: List[Optional[float]] = []
+        ages: List[Optional[float]] = []
+        classes: List[Optional[float]] = []
         for e in entries:
             rc = e.get("racecard", {}) or {}
             rc_avgSTs.append(_to_float(rc.get("avgST")))
@@ -64,16 +66,15 @@ def build_c_features(date: str, pid: str, race: str = ""):
             classes.append(_to_float(rc.get("classNumber")))
 
         rank_avgST = _rank(rc_avgSTs)
-        # 年齢・級別は大きい方が強い/弱いの解釈が割れるので順位は参考値（昇順=若い/低いが良）
-        rank_age   = _rank(ages)
-        rank_class = _rank(classes)
+        rank_age   = _rank(ages)      # 若いほうが良い想定で昇順
+        rank_class = _rank(classes)   # 低い級のほうが良い想定で昇順
 
         row: Dict[str, Any] = {"date": date, "pid": pid, "race": r}
 
         for idx, e in enumerate(entries):
             lane = int(e.get("lane"))
             rc = e.get("racecard", {}) or {}
-            # ★ 修正点: ec は exhibition ではなく stats.entryCourse
+            # ★ exhibition ではなく stats.entryCourse を ec として使う
             ec = _safe_get(e, "stats", "entryCourse", default={}) or {}
             ss = _safe_get(e, "stats", "entryCourse", "selfSummary", default={}) or {}
             ms = _safe_get(e, "stats", "entryCourse", "matrixSelf", default={}) or {}
@@ -85,7 +86,7 @@ def build_c_features(date: str, pid: str, race: str = ""):
                 "class": rc.get("classNumber"),
                 "age": rc.get("age"),
                 "avgST_rc": _to_float(rc.get("avgST")),
-                "ec_avgST": _to_float(ec.get("avgST")),   # ← ここが本来の ec
+                "ec_avgST": _to_float(ec.get("avgST")),
                 "flying": rc.get("flyingCount"),
                 "late": rc.get("lateCount"),
 
@@ -98,12 +99,12 @@ def build_c_features(date: str, pid: str, race: str = ""):
                 "ms_top2Rate": _to_float(ms.get("top2Rate")),
                 "ms_top3Rate": _to_float(ms.get("top3Rate")),
 
-                # 便宜的な勝敗カウント（selfSummaryから近似）
+                # 勝敗近似（firstCount を win、負けは loseKimarite の一部を参考値）
                 "win_k": ss.get("firstCount", 0),
                 "lose_k": (_safe_get(e, "stats", "entryCourse", "loseKimarite", default={}) or {}).get("まくり", 0),
             }
 
-            # 差分系（基準は経験的な中央値）
+            # 差分系（基準は経験的中央値）
             feat["d_avgST_rc"] = (feat["avgST_rc"] if feat["avgST_rc"] is not None else 0.16) - 0.16
             feat["d_age"]      = (feat["age"] if feat["age"] is not None else 40) - 40
             feat["d_class"]    = (feat["class"] if feat["class"] is not None else 3) - 3
@@ -117,7 +118,7 @@ def build_c_features(date: str, pid: str, race: str = ""):
                 row[f"{prefix}{k}"] = v
 
         # レース全体平均
-        def _mean(xs):
+        def _mean(xs: List[Optional[float]]):
             xs = [x for x in xs if x is not None]
             return sum(xs) / len(xs) if xs else None
 
