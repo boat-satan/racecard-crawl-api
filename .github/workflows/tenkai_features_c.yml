@@ -7,11 +7,10 @@ on:
         description: '対象日 (YYYYMMDD)'
         required: true
       pid:
-        description: '場コード pid (例: 02) ー ALLで全場'
-        required: false
-        default: 'ALL'
+        description: '場コード pid (例: 02 / ALL)'
+        required: true
       race:
-        description: 'レース (例: 1R)。空 or ALL で全R'
+        description: 'レース (例: 1R) 空なら全R'
         required: false
         default: ''
 
@@ -25,6 +24,7 @@ concurrency:
 jobs:
   build-c-features:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,7 +41,7 @@ jobs:
 
       - name: Sanity check
         run: |
-          test -f TENKAI/build_c_features.py || { echo "TENKAI/build_c_features.py がありません"; exit 1; }
+          test -f TENKAI/features_c.py || { echo "TENKAI/features_c.py がありません"; exit 1; }
 
       - name: Ensure TENKAI package
         run: |
@@ -50,62 +50,75 @@ jobs:
 
       - name: Build C features (supports ALL)
         shell: bash
+        env:
+          DATE: ${{ github.event.inputs.date }}
+          PID:  ${{ github.event.inputs.pid }}
+          RACE: ${{ github.event.inputs.race }}
         run: |
-          set -eo pipefail
+          set -euo pipefail
+          BASE="public/integrated/v1"
+          PYTHONPATH=.
 
-          DATE='${{ github.event.inputs.date }}'
-          PID_IN='${{ github.event.inputs.pid }}'
-          RACE_IN='${{ github.event.inputs.race }}'
+          build_one() {
+            local d="$1" p="$2" r="${3:-}"
+            local r_opt=""
+            if [ -n "$r" ]; then r_opt="--race $r"; fi
+            echo ">>> run: python TENKAI/features_c.py --date $d --pid $p $r_opt"
+            PYTHONPATH="$PYTHONPATH" python TENKAI/features_c.py --date "$d" --pid "$p" $r_opt || true
+          }
 
-          # race オプション（空 or ALL は全R）
-          if [[ -z "$RACE_IN" || "$RACE_IN" == "ALL" ]]; then
-            RACE_OPT=""
-            echo "→ race: ALL (全R)"
+          if [ "${PID}" = "ALL" ]; then
+            # 指定日の配下にある pid を総当たり
+            if [ ! -d "${BASE}/${DATE}" ]; then
+              echo "No integrated data for ${DATE}"; exit 0
+            fi
+            for dir in "${BASE}/${DATE}"/*; do
+              [ -d "$dir" ] || continue
+              p="$(basename "$dir")"
+              build_one "${DATE}" "${p}" "${RACE}"
+            done
           else
-            RACE_OPT="--race $RACE_IN"
-            echo "→ race: $RACE_IN"
+            # 単一 pid
+            build_one "${DATE}" "${PID}" "${RACE}"
           fi
 
-          # pid リスト
-          if [[ "$PID_IN" == "ALL" ]]; then
-            PIDS=(01 02 03 04 05 06 07 08 09 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24)
-            echo "→ pid: ALL (${#PIDS[@]}場)"
-          else
-            PIDS=("$PID_IN")
-            echo "→ pid: ${PID_IN}"
-          fi
-
-          for pid in "${PIDS[@]}"; do
-            echo ">>> run: python TENKAI/build_c_features.py --date ${DATE} --pid ${pid} ${RACE_OPT}"
-            PYTHONPATH="." python TENKAI/build_c_features.py --date "${DATE}" --pid "${pid}" ${RACE_OPT}
-          done
+      - name: List outputs (debug)
+        run: |
+          echo "---- generated files ----"
+          ls -R TENKAI || true
 
       - name: Commit outputs
         shell: bash
+        env:
+          DATE: ${{ github.event.inputs.date }}
+          PID:  ${{ github.event.inputs.pid }}
+          RACE: ${{ github.event.inputs.race }}
         run: |
-          set -eo pipefail
-          DATE='${{ github.event.inputs.date }}'
-          PID_IN='${{ github.event.inputs.pid }}'
-          RACE_IN='${{ github.event.inputs.race }}'
-
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # 先に最新を取り込んで衝突で落ちないようにする
-          git fetch origin
-          git pull --rebase || true
-
-          git add TENKAI/features_c/v1/"${DATE}"/** || true
-          if git diff --cached --quiet; then
-            echo "no changes to commit"
-          else
-            git commit -m "TENKAI C features: ${DATE} pid=${PID_IN} race=${RACE_IN:-ALL}"
+          set -euo pipefail
+          FILES="$(find TENKAI/features_c/v1/${DATE} -type f -name '*.csv' -print 2>/dev/null || true)"
+          if [ -n "$FILES" ]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            # 生成された実ファイルだけ add
+            git add $FILES
+            # 変更があればコミット
+            git diff --cached --quiet || git commit -m "TENKAI C features: ${DATE} pid=${PID} race=${RACE:-ALL}"
+            # リモート競合に強い push（必要ならrebaseして再push）
+            set +e
             git push
+            if [ $? -ne 0 ]; then
+              set -e
+              git fetch origin
+              git pull --rebase origin "${GITHUB_REF_NAME}"
+              git push
+            fi
+          else
+            echo "No CSV generated; skip commit."
           fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: tenkai-c-${{ github.event.inputs.date }}-${{ github.event.inputs.pid }}${{ github.event.inputs.race && format('-{0}', github.event.inputs.race) || '-ALLR' }}
-          path: TENKAI/features_c/v1/${{ github.event.inputs.date }}/**
+          name: tenkai-c-${{ github.event.inputs.date }}-${{ github.event.inputs.pid }}${{ github.event.inputs.race && format('-{0}', github.event.inputs.race) || '' }}
+          path: TENKAI/features_c/v1/${{ github.event.inputs.date }}/**/*.csv
           if-no-files-found: warn
