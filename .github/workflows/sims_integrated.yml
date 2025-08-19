@@ -9,16 +9,13 @@ on:
       SIMS:   { description: "試行回数/レース", required: true, default: "600", type: string }
       TOPN:   { description: "trifecta_topN", required: true, default: "18", type: string }
       UNIT:   { description: "1点あたり(円)", required: true, default: "100", type: string }
-      STRATEGY: { description: "strategy", required: true, default: "trifecta_topN", type: choice, options: [trifecta_topN, exacta_topK_third_topM] }
-      K:      { description: "exacta K", required: false, default: "2", type: string }
-      M:      { description: "third M", required: false, default: "4", type: string }
       REQUIRE_ODDS: { description: "オッズ必須（eval時）", required: false, default: "false", type: choice, options: [false, true] }
-      MIN_EV: { description: "EV下限（0=無効）", required: false, default: "0", type: string }
-      ODDS_BANDS: { description: "例 01-09,10-19", required: false, default: "", type: string }
-      KEYMAN_ENABLE:   { description: "pass2有効", required: false, default: "true", type: choice, options: [true, false] }
-      KEYMAN_THR:      { description: "KEYMAN_RANK 閾値", required: false, default: "0.7", type: string }
-      KEYMAN_BOOST:    { description: "A/Ap ブースト(例0.15)", required: false, default: "0.15", type: string }
-      KEYMAN_AGGR:     { description: "挙動改変 0..1", required: false, default: "0.0", type: string }
+      KEYMAN_ENABLE: { description: "pass2有効", required: false, default: "true", type: choice, options: [true, false] }
+      FILTERS:
+        description: "フィルタまとめ入力 (例: MIN_EV=1.5,ODDS_BANDS=01-19,KEYMAN_THR=0.7,KEYMAN_BOOST=0.15,KEYMAN_AGGR=0.3)"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: write
@@ -52,9 +49,6 @@ jobs:
           SIMS:  ${{ inputs.SIMS }}
           TOPN:  ${{ inputs.TOPN }}
           UNIT:  ${{ inputs.UNIT }}
-          STRATEGY: ${{ inputs.STRATEGY }}
-          K: ${{ inputs.K }}
-          M: ${{ inputs.M }}
         run: |
           set -euo pipefail
           echo "[pass1] DATE=$DATE PID=$PID"
@@ -63,11 +57,11 @@ jobs:
             --dates "$DATE" \
             --pids "$PID" \
             --sims "$SIMS" \
-            --strategy "$STRATEGY" --k "$K" --m "$M" --topn "$TOPN" \
+            --topn "$TOPN" \
             --predict-only \
             --outdir scripts/sims
 
-      # 2) ML推論（TENKAI）— 既に出力がある場合はスキップ可能
+      # 2) ML推論（TENKAI）
       - name: Run TENKAI prediction (generate CSVs)
         env:
           DATE: ${{ inputs.DATE }}
@@ -77,7 +71,6 @@ jobs:
           OUT_DIR="TENKAI/predictions/v1/$DATE"
           mkdir -p "$OUT_DIR"
           echo "[tenkai] generate predictions for $DATE / $PID"
-          # 既存があれば上書きしたい場合は --force などを自前スクリプトに実装して使う
           python TENKAI/tenkai_predict_integrated.py \
             --date "$DATE" --pids "$PID" \
             --out "TENKAI/predictions/v1"
@@ -87,7 +80,7 @@ jobs:
           echo "ML outputs:"
           find TENKAI/predictions/v1/${{ inputs.DATE }} -maxdepth 2 -type f -name '*.csv' | sort
 
-      # 3) Pass2（MLを読み込んで統合）
+      # 3) Pass2（ML統合）
       - name: Run Pass2 (SimS integrated with ML)
         env:
           DATE:  ${{ inputs.DATE }}
@@ -96,33 +89,24 @@ jobs:
           SIMS:  ${{ inputs.SIMS }}
           TOPN:  ${{ inputs.TOPN }}
           UNIT:  ${{ inputs.UNIT }}
-          STRATEGY: ${{ inputs.STRATEGY }}
-          K: ${{ inputs.K }}
-          M: ${{ inputs.M }}
           REQUIRE_ODDS: ${{ inputs.REQUIRE_ODDS }}
-          MIN_EV: ${{ inputs.MIN_EV }}
-          ODDS_BANDS: ${{ inputs.ODDS_BANDS }}
           KEYMAN_ENABLE: ${{ inputs.KEYMAN_ENABLE }}
-          KEYMAN_THR: ${{ inputs.KEYMAN_THR }}
-          KEYMAN_BOOST: ${{ inputs.KEYMAN_BOOST }}
-          KEYMAN_AGGR: ${{ inputs.KEYMAN_AGGR }}
+          FILTERS: ${{ inputs.FILTERS }}
         run: |
           set -euo pipefail
           echo "[pass2] MODE=$MODE  DATE=$DATE PID=$PID"
           ARGS_COMMON="--base public --dates $DATE --pids $PID \
-            --sims $SIMS --strategy $STRATEGY --k $K --m $M --topn $TOPN \
-            --keyman-enable $KEYMAN_ENABLE --keyman-threshold $KEYMAN_THR \
-            --keyman-boost $KEYMAN_BOOST --keyman-aggr $KEYMAN_AGGR \
-            --ml-root TENKAI/predictions/v1"
+            --sims $SIMS --topn $TOPN \
+            --keyman-enable $KEYMAN_ENABLE \
+            --ml-root TENKAI/predictions/v1 \
+            --filters \"$FILTERS\""
           if [ "$MODE" = "predict" ]; then
             python scripts/sims/sims_integrated.py $ARGS_COMMON --predict-only --outdir scripts/sims
           else
             python scripts/sims/sims_integrated.py $ARGS_COMMON \
               --outdir scripts/sims \
               --odds-base public/odds/v1 \
-              --require-odds $REQUIRE_ODDS \
-              --min-ev $MIN_EV \
-              --odds-bands "$ODDS_BANDS"
+              --require-odds $REQUIRE_ODDS
           fi
 
       - name: Commit results into repo
