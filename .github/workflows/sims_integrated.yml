@@ -151,6 +151,7 @@ jobs:
           SIMS:  ${{ inputs.SIMS }}
           TOPN:  ${{ inputs.TOPN }}
           OUTDIR: ${{ inputs.OUTDIR }}
+          # parsed filters
           F_REQUIRE_ODDS:   ${{ steps.parse.outputs.F_REQUIRE_ODDS }}
           F_MIN_EV:         ${{ steps.parse.outputs.F_MIN_EV }}
           F_ODDS_BANDS:     ${{ steps.parse.outputs.F_ODDS_BANDS }}
@@ -160,6 +161,7 @@ jobs:
           F_ONLY_FIRST1:    ${{ steps.parse.outputs.F_ONLY_FIRST1 }}
           F_BUY_IN_TOP3:    ${{ steps.parse.outputs.F_BUY_IN_TOP3 }}
           F_BUY_THR:        ${{ steps.parse.outputs.F_BUY_THR }}
+          # parsed keyman
           K_ENABLE: ${{ steps.parse.outputs.K_ENABLE }}
           K_THR:    ${{ steps.parse.outputs.K_THR }}
           K_BOOST:  ${{ steps.parse.outputs.K_BOOST }}
@@ -167,30 +169,36 @@ jobs:
         run: |
           set -euo pipefail
           echo "[pass2] MODE=$MODE DATE=$DATE PID=$PID"
+
           if [[ "${K_ENABLE,,}" == "false" ]]; then
-            K_THR=9.9; K_BOOST=0; K_AGGR=0
+            K_THR=9.9
+            K_BOOST=0
+            K_AGGR=0
           fi
+
           ARGS_COMMON="--base public --dates $DATE --pids $PID \
             --sims $SIMS --topn $TOPN \
             --keyman-threshold $K_THR --keyman-boost $K_BOOST --keyman-aggr $K_AGGR \
             --ml-root TENKAI/predictions/v1 \
             --outdir $OUTDIR"
+
           [[ "${F_EXCLUDE_FIRST1,,}" == "true" ]] && ARGS_COMMON="$ARGS_COMMON --exclude-first1"
           [[ "${F_ONLY_FIRST1,,}"    == "true" ]] && ARGS_COMMON="$ARGS_COMMON --only-first1"
           [[ "${F_BUY_IN_TOP3,,}"    == "true" ]] && ARGS_COMMON="$ARGS_COMMON --buy-if-keyman-in-top3 --buy-keyman-threshold $F_BUY_THR"
+
           if [[ "$MODE" == "predict" ]]; then
             python scripts/sims/sims_integrated.py $ARGS_COMMON --predict-only
           else
             ARGS_FILTER=""
             [[ -n "${F_ODDS_BANDS}" ]] && ARGS_FILTER="$ARGS_FILTER --odds-bands \"$F_ODDS_BANDS\""
-            [[ -n "${F_ODDS_MIN}" && "$F_ODDS_MIN" != "0" ]] && ARGS_FILTER="$ARGS_FILTER --odds-min $F_ODDS_MIN"
-            [[ -n "${F_ODDS_MAX}" && "$F_ODDS_MAX" != "0" ]] && ARGS_FILTER="$ARGS_FILTER --odds-max $F_ODDS_MAX"
+            [[ -n "${F_ODDS_MIN}"   && "$F_ODDS_MIN" != "0" ]] && ARGS_FILTER="$ARGS_FILTER --odds-min $F_ODDS_MIN"
+            [[ -n "${F_ODDS_MAX}"   && "$F_ODDS_MAX" != "0" ]] && ARGS_FILTER="$ARGS_FILTER --odds-max $F_ODDS_MAX"
             [[ "${F_REQUIRE_ODDS,,}" == "true" ]] && ARGS_FILTER="$ARGS_FILTER --require-odds"
             [[ -n "${F_MIN_EV}" && "$F_MIN_EV" != "0" ]] && ARGS_FILTER="$ARGS_FILTER --min-ev $F_MIN_EV"
             eval python scripts/sims/sims_integrated.py $ARGS_COMMON --odds-base public/odds/v1 $ARGS_FILTER
           fi
 
-      # ★ 追加：集計を固定名で上書き保存
+      # ★ 固定ファイル名で集計を常に上書き
       - name: Aggregate overall (overwrite)
         if: always()
         env:
@@ -202,6 +210,7 @@ jobs:
           set -euo pipefail
           python - <<'PY'
 import os, json, glob
+
 date   = os.environ["DATE"]
 mode   = os.environ["MODE"]
 unit   = int(os.environ["UNIT"])
@@ -217,6 +226,7 @@ payout_total = 0
 def load_results(base,date,pid,race):
     root_v1=os.path.join("public","results","v1")
     dirp=os.path.join(root_v1,date,pid)
+    if not os.path.isdir(dirp): return {}
     cand=os.path.join(dirp, f"{race if race.endswith('R') else race+'R'}.json")
     if os.path.isfile(cand):
         return json.load(open(cand,"r",encoding="utf-8"))
@@ -270,7 +280,7 @@ summary = {
 }
 os.makedirs(os.path.join(outdir,"pass2"), exist_ok=True)
 with open(os.path.join(outdir,"pass2","overall.json"),"w",encoding="utf-8") as fp:
-    json.dump(summary, fp, ensure_ascii=False, indent=2)
+  json.dump(summary, fp, ensure_ascii=False, indent=2)
 print(">> wrote", os.path.join(outdir,"pass2","overall.json"))
 PY
 
