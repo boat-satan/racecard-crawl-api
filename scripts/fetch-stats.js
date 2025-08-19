@@ -10,6 +10,7 @@ import fs from "node:fs/promises";
 import fssync from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { execSync } from "node:child_process"; // ★ git最終コミット時刻 用
 
 // -------------------------------
 // 定数/入出力
@@ -29,6 +30,7 @@ const ENV_RACERS       = process.env.RACERS?.trim() || "";
 const ENV_RACERS_LIMIT = Number(process.env.RACERS_LIMIT ?? "");
 const ENV_BATCH        = Number(process.env.STATS_BATCH ?? "");
 const FRESH_HOURS      = Number(process.env.FRESH_HOURS || 12);
+const OVERWRITE        = String(process.env.STATS_OVERWRITE || "0") === "1"; // ★強制再取得
 
 // 絞り込み（PID/RACE）— 例: TARGET_PID="02,06", TARGET_RACE="1,3R,12"
 const PID_IN = (process.env.TARGET_PID || "").trim();
@@ -192,9 +194,7 @@ function parseEntryMatrixFromCoursePage($){
   return result;
 }
 
-// ---- ここから修正：勝ち決まり手（自艇行の横列）抽出 ----
-
-// 表記ゆれ対応付きで「決まり手」テーブルを探す
+// ---- 勝ち決まり手（自艇行の横列）抽出 ----
 function findKimariteTable($) {
   const need = ["逃げ","差し","まくり","まくり差し","抜き","恵まれ"];
   const tables = $("table").toArray();
@@ -206,18 +206,13 @@ function findKimariteTable($) {
   }
   return null;
 }
-
-// 「全艇決まり手」（自艇行の横列＝勝ち決まり手）
 function parseEntryKimariteRows($){
   const found = findKimariteTable($);
   if (!found) return null;
   const { $el, normHeaders } = found;
   const { rows } = parseTable($, $el);
-
-  // 「逃げ」列の位置から右側を決まり手列として読む（前に「出走数」「1着数」等があってもOK）
   const start = Math.max(0, normHeaders.findIndex(h => h.includes("逃げ")));
   const keys  = normHeaders.slice(start).map(normalizeKimariteKey);
-
   const resultRows=[];
   for(const r of rows){
     const label=r[0]||"";
@@ -225,7 +220,6 @@ function parseEntryKimariteRows($){
     if(!m) continue;
     const course=Number(m[1]);
     const isSelf=label.includes("（自艇）");
-
     const detail={};
     for(let i=0;i<keys.length;i++){
       const v=r[start+i];
@@ -237,8 +231,6 @@ function parseEntryKimariteRows($){
   resultRows.sort((a,b)=>a.course-b.course);
   return { rows: resultRows };
 }
-
-// ---- 修正ここまで ----
 
 // rdemo: 展示タイム順位
 function parseExTimeRankFromRdemo($){
@@ -281,7 +273,7 @@ function* candidateProgramRoots(){
     const dates = listDateDirs(base);
     if (dates.length) yield path.join(base, dates[0]);
   }
-  // 2) today ディレクトリ
+  // 2) today ディレクトリ（残しておくが、実運用では日付ディレクトリを優先）
   for (const base of bases) {
     const todayDir = path.join(base, "today");
     if (fssync.existsSync(todayDir)) yield todayDir;
@@ -321,7 +313,6 @@ async function collectRacersFromPrograms(){
       const pidDirName = e.name; // "02" 等
       // PIDフィルタ：ディレクトリ名 or stadiumName(index.json) の両対応
       if (PID_FILTERS && !PID_FILTERS.includes(pidDirName)) {
-        // stadiumNameでの照合（任意）
         const idxPath = path.join(root, pidDirName, "index.json");
         let okByName = false;
         if (fssync.existsSync(idxPath)) {
@@ -354,9 +345,28 @@ async function collectRacersFromPrograms(){
 }
 
 async function ensureDir(p){ await fs.mkdir(p,{recursive:true}); }
-function isFresh(file, hours=12){
-  try{ const st=fssync.statSync(file); return (Date.now()-st.mtimeMs) <= hours*3600*1000; }
-  catch{ return false; }
+
+// -------------------------------
+// ★ git最終コミット時刻ベースの鮮度判定
+// -------------------------------
+function lastCommitUnix(filePath){
+  try {
+    // %ct = committer date (unix). 履歴が無いときは空になるので例外→0
+    const out = execSync(`git log -1 --format=%ct -- "${filePath}"`, {
+      stdio: ["ignore","pipe","ignore"],
+      cwd: path.resolve(__dirname, "..") // リポのルート（scripts/から一つ上）
+    }).toString().trim();
+    return Number(out) || 0;
+  } catch {
+    return 0;
+  }
+}
+function isFreshByGit(filePath, hours=12){
+  if (!fssync.existsSync(filePath)) return false; // そもそも無い→古い扱い
+  const ts = lastCommitUnix(filePath);           // 最終コミット時刻（秒）
+  if (!ts) return false;                          // 履歴が取れない→古い扱い
+  const ageHours = (Date.now()/1000 - ts) / 3600;
+  return ageHours < hours;
 }
 
 // -------------------------------
@@ -451,7 +461,8 @@ async function main(){
   }
 
   console.log(
-    `process ${racers.length} racers (incremental, fresh<=${FRESH_HOURS}h)` +
+    `process ${racers.length} racers (fresh<=${FRESH_HOURS}h by git-commit time` +
+    (OVERWRITE ? ", OVERWRITE=1" : "") + ")" +
     (ENV_RACERS ? " [env RACERS specified]" : "") +
     (ENV_RACERS_LIMIT ? ` [limit=${ENV_RACERS_LIMIT}]` : "") +
     (ENV_BATCH ? ` [batch=${ENV_BATCH}]` : "")
@@ -462,10 +473,12 @@ async function main(){
   let ok=0, ng=0;
   for(const regno of racers){
     const outPath = path.join(OUTPUT_DIR_V2, `${regno}.json`);
-    if(isFresh(outPath, FRESH_HOURS)){
-      console.log(`⏭️  skip fresh ${path.relative(PUBLIC_DIR, outPath)}`);
+
+    if (!OVERWRITE && isFreshByGit(outPath, FRESH_HOURS)) {
+      console.log(`⏭️  skip fresh(by git) ${path.relative(PUBLIC_DIR, outPath)}`);
       continue;
     }
+
     try{
       const data = await fetchOne(regno);
       await fs.writeFile(outPath, JSON.stringify(data, null, 2), "utf8");
