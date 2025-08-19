@@ -137,7 +137,7 @@ def _predict_tansyo(df_feat,model,feat_cols):
     out["pred_rank_in_race"]=out.groupby(["date","pid","race"])["win_prob"].rank(ascending=False,method="first").astype(int)
     return out
 
-# --- ★決まり手後処理ルール ---
+# --- ★決まり手後処理ルール（最小変更で追加） ---
 ALLOWED = {
     1:["逃げ","抜き","恵まれ"],
     2:["差し","まくり","抜き","恵まれ"],
@@ -149,10 +149,11 @@ ALLOWED = {
 
 def postprocess_kimarite(df:pd.DataFrame,classes:List[str])->pd.DataFrame:
     for i,row in df.iterrows():
-        lane=row["lane"]; allowed=ALLOWED[lane]
-        probs=np.array([row[f"prob_{c}"] for c in classes])
+        lane=row["lane"]; allowed=ALLOWED.get(lane, classes)
+        probs=np.array([row[f"prob_{c}"] for c in classes], dtype=float)
         mask=np.array([c in allowed for c in classes],dtype=bool)
-        probs[~mask]=0.0; s=probs.sum(); 
+        probs[~mask]=0.0
+        s=probs.sum()
         if s>0: probs/=s
         for j,c in enumerate(classes): df.at[i,f"prob_{c}"]=probs[j]
         df.at[i,"pred_kimarite"]=classes[int(np.argmax(probs))]
