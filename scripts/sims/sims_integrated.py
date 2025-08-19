@@ -1,32 +1,17 @@
-# SimS_integrated.py — SimS × ML ハイブリッド（predict/eval両対応, pass2相当）
-# - predict-only: results/odds なしで ./predict にTOPN出力
-# - eval       : results/odds 読込で ROI 集計（outdir配下）
-# - 入力:
-#   * integrated: public/integrated/v1/<date>/<pid>/<race>.json
-#   * pass1 keyman: <pass1-dir>/keyman/<date>/<pid>/<race>.json（任意）
-#   * ML CSV: <ml-root>/<date>/<pid>/<race>.csv（任意）
-#
-# MLの使いどころ:
-#  - ST(μ,σ) 前倒し/分散調整, A/Ap 乗算, aggr_map（攻め度）, first_right/lineblock 微調整,
-#    スワップロジット加点, 決まり手のsoft prior（決定は既存ルールを基本に上書き最小限）
-#
-# 使い方例:
-#   # predict
-#   python SimS_integrated.py --base ./public --dates 20250819 --sims 1200 --topn 18 --predict-only \
-#     --pass1-dir ./SimS_v1.0_eval/pass1 --ml-root ./ml_outputs
-#
-#   # eval
-#   python SimS_integrated.py --base ./public --dates 20250819 --sims 1200 --topn 18 \
-#     --outdir ./out --pass1-dir ./SimS_v1.0_eval/pass1 --ml-root ./ml_outputs \
-#     --odds-base ./public/odds/v1 --min-ev 0.0
-
-import os, csv, json, math, argparse, shutil
-from collections import Counter, defaultdict
+# sims_integrated.py — Pass2: ML×Keyman を反映して SimS 再シム（predict/eval 両対応）
+import os, json, math, argparse, shutil, csv
+from collections import Counter
 import numpy as np
 import pandas as pd
 
-# ========= 基本パラメータ =========
+try:
+    import tomllib
+except Exception:
+    tomllib = None
+
+# ===== パラメータ/既定係数 =====
 class Params:
+    # SimS core
     b0=100.0; alpha_R=0.005; alpha_A=-0.010; alpha_Ap=-0.012
     theta=0.0285; a0=0.0; b_dt=15.0; cK=1.2
     tau_k=0.030
@@ -41,23 +26,77 @@ class Params:
     base_wake=0.20; extra_wake_when_outside=0.25
     decision_bias_mult=1.0
 
-rng = np.random.default_rng(2025)
+    # ML融合の既定
+    ml_st_gain=0.30            # まくり系に比例して ST μ を前倒し（下げ）
+    ml_A_gain=0.20             # A/Ap を攻め/守りでスケール
+    ml_consistency=0.30        # 片寄りの緩和
+    # セーフティガード
+    ml_max_mu_advance=0.003    # ST μ 前倒し上限（秒）
+    ml_max_sigma_shrink=0.20   # σ 縮小上限（割合）
+    ml_max_A_scale=0.12        # A/Ap の倍率 |±| 上限（割合）
 
-# ========= 小物 =========
-def sigmoid(x): return 1/(1+math.exp(-x))
+rng = np.random.default_rng(2025)
+sigmoid = lambda x: 1/(1+math.exp(-x))
+
+def _load_params_file(path: str) -> dict:
+    if not path: return {}
+    p = os.path.expanduser(path)
+    if not os.path.isfile(p): raise FileNotFoundError(p)
+    ext = os.path.splitext(p)[1].lower()
+    if ext == ".json":
+        return json.load(open(p, "r", encoding="utf-8"))
+    if ext == ".toml":
+        if tomllib is None: raise RuntimeError("toml は Python 3.11+")
+        return tomllib.load(open(p, "rb"))
+    raise ValueError(f"Unsupported: {ext}")
+
+def _parse_set(expr: str) -> dict:
+    out = {}
+    if not expr: return out
+    for kv in [p.strip() for p in expr.split(",") if p.strip()]:
+        if "=" not in kv: continue
+        k, v = kv.split("=", 1); k=k.strip(); v=v.strip()
+        try:
+            out[k] = (v.lower()=="true") if v.lower() in ("true","false") else (float(v) if any(c in v.lower() for c in ".e") else int(v))
+        except: out[k]=v
+    return out
+
+def _apply_over(cls, d: dict):
+    for k,v in d.items():
+        if hasattr(cls,k): setattr(cls,k,v)
+
+# ===== ユーティリティ =====
 def _norm_race(r): 
     r=(r or "").strip().upper()
     return r if (not r or r.endswith("R")) else f"{r}R"
-def _parse_bool(v, default):
-    if v is None: return default
-    s=str(v).strip().lower()
-    return True if s in ("1","true","yes","y","on") else False if s in ("0","false","no","n","off") else default
+
+def _minmax_norm(d, keys):
+    vs=[float(d.get(k,0.0)) for k in keys]; lo=min(vs) if vs else 0.0; hi=max(vs) if vs else 0.0
+    den=(hi-lo) or 1.0
+    return {k:(float(d.get(k,0.0))-lo)/den for k in keys}
+
+def _bands(bands_str, omin, omax):
+    if bands_str:
+        out=[]
+        for part in bands_str.split(","):
+            if "-" not in part: continue
+            lo_s,hi_s=[s.strip() for s in part.split("-",1)]
+            lo=float(lo_s) if lo_s else float("-inf"); hi=float(hi_s) if hi_s else float("inf")
+            if math.isfinite(lo) and math.isfinite(hi) and lo>hi: lo,hi=hi,lo
+            out.append((lo,hi))
+        return out
+    if omin or omax:
+        lo=float(omin) if omin>0 else float("-inf"); hi=float(omax) if omax>0 else float("inf")
+        if math.isfinite(lo) and math.isfinite(hi) and lo>hi: lo,hi=hi,lo
+        return [(lo,hi)]
+    return []
+
 def _in_band(odds,bands):
     if not bands: return True
     if odds is None or not math.isfinite(odds): return False
     return any(lo<=odds<=hi for lo,hi in bands)
 
-# ========= 入力構築 =========
+# ===== ベース入力 =====
 def _sbase(rc):
     n1=float(rc.get("natTop1",6.0)); n2=float(rc.get("natTop2",50.0)); n3=float(rc.get("natTop3",70.0))
     return 0.5*((n1-6)/2)+0.3*((n2-50)/20)+0.2*((n3-70)/20)
@@ -66,6 +105,30 @@ def _wind(env):
     d=(env.get("wind") or {}).get("dir","cross"); m=float((env.get("wind") or {}).get("mps",0.0))
     sign=1 if d=="tail" else -1 if d=="head" else 0
     return Params.wind_theta_gain*sign*m, 1.0+Params.wind_st_sigma_gain*(abs(m)/10.0)
+
+def _apply_session(ST,A,Ap):
+    ST+=rng.normal(Params.session_ST_shift_mu,Params.session_ST_shift_sd)
+    g=lambda x: x*(1.0+rng.normal(Params.session_A_bias_mu,Params.session_A_bias_sd))
+    return ST,g(A),g(Ap)
+
+def _maybe_backoff(ST,A):
+    if rng.random()<Params.p_backoff: return ST+Params.backoff_ST_shift, A*(1-Params.backoff_A_penalty), True
+    return ST,A,False
+
+def _maybe_cav(A):
+    if rng.random()<Params.p_cav: return A*(1-Params.cav_A_penalty), True
+    return A,False
+
+def _maybe_safe():
+    if rng.random()<Params.p_safe_margin: 
+        return max(0.0, rng.normal(Params.safe_margin_mu, Params.safe_margin_sigma)), True
+    return 0.0, False
+
+def _wake_p(lane, entry):
+    pos=entry.index(lane)
+    base=Params.base_wake+Params.extra_wake_when_outside*((lane-1)/5.0)
+    if pos==0: base*=0.3
+    return max(0.0, min(base,0.95))
 
 def build_input(d):
     lanes=[e["lane"] for e in d["entries"]]
@@ -100,122 +163,59 @@ def build_input(d):
     return {"lanes":lanes,"ST_model":ST_model,"R":R,"A":A,"Ap":Ap,"env":env,
             "squeeze":squeeze,"first_right":set(first_right),"lineblocks":set(lineblocks)}
 
-# ========= ML 読み込み & 補正マップ作成 =========
-def load_ml_csv(ml_root, date, pid, race):
-    """1レース1CSV: lane, win_prob, prob_*, pred_kimarite, pred_conf, uncertainty"""
-    path=os.path.join(ml_root, date, pid, f"{race}.csv")
-    if not os.path.isfile(path): return {}
-    rows={}
-    with open(path, newline="", encoding="utf-8") as f:
-        r=csv.DictReader(f)
-        for row in r:
-            try:
-                lane=int(row["lane"])
-            except: continue
-            rows[lane]=row
-    return rows
+# ===== ML 取り込み・融合 =====
+def load_ml_row(path_csv):
+    rows=[]
+    with open(path_csv, newline="", encoding="utf-8") as f:
+        for r in csv.DictReader(f):
+            rows.append(r)
+    # lane -> dict(prob_*)
+    out={}
+    for r in rows:
+        lane=int(r["lane"])
+        out[lane]={
+            "p_nige":float(r.get("prob_逃げ",0.0)),
+            "p_sashi":float(r.get("prob_差し",0.0)),
+            "p_makuri":float(r.get("prob_まくり",0.0)),
+            "p_makuri_sashi":float(r.get("prob_まくり差し",0.0)),
+            "p_nuki":float(r.get("prob_抜き",0.0)),
+            "p_megumare":float(r.get("prob_恵まれ",0.0)),
+        }
+    return out
 
-def _get_float(d, k, default=0.0):
-    try: return float(d.get(k, default))
-    except: return default
+def apply_ml_adjustments(inp, ml_probs, st_gain=0.30, A_gain=0.20, consistency=0.30):
+    """inp: build_input の戻り値を破壊的に更新。ガード込み。"""
+    lanes=inp["lanes"]
+    for l in lanes:
+        probs=ml_probs.get(l, None)
+        if not probs: continue
+        p_att = probs["p_makuri"] + probs["p_makuri_sashi"]     # 攻め（外向き）
+        p_def = probs["p_sashi"] + probs["p_nuki"] + probs["p_megumare"]  # 守り
+        # 片寄り緩和
+        p_att *= (1.0 + consistency*(-0.2))
+        p_def *= (1.0 + consistency*(+0.1))
 
-def build_ml_adjusters(ml_rows, keyman_rank=None, gains=None):
-    """
-    returns:
-      st_mu_shift[lane], st_sigma_mult[lane], A_mult[lane], Ap_mult[lane],
-      aggr_map[lane], first_right_extra:set, lineblock_extra:set, swap_bias[(lead,chase)], kim_prior[lane]->dict
-    """
-    keyman_rank = keyman_rank or {}
-    g = {
-        "st_mu_in":0.010, "st_mu_out":0.008, "st_sig_tight":0.20, "st_sig_loose":0.10,
-        "A_M":0.20, "A_S":0.10, "A_X":0.05, "Ap_M":0.25, "Ap_S":0.10, "Ap_X":0.10,
-        "line_12":0.20, "line_41":0.15, "wake_cut":0.60, "swap_M":0.8, "swap_S":0.4, "swap_N":0.3,
-        "prior_N":0.5, "prior_M":0.6, "prior_S":0.5,
-        "key_boost_A":0.15, "key_mu_shift":0.006, "key_sig_tight":0.35
-    }
-    if gains: g.update(gains)
+        # ST μ 前倒し（最大 0.003 s）
+        mu0 = inp["ST_model"][str(l)]["mu"]
+        dmu = -min(Params.ml_max_mu_advance, st_gain * 0.010 * p_att)  # 目安 0.0〜0.003
+        inp["ST_model"][str(l)]["mu"] = max(0.05, mu0 + dmu)
 
-    st_mu_shift=defaultdict(float); st_sigma_mult=defaultdict(lambda:1.0)
-    A_mult=defaultdict(lambda:1.0); Ap_mult=defaultdict(lambda:1.0)
-    aggr_map=defaultdict(float)
-    first_right_extra=set(); lineblock_extra=set()
-    swap_bias_lead=defaultdict(float); swap_bias_chase=defaultdict(float)
-    kim_prior=defaultdict(lambda: {"逃げ":0.0,"差し":0.0,"まくり":0.0,"まくり差し":0.0})
+        # σ縮小（控えめ）
+        sigma0 = inp["ST_model"][str(l)]["sigma"]
+        shrink = min(Params.ml_max_sigma_shrink, st_gain*0.5*p_att)    # 最大 20%
+        inp["ST_model"][str(l)]["sigma"] = max(0.005, sigma0*(1.0 - shrink))
 
-    for lane,row in ml_rows.items():
-        M = _get_float(row,"prob_まくり",0)+_get_float(row,"prob_まくり差し",0)
-        S = _get_float(row,"prob_差し",0)
-        N = _get_float(row,"prob_逃げ",0) if lane==1 else 0.0
-        X = _get_float(row,"prob_抜き",0)+_get_float(row,"prob_恵まれ",0)
-        C = max(0.0, min(1.0, _get_float(row,"pred_conf",1.0)*(1.0-_get_float(row,"uncertainty",0.0))))
-        K = float(keyman_rank.get(str(lane), 0.0))
+        # A/Ap の攻守スケール（±12%クランプ）
+        scale = max(-Params.ml_max_A_scale, min(Params.ml_max_A_scale, A_gain*(p_att - p_def)))
+        inp["A"][l]  *= (1.0 + scale)
+        inp["Ap"][l] *= (1.0 + scale)
 
-        # ST
-        st_mu_shift[lane] += -(g["st_mu_in"] * N * C) if lane==1 else -(g["st_mu_out"] * M * C)
-        st_sigma_mult[lane] *= (1.0 - g["st_sig_tight"]*M*C + g["st_sig_loose"]*X*C)
+    return inp
 
-        # A / Ap
-        A_mult[lane]  *= (1.0 + g["A_M"]*M*C + g["A_S"]*S*C + g["A_X"]*X*C)
-        Ap_mult[lane] *= (1.0 + g["Ap_M"]*M*C + g["Ap_S"]*S*C - g["Ap_X"]*X*C)
-
-        # 攻め度
-        aggr_map[lane] = max(0.0, min(1.0, M*C))
-
-        # 先マイ/ラインブロック（控えめに）
-        if lane==1 and N*C > 0.5: first_right_extra.add(1)
-        if lane in (3,4) and M*C > 0.5: first_right_extra.add(lane)
-        if N*C > 0.6: lineblock_extra.add((1,2))
-        if lane==4 and M*C > 0.5: lineblock_extra.add((4,1))
-
-        # スワップロジット加点は one_pass 側で aggr_map を使用（+追記バイアス）
-        swap_bias_chase[lane] += g["swap_M"]*M*C + g["swap_S"]*S*C
-        if lane==1: swap_bias_lead[lane] += g["swap_N"]*N*C
-
-        # 決まり手prior（勝者にだけ効く想定）
-        kim_prior[lane]["逃げ"]      += g["prior_N"]*N*C
-        kim_prior[lane]["まくり"]    += g["prior_M"]*_get_float(row,"prob_まくり",0)*C
-        kim_prior[lane]["まくり差し"]+= 0.5*g["prior_M"]*_get_float(row,"prob_まくり差し",0)*C
-        kim_prior[lane]["差し"]      += g["prior_S"]*S*C
-
-        # キーマン追加ブースト（乗算/前倒しは小さめ。pass2想定）
-        if K>0:
-            A_mult[lane]  *= (1.0 + g["key_boost_A"]*K*C)
-            Ap_mult[lane] *= (1.0 + g["key_boost_A"]*K*C)
-            st_mu_shift[lane] += -g["key_mu_shift"]*K*C
-            st_sigma_mult[lane] *= (1.0 - g["key_sig_tight"]*K*C)
-
-    return (st_mu_shift, st_sigma_mult, A_mult, Ap_mult,
-            aggr_map, first_right_extra, lineblock_extra,
-            swap_bias_lead, swap_bias_chase, kim_prior)
-
-# ========= 1レース・シミュ =========
+# ===== 1レース・シミュ（再利用）=====
 def _sample_ST(m): return rng.normal(m["mu"], m["sigma"])
 
-def _apply_session(ST,A,Ap):
-    ST+=rng.normal(Params.session_ST_shift_mu,Params.session_ST_shift_sd)
-    g=lambda x: x*(1.0+rng.normal(Params.session_A_bias_mu,Params.session_A_bias_sd))
-    return ST,g(A),g(Ap)
-
-def _maybe_backoff(ST,A):
-    if rng.random()<Params.p_backoff: return ST+Params.backoff_ST_shift, A*(1-Params.backoff_A_penalty), True
-    return ST,A,False
-
-def _maybe_cav(A):
-    if rng.random()<Params.p_cav: return A*(1-Params.cav_A_penalty), True
-    return A,False
-
-def _maybe_safe():
-    if rng.random()<Params.p_safe_margin: 
-        return max(0.0, rng.normal(Params.safe_margin_mu, Params.safe_margin_sigma)), True
-    return 0.0, False
-
-def _wake_p(lane, entry):
-    pos=entry.index(lane)
-    base=Params.base_wake+Params.extra_wake_when_outside*((lane-1)/5.0)
-    if pos==0: base*=0.3
-    return max(0.0, min(base,0.95))
-
-def _t1m(ST,R,A,Ap,sq,env,st_gain):
+def _t1m(ST,R,A,Ap,sq,env,lane,st_gain):
     ST,A,Ap=_apply_session(ST,A,Ap)
     ST,A,back=_maybe_backoff(ST,A)
     A,cav=_maybe_cav(A)
@@ -223,11 +223,8 @@ def _t1m(ST,R,A,Ap,sq,env,st_gain):
     t+=ST*st_gain
     return t, {"backoff":back,"cav":cav}
 
-def one_pass(entry,T1M,A,Ap,env,lineblocks,first_right,aggr_map=None,
-             swap_bias_lead=None, swap_bias_chase=None):
-    aggr_map=aggr_map or {}
-    swap_bias_lead=swap_bias_lead or {}
-    swap_bias_chase=swap_bias_chase or {}
+def _one_pass(entry,T1M,A,Ap,env,lineblocks,first_right,aggr=None):
+    aggr=aggr or {}
     exit_order=entry[:]; swaps=[]; blocks=[]; safe_cnt=0
     d_theta,_=_wind(env); theta_eff=Params.theta+d_theta
     for k in range(len(exit_order)-1):
@@ -235,13 +232,12 @@ def one_pass(entry,T1M,A,Ap,env,lineblocks,first_right,aggr_map=None,
         dt=T1M[chase]-T1M[lead]
         dK=(A[chase]+Ap[chase])-(A[lead]+Ap[lead])
         delta=(Params.delta_lineblock if (lead,chase) in lineblocks else 0.0)
-        if str(lead) in aggr_map: delta+=0.10*float(aggr_map[str(lead)])
+        if str(lead) in aggr: delta+=0.10*float(aggr[str(lead)])
         if lead in first_right: delta+=Params.delta_first
-        terr,used=_maybe_safe()
+        terr,used=_maybe_safe(); 
         if used: safe_cnt+=1
         logit=Params.a0+Params.b_dt*(theta_eff-(dt+Params.gamma_wall+Params.k_turn_err*terr))+Params.cK*dK+delta
-        if str(chase) in aggr_map: logit+=0.45*float(aggr_map[str(chase)])
-        logit+= float(swap_bias_chase.get(chase,0.0)) + float(swap_bias_lead.get(lead,0.0))
+        if str(chase) in aggr: logit+=0.45*float(aggr[str(chase)])
         logit*= (Params.decision_bias_mult or 1.0)
         if rng.random()<sigmoid(logit):
             swaps.append((chase,lead)); exit_order[k],exit_order[k+1]=chase,lead
@@ -249,147 +245,64 @@ def one_pass(entry,T1M,A,Ap,env,lineblocks,first_right,aggr_map=None,
             if delta>0: blocks.append((lead,chase))
     return exit_order, swaps, blocks, safe_cnt
 
-def simulate_one(integrated_json, sims=600,
-                 ml_adj=None):
-    inp=build_input(integrated_json)
-
-    # ---- ML補正適用（静的部分）----
-    if ml_adj:
-        (st_mu_shift, st_sigma_mult, A_mult, Ap_mult,
-         aggr_map, first_right_extra, lineblock_extra,
-         swap_bias_lead, swap_bias_chase, kim_prior) = ml_adj
-        # ST
-        for k,st in list(inp["ST_model"].items()):
-            l=int(k)
-            st["mu"]=max(0.05, st["mu"] + float(st_mu_shift.get(l,0.0)))
-            st["sigma"]=max(0.005, st["sigma"] * float(st_sigma_mult.get(l,1.0)))
-        # A/Ap
+def simulate_one(inp, sims=600, boost_map=None, aggr_map=None):
+    # keyman boost/aggr
+    if boost_map:
         for l in list(inp["A"].keys()):
-            inp["A"][l]  *= float(A_mult.get(l,1.0))
-            inp["Ap"][l] *= float(A_mult.get(l,1.0))  # A系
-            inp["Ap"][l] *= float(Ap_mult.get(l,1.0))/max(1e-9,float(A_mult.get(l,1.0)))  # Ap差分
-        # 先マイ/ライン追加
-        inp["first_right"] = set(inp["first_right"]) | set(first_right_extra)
-        inp["lineblocks"]  = set(inp["lineblocks"])  | set(lineblock_extra)
-    else:
-        aggr_map={}; swap_bias_lead={}; swap_bias_chase={}; kim_prior=defaultdict(lambda:{"逃げ":0,"差し":0,"まくり":0,"まくり差し":0})
+            b=float(boost_map.get(str(l),0.0))
+            if b: inp["A"][l]*=(1.0+b); inp["Ap"][l]*=(1.0+b)
+    aggr_map=aggr_map or {}
+    if aggr_map:
+        for k in list(inp["ST_model"].keys()):
+            a=float(aggr_map.get(str(k),0.0))
+            if a>0:
+                inp["ST_model"][k]["mu"]=max(0.05, inp["ST_model"][k]["mu"]-0.006*a)
+                inp["ST_model"][k]["sigma"]=max(0.005, inp["ST_model"][k]["sigma"]*(1-0.35*a))
 
     lanes=inp["lanes"]; env=inp["env"]; _,st_gain=_wind(env)
-
-    trif=Counter(); kim=Counter(); ex2=Counter(); thd=Counter()
-    wake=Counter(); back=Counter(); cav=Counter()
-    H1=Counter(); H2=Counter(); H3=Counter()
-    swp=Counter(); blk=Counter()
+    trif=Counter(); ex2=Counter(); thd=Counter()
     for _ in range(sims):
         ST={i:_sample_ST(inp["ST_model"][str(i)]) for i in lanes}
         T1M={}
         for i in lanes:
-            t,fl=_t1m(ST[i], inp["R"][str(i)], inp["A"][i], inp["Ap"][i], inp["squeeze"][str(i)], env, st_gain)
+            t,_fl=_t1m(ST[i], inp["R"][str(i)], inp["A"][i], inp["Ap"][i], inp["squeeze"][str(i)], env, i, st_gain)
             T1M[i]=t
-            if fl["backoff"]: back[i]+=1
-            if fl["cav"]: cav[i]+=1
         entry=sorted(lanes, key=lambda x:T1M[x])
-
-        # wake: aggr で切り裂き
         for i in lanes:
             p=_wake_p(i, entry)
             if aggr_map:
-                if str(i) in aggr_map:
-                    p *= max(0.0, 1.0 - 0.60*float(aggr_map[str(i)]))
-                else:
-                    p *= (1.0 + 0.05*max([float(v) for v in aggr_map.values()]+[0.0]))
+                p = p*(1-0.60*float(aggr_map.get(str(i),0.0))) if str(i) in aggr_map else p*(1+0.05*max(aggr_map.values(), default=0.0))
             if rng.random()<min(0.95,max(0.0,p)):
-                wake[i]+=1; T1M[i]+=Params.beta_wk
-
-        exit_order, swaps, blocks, _safe = one_pass(
-            entry, T1M, inp["A"], inp["Ap"], env,
-            inp["lineblocks"], inp["first_right"],
-            aggr_map=aggr_map,
-            swap_bias_lead=swap_bias_lead, swap_bias_chase=swap_bias_chase
-        )
-
-        lead=exit_order[0]
-        dt_lead=T1M[exit_order[1]]-T1M[lead]
-        base = "逃げ" if lead==1 else ("まくり" if dt_lead>=Params.tau_k else "まくり差し")
-        # soft prior
-        prior = kim_prior.get(lead, {})
-        scored = {lab:(1.0 if lab==base else 0.0)+float(prior.get(lab,0.0)) for lab in ["逃げ","まくり","まくり差し","差し"]}
-        decided = max(scored.items(), key=lambda kv: kv[1])[0]
-        kim[decided]+=1
-
+                T1M[i]+=Params.beta_wk
+        exit_order, _, _, _ = _one_pass(entry, T1M, inp["A"], inp["Ap"], env, inp["lineblocks"], inp["first_right"], aggr_map)
         trif[tuple(exit_order[:3])]+=1; ex2[(exit_order[0],exit_order[1])]+=1; thd[exit_order[2]]+=1
-        H1[exit_order[0]]+=1; H2[exit_order[1]]+=1; H3[exit_order[2]]+=1
-        for c,l in swaps: swp[(c,l)]+=1
-        for l,c in blocks: blk[(l,c)]+=1
 
     total=sims
     tri_probs={k:v/total for k,v in trif.items()}
-    kim_probs={k:v/total for k,v in kim.items()}
     ex_probs={k:v/total for k,v in ex2.items()}
     th_probs={k:v/total for k,v in thd.items()}
+    return tri_probs, ex_probs, th_probs
 
-    keyman={
-        "trials":int(total),
-        "H1":{str(i):H1[i]/total for i in lanes},
-        "H2":{str(i):H2[i]/total for i in lanes},
-        "H3":{str(i):H3[i]/total for i in lanes},
-        "SWAP":{f"{c}>{l}":int(v) for (c,l),v in swp.items()},
-        "BLOCK":{f"{l}|{c}":int(v) for (l,c),v in blk.items()},
-        "WAKE":{str(i):wake[i]/total for i in lanes},
-    }
-    return tri_probs, kim_probs, ex_probs, th_probs, keyman
+# ===== 生成/フィルタ/評価 =====
+def generate_tickets(tri, ex2, th3, topn=18, strategy="trifecta_topN", k=2, m=4,
+                     exclude_first1=False, only_first1=False):
+    if strategy=="exacta_topK_third_topM":
+        top2=sorted(ex2.items(), key=lambda kv: kv[1], reverse=True)[:k]
+        top3=[t for t,_ in sorted(th3.items(), key=lambda kv: kv[1], reverse=True)[:m]]
+        seen=set(); out=[]
+        for (f,s), p2 in top2:
+            for t in top3:
+                if t!=f and t!=s:
+                    key=(f,s,t)
+                    if key in seen: continue
+                    seen.add(key)
+                    out.append((key, p2*th3.get(t,0.0)))
+        out=[(k_,p_) for (k_,p_) in out if ((not only_first1) or k_[0]==1) and ((not exclude_first1) or k_[0]!=1)]
+        return sorted(out, key=lambda kv: kv[1], reverse=True)
+    top=sorted(tri.items(), key=lambda kv: kv[1], reverse=True)[:topn]
+    return [(k_,p_) for (k_,p_) in top if ((not only_first1) or k_[0]==1) and ((not exclude_first1) or k_[0]!=1)]
 
-# ========= ファイル収集/読込 =========
-def _collect(base, kind, dates:set):
-    root_v1=os.path.join(base,kind,"v1"); root=root_v1 if os.path.isdir(root_v1) else os.path.join(base,kind)
-    out={}
-    date_dirs=list(dates) if dates else [d for d in os.listdir(root) if os.path.isdir(os.path.join(root,d))]
-    for d in date_dirs:
-        dir_d=os.path.join(root,d)
-        if not os.path.isdir(dir_d): continue
-        for pid in os.listdir(dir_d):
-            dir_pid=os.path.join(dir_d,pid)
-            if not os.path.isdir(dir_pid): continue
-            for f in os.listdir(dir_pid):
-                if f.endswith(".json"):
-                    race=f[:-5]; out[(d,pid,race)]=os.path.join(dir_pid,f)
-    return out
-
-def _collect_results(base, dates:set):
-    root_v1=os.path.join(base,"results","v1"); root=root_v1 if os.path.isdir(root_v1) else os.path.join(base,"results")
-    out={}
-    date_dirs=list(dates) if dates else [d for d in os.listdir(root) if os.path.isdir(os.path.join(root,d))]
-    for d in date_dirs:
-        dir_d=os.path.join(root,d)
-        if not os.path.isdir(dir_d): continue
-        for pid in os.listdir(dir_d):
-            dir_pid=os.path.join(dir_d,pid)
-            if not os.path.isdir(dir_pid): continue
-            per=[f for f in os.listdir(dir_pid) if f.lower().endswith(".json") and f.upper().endswith("R.JSON")]
-            if per:
-                for f in per:
-                    r=f[:-5].upper(); r=r if r.endswith("R") else r+"R"
-                    out[(d,pid,r)]=os.path.join(dir_pid,f); 
-                continue
-            for f in [f for f in os.listdir(dir_pid) if f.lower().endswith(".json")]:
-                p=os.path.join(dir_pid,f)
-                try:
-                    data=json.load(open(p,"r",encoding="utf-8"))
-                    container=data.get("races", data) if isinstance(data,dict) else {}
-                    for rk in list(container.keys()):
-                        k=str(rk).upper(); 
-                        if k.isdigit(): k+= "R"
-                        if k.endswith("R"): out[(d,pid,k)]=p+"#"+k
-                except: pass
-    return out
-
-def _load_result(res_path):
-    if "#" in res_path:
-        p,r=res_path.split("#",1); data=json.load(open(p,"r",encoding="utf-8")); cont=data.get("races",data) if isinstance(data,dict) else {}
-        d=cont.get(r) or cont.get(r.upper()) or cont.get(r.lower()); return d if isinstance(d,dict) else {}
-    return json.load(open(res_path,"r",encoding="utf-8"))
-
-def _load_odds(odds_base,date,pid,race):
+def load_odds(odds_base,date,pid,race):
     try:
         race=race if race.upper().endswith("R") else f"{race}R"
         path=os.path.join(odds_base,date,pid,f"{race}.json")
@@ -407,41 +320,13 @@ def _load_odds(odds_base,date,pid,race):
         return out
     except: return {}
 
-# ========= 買い目生成 =========
-def generate_tickets(strategy, tri, ex2, th3, topn=18, k=2, m=4, exclude_first1=False, only_first1=False):
-    if strategy=="exacta_topK_third_topM":
-        top2=sorted(ex2.items(), key=lambda kv: kv[1], reverse=True)[:k]
-        top3=[t for t,_ in sorted(th3.items(), key=lambda kv: kv[1], reverse=True)[:m]]
-        seen=set(); out=[]
-        for (f,s), p2 in top2:
-            for t in top3:
-                if t!=f and t!=s:
-                    key=(f,s,t)
-                    if key in seen: continue
-                    seen.add(key)
-                    out.append((key, p2*th3.get(t,0.0)))
-        out=[(k_,p_) for (k_,p_) in out if ((not only_first1) or k_[0]==1) and ((not exclude_first1) or k_[0]!=1)]
-        return sorted(out, key=lambda kv: kv[1], reverse=True)
-    top=sorted(tri.items(), key=lambda kv: kv[1], reverse=True)[:topn]
-    return [(k_,p_) for (k_,p_) in top if ((not only_first1) or k_[0]==1) and ((not exclude_first1) or k_[0]!=1)]
-
-# ========= KEYMAN 読み込み =========
-def load_keyman_rank(pass1_dir, date, pid, race):
-    path=os.path.join(pass1_dir,"keyman",date,pid,f"{race}.json")
-    if not os.path.isfile(path): return {}
-    try:
-        d=json.load(open(path,"r",encoding="utf-8"))
-        return (d.get("keyman") or {}).get("KEYMAN_RANK", {}) or {}
-    except: return {}
-
-# ========= 3連単判定 =========
-def actual_trifecta_and_amount(res):
-    trif=(res or {}).get("payouts",{}).get("trifecta")
+def _actual_trifecta_and_amount(res_json: dict):
+    trif=(res_json or {}).get("payouts",{}).get("trifecta")
     combo=None; amt=0
     if isinstance(trif,dict):
         combo=trif.get("combo"); amt=int(trif.get("amount") or 0)
-    if not combo and isinstance(res,dict):
-        order=res.get("order")
+    if not combo and isinstance(res_json,dict):
+        order=res_json.get("order")
         if isinstance(order,list) and len(order)>=3:
             def lane(x): return str(x.get("lane") or x.get("course") or x.get("F") or x.get("number"))
             try:
@@ -450,126 +335,167 @@ def actual_trifecta_and_amount(res):
             except: pass
     return combo, amt
 
-# ========= メイン =========
+def load_results(base,date,pid,race):
+    # results/v1/<date>/<pid>/<race>.json  or  results/v1/<date>/<pid>/summary.json#<race>
+    root_v1=os.path.join(base,"results","v1"); root=root_v1 if os.path.isdir(root_v1) else os.path.join(base,"results")
+    dirp=os.path.join(root,date,pid)
+    # per-race
+    cand=os.path.join(dirp, f"{race if race.endswith('R') else race+'R'}.json")
+    if os.path.isfile(cand): return json.load(open(cand,"r",encoding="utf-8"))
+    # summary
+    for f in os.listdir(dirp):
+        if not f.lower().endswith(".json"): continue
+        data=json.load(open(os.path.join(dirp,f),"r",encoding="utf-8"))
+        cont=data.get("races", data) if isinstance(data,dict) else {}
+        rk=_norm_race(race)
+        if rk in cont: return cont[rk]
+    return {}
+
+# ===== キーマン読み込み =====
+def load_keyman(pass1_dir, date, pid, race):
+    p=os.path.join(pass1_dir,"keyman",date,pid,f"{race}.json")
+    if not os.path.isfile(p): return {}
+    d=json.load(open(p,"r",encoding="utf-8"))
+    return (d.get("keyman") or {})
+
+def keyman_maps(pass1_dir,date,pid,race,thr=0.70, boost=0.15, aggr=0.25):
+    km=load_keyman(pass1_dir,date,pid,race)
+    kmr=(km.get("KEYMAN_RANK") or {})
+    lanes=[k for k,v in kmr.items() if isinstance(v,(int,float)) and float(v)>=thr]
+    boost_map={str(int(l)):float(boost) for l in lanes}
+    aggr_map ={str(int(l)):float(aggr)  for l in lanes}
+    return boost_map, aggr_map, km
+
+# ===== メインパス =====
 def main():
     ap=argparse.ArgumentParser()
     ap.add_argument("--base",default="./public")
     ap.add_argument("--dates",default="")
     ap.add_argument("--pids",default="")
     ap.add_argument("--races",default="")
-    ap.add_argument("--sims",type=int,default=1200)
+    ap.add_argument("--sims",type=int,default=600)
     ap.add_argument("--topn",type=int,default=18)
-    ap.add_argument("--unit",type=int,default=100)
+    ap.add_argument("--k",type=int,default=2)
+    ap.add_argument("--m",type=int,default=4)
+    ap.add_argument("--exclude-first1",action="store_true")
+    ap.add_argument("--only-first1",action="store_true")
     ap.add_argument("--limit",type=int,default=0)
+    ap.add_argument("--outdir",default="./SimS_v1.0_eval")
     ap.add_argument("--predict-only",action="store_true")
-
+    # ML
+    ap.add_argument("--ml-root",default="./ml/predictions")
+    ap.add_argument("--ml-st-gain",type=float,default=Params.ml_st_gain)
+    ap.add_argument("--ml-A-gain",type=float,default=Params.ml_A_gain)
+    ap.add_argument("--ml-consistency",type=float,default=Params.ml_consistency)
+    # keyman
+    ap.add_argument("--keyman-threshold",type=float,default=0.70)
+    ap.add_argument("--keyman-boost",type=float,default=0.15)
+    ap.add_argument("--keyman-aggr",type=float,default=0.25)
+    # odds/results
     ap.add_argument("--odds-base",default="./public/odds/v1")
     ap.add_argument("--min-ev",type=float,default=0.0)
     ap.add_argument("--require-odds",action="store_true")
     ap.add_argument("--odds-bands",default="")
     ap.add_argument("--odds-min",type=float,default=0.0)
     ap.add_argument("--odds-max",type=float,default=0.0)
-
-    ap.add_argument("--strategy",default="trifecta_topN",choices=["trifecta_topN","exacta_topK_third_topM"])
-    ap.add_argument("--k",type=int,default=2); ap.add_argument("--m",type=int,default=4)
-    ap.add_argument("--exclude-first1",action="store_true"); ap.add_argument("--only-first1",action="store_true")
-
-    ap.add_argument("--outdir",default="./SimS_integrated_out")
-    ap.add_argument("--pass1-dir",default="./SimS_v1.0_eval/pass1")
-    ap.add_argument("--ml-root",default="./ml_outputs")
+    # params override
+    ap.add_argument("--params",default="")
+    ap.add_argument("--set",default="")
+    # log
+    ap.add_argument("--log-level",default="info", choices=["warn","info","debug"])
     args=ap.parse_args()
 
-    # 収集
+    # Param override
+    if args.params: _apply_over(Params, _load_params_file(args.params))
+    over=_parse_set(getattr(args,"set","")); 
+    if over: _apply_over(Params, over)
+
+    root_out=os.path.abspath(args.outdir)
+    pass1_dir=os.path.join(root_out, "pass1")
+    pass2_dir=os.path.join(root_out, "pass2")
+    os.makedirs(pass2_dir, exist_ok=True)
+
+    # active params snapshot（監査）
+    try:
+        active={k:getattr(Params,k) for k in dir(Params) if not k.startswith("_") and isinstance(getattr(Params,k),(int,float,bool))}
+        json.dump(active, open(os.path.join(pass2_dir,"active_params.json"),"w",encoding="utf-8"), ensure_ascii=False, indent=2)
+    except: pass
+
+    # キー集合
+    root_v1=os.path.join(args.base,"integrated","v1"); root_integrated = root_v1 if os.path.isdir(root_v1) else os.path.join(args.base,"integrated")
     dates=set([d.strip() for d in args.dates.split(",") if d.strip()]) if args.dates else set()
     pids_filter=set([p.strip() for p in args.pids.split(",") if p.strip()])
     races_filter=set([_norm_race(r) for r in args.races.split(",") if r.strip()])
-    int_idx=_collect(args.base,"integrated",dates) if dates else _collect(args.base,"integrated", set(os.listdir(os.path.join(args.base,"integrated","v1"))))
 
-    # predict-only は results 不要
-    if args.predict_only:
-        keys=sorted(int_idx.keys())
-    else:
-        res_idx=_collect_results(args.base,dates)
-        keys=sorted(set(int_idx.keys()) & set(res_idx.keys()))
+    int_idx={}
+    for d in (list(dates) if dates else [x for x in os.listdir(root_integrated) if os.path.isdir(os.path.join(root_integrated,x))]):
+        dir_d=os.path.join(root_integrated,d)
+        for pid in os.listdir(dir_d):
+            dir_p=os.path.join(dir_d,pid)
+            if not os.path.isdir(dir_p): continue
+            for f in os.listdir(dir_p):
+                if f.endswith(".json"):
+                    race=f[:-5]
+                    int_idx[(d,pid,race)]=os.path.join(dir_p,f)
 
+    keys=sorted(int_idx.keys())
     if pids_filter: keys=[k for k in keys if k[1] in pids_filter]
     if races_filter: keys=[k for k in keys if _norm_race(k[2]) in races_filter]
     if args.limit and args.limit>0: keys=keys[:args.limit]
 
-    # オッズ帯
-    bands=[]
-    if args.odds_bands:
-        for part in args.odds_bands.split(","):
-            if "-" not in part: continue
-            lo_s,hi_s=[s.strip() for s in part.split("-",1)]
-            lo=float(lo_s) if lo_s else float("-inf"); hi=float(hi_s) if hi_s else float("inf")
-            if math.isfinite(lo) and math.isfinite(hi) and lo>hi: lo,hi=hi,lo
-            bands.append((lo,hi))
-    elif args.odds_min or args.odds_max:
-        lo=float(args.odds_min) if args.odds_min>0 else float("-inf")
-        hi=float(args.odds_max) if args.odds_max>0 else float("inf")
-        if math.isfinite(lo) and math.isfinite(hi) and lo>hi: lo,hi=hi,lo
-        bands=[(lo,hi)]
+    bands=_bands(args.odds_bands, args.odds_min, args.odds_max)
+    pred_dir=os.path.join(pass2_dir,"predict")
+    if os.path.exists(pred_dir): shutil.rmtree(pred_dir)
+    os.makedirs(pred_dir, exist_ok=True)
+    rows_summary=[]
 
-    # 出力ディレクトリ
-    root_out=os.path.abspath(args.outdir)
-    os.makedirs(root_out, exist_ok=True)
-
-    # ==== predict-only: ./predict に出す（互換のため）====
-    if args.predict_only:
-        pred_dir="./predict"
-        if os.path.exists(pred_dir): shutil.rmtree(pred_dir)
-        os.makedirs(pred_dir, exist_ok=True)
-        rows=[]
-
-        for (date,pid,race) in keys:
-            d_int=json.load(open(int_idx[(date,pid,race)],"r",encoding="utf-8"))
-
-            # pass1 keyman & ML 読込 → adjust 作成
-            km_rank = load_keyman_rank(args.pass1_dir, date, pid, race)
-            ml_rows = load_ml_csv(args.ml_root, date, pid, race)
-            ml_adj=None
-            if ml_rows:
-                ml_adj = build_ml_adjusters(ml_rows, keyman_rank=km_rank)
-
-            tri,kim,ex2,th3,_ = simulate_one(d_int, sims=args.sims, ml_adj=ml_adj)
-
-            tickets=generate_tickets(args.strategy, tri, ex2, th3, args.topn, args.k, args.m,
-                                     args.exclude_first1, args.only_first1)
-
-            # オッズ不要・EVなしでそのまま書き出し
-            out_list=[{"ticket":"-".join(map(str,k)),"score":round(p,6),"odds":None,"ev":None} for (k,p) in tickets]
-
-            json.dump({"date":date,"pid":pid,"race":race,"buylist":out_list,
-                       "engine":"SimS integrated (pass2, ML)"},
-                      open(os.path.join(pred_dir,f"pred_{date}_{pid}_{race}.json"),"w",encoding="utf-8"),
-                      ensure_ascii=False, indent=2)
-
-            for i,t in enumerate(out_list,1):
-                rows.append({"date":date,"pid":pid,"race":race,"rank":i,
-                             "ticket":t["ticket"],"score":t["score"],"odds":t["odds"],"ev":t["ev"]})
-
-        pd.DataFrame(rows).to_csv(os.path.join(pred_dir,"predictions_summary.csv"), index=False, encoding="utf-8")
-        print(f"[predict/integrated] races={len(keys)} -> {pred_dir}")
-        return
-
-    # ==== eval ====
-    per=[]; stake_sum=0; pay_sum=0
     for (date,pid,race) in keys:
+        # 入力
         d_int=json.load(open(int_idx[(date,pid,race)],"r",encoding="utf-8"))
-        res=d_res=_load_result(res_idx[(date,pid,race)])
+        inp=build_input(d_int)
 
-        km_rank = load_keyman_rank(args.pass1_dir, date, pid, race)
-        ml_rows = load_ml_csv(args.ml_root, date, pid, race)
-        ml_adj=None
-        if ml_rows:
-            ml_adj = build_ml_adjusters(ml_rows, keyman_rank=km_rank)
+        # ML 読み込み（無ければ素通し）
+        ml_csv=os.path.join(args.ml_root, date, pid, f"{_norm_race(race)}.csv")
+        if not os.path.isfile(ml_csv):
+            # 代替： race が "8R" などの場合、"8R" で保存していると仮定
+            ml_csv=os.path.join(args.ml_root, date, pid, f"{race if race.endswith('R') else race+'R'}.csv")
+        ml_probs={}
+        if os.path.isfile(ml_csv):
+            try:
+                ml_probs=load_ml_row(ml_csv)
+            except Exception as e:
+                if args.log_level!="warn":
+                    print(f"[warn] ML CSV read failed {ml_csv}: {e}")
+        else:
+            if args.log_level=="debug":
+                print(f"[debug] ML CSV not found -> skip ML for {date}/{pid}/{race}")
 
-        tri,kim,ex2,th3,_ = simulate_one(d_int, sims=args.sims, ml_adj=ml_adj)
-        tickets=generate_tickets(args.strategy, tri, ex2, th3, args.topn, args.k, args.m,
-                                 args.exclude_first1, args.only_first1)
+        # ML 調整
+        if ml_probs:
+            inp = apply_ml_adjustments(inp, ml_probs, st_gain=args.ml_st_gain, A_gain=args.ml_A_gain, consistency=args.ml_consistency)
 
-        odds_map=_load_odds(args.odds_base, date, pid, race)
+        # keyman ブースト/アグレ
+        boost_map, aggr_map, kmjson = keyman_maps(pass1_dir,date,pid,race, args.keyman_threshold, args.keyman_boost, args.keyman_aggr)
+
+        # 監査ダンプ
+        audit_dir=os.path.join(pass2_dir,"audit",date,pid); os.makedirs(audit_dir, exist_ok=True)
+        json.dump({
+            "date":date,"pid":pid,"race":race,
+            "ml_csv_exists": bool(ml_probs),
+            "ml_coeffs": {"st_gain":args.ml_st_gain,"A_gain":args.ml_A_gain,"consistency":args.ml_consistency},
+            "keyman": {"threshold":args.keyman_threshold,"boost":args.keyman_boost,"aggr":args.keyman_aggr},
+            "boost_map": boost_map, "aggr_map": aggr_map
+        }, open(os.path.join(audit_dir,f"{race}.json"),"w",encoding="utf-8"), ensure_ascii=False, indent=2)
+
+        # 再シム
+        tri, ex2, th3 = simulate_one(inp, sims=args.sims, boost_map=boost_map, aggr_map=aggr_map)
+        tickets = generate_tickets(tri, ex2, th3, topn=args.topn, strategy="trifecta_topN",
+                                   k=args.k, m=args.m, exclude_first1=args.exclude_first1, only_first1=args.only_first1)
+
+        # オッズ/EV フィルタ（predict でも要求されれば適用）
+        odds_map={}
+        if (args.min_ev>0) or args.require_odds or bands:
+            odds_map=load_odds(args.odds_base, date, pid, race)
         kept=[]
         for (key,prob) in tickets:
             combo="-".join(map(str,key)); rec=odds_map.get(combo); odds=rec["odds"] if rec else None
@@ -579,27 +505,40 @@ def main():
             kept.append((key,prob,odds))
         tickets=kept
 
-        bets=['-'.join(map(str,k)) for k,_,_ in tickets]; stake=args.unit*len(bets)
-        hit_combo, amt = actual_trifecta_and_amount(res)
-        payout = amt if hit_combo in bets else 0
-        stake_sum+=stake; pay_sum+=payout
+        # 出力（predict JSON/CSV）
+        out_list=[]
+        for (key,p,odds) in tickets:
+            ev = (p*odds) if (odds is not None) else None
+            out_list.append({"ticket":"-".join(map(str,key)),"score":round(p,6),"odds":(None if odds is None else float(odds)),"ev":(None if ev is None else round(ev,6))})
+        json.dump({"date":date,"pid":pid,"race":race,"buylist":out_list,
+                   "engine":"SimS integrated (E1+ML)","sims_per_race":int(args.sims),
+                   "ml_coeffs":{"st_gain":args.ml_st_gain,"A_gain":args.ml_A_gain,"consistency":args.ml_consistency},
+                   "keyman":{"threshold":args.keyman_threshold,"boost":args.keyman_boost,"aggr":args.keyman_aggr},
+                   "exclude_first1":bool(args.exclude_first1),"only_first1":bool(args.only_first1),
+                   "min_ev":float(args.min_ev),"require_odds":bool(args.require_odds),
+                   "odds_bands":args.odds_bands or "","odds_min":float(args.odds_min),"odds_max":float(args.odds_max)},
+                  open(os.path.join(pred_dir,f"pred_{date}_{pid}_{race}.json"),"w",encoding="utf-8"),
+                  ensure_ascii=False, indent=2)
 
-        per.append({"date":date,"pid":pid,"race":race,
-                    "bets":len(bets),"stake":stake,"payout":payout,
-                    "hit":1 if payout>0 else 0,"hit_combo":hit_combo})
+        for i,t in enumerate(out_list,1):
+            rows_summary.append({"date":date,"pid":pid,"race":race,"rank":i,"ticket":t["ticket"],"score":t["score"],"odds":t["odds"],"ev":t["ev"]})
 
-    df=pd.DataFrame(per)
-    os.makedirs(root_out, exist_ok=True)
-    df.to_csv(os.path.join(root_out,"per_race_results.csv"), index=False)
-    overall={"engine":"SimS integrated (pass2, ML)","races":int(len(df)),
-             "bets_total":int(df["bets"].sum()) if len(df)>0 else 0,
-             "stake_total":int(stake_sum),"payout_total":int(pay_sum),
-             "hit_rate":float(df["hit"].mean()) if len(df)>0 else 0.0,
-             "roi": float((pay_sum-stake_sum)/stake_sum) if stake_sum>0 else 0.0}
-    json.dump(overall, open(os.path.join(root_out,"overall.json"),"w",encoding="utf-8"),
-              ensure_ascii=False, indent=2)
-    print("=== OVERALL (integrated) ===")
-    print(json.dumps(overall, ensure_ascii=False, indent=2))
+        # eval のみ：的中/ROI
+        if not args.predict_only:
+            d_res = load_results(args.base, date, pid, race)
+            hit_combo, pay = _actual_trifecta_and_amount(d_res)
+            bets=[t["ticket"] for t in out_list]
+            hit = 1 if hit_combo in bets else 0
+            # 1点100円固定（unit はワークフローで外から渡す前提なら追加してOK）
+            # ここでは JSON 側は predict 中心なので集計はワークフローで揃える想定
+            if args.log_level=="debug":
+                print(f"[debug] {date}/{pid}/{race}: bets={len(bets)}, hit={hit}, hit_combo={hit_combo}, payout={pay}")
+
+    # summary CSV
+    pd.DataFrame(rows_summary).to_csv(os.path.join(pred_dir,"predictions_summary.csv"), index=False, encoding="utf-8")
+    print(f"[predict/pass2] {len(keys)} races -> {pred_dir}")
+    if not args.predict_only:
+        print("[eval] 集計はワークフロー側で per_race/overall にまとめる設計（必要なら追加実装可）")
 
 if __name__=="__main__":
     main()
