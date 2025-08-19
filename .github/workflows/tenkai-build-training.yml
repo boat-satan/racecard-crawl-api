@@ -41,7 +41,7 @@ jobs:
           mkdir -p TENKAI
           [ -f TENKAI/__init__.py ] || printf "" > TENKAI/__init__.py
 
-      - name: Build training table (supports pid=ALL)
+      - name: Build training table (supports pid=ALL; outputs tansyo+kimarite)
         shell: bash
         run: |
           set -euo pipefail
@@ -53,7 +53,7 @@ jobs:
             RACE_OPT="--race ${RACE_IN}"
           fi
 
-          # pid=ALL の展開（features_c か labels のどちらかにある pid を採用）
+          # pid=ALL の展開（features_c or labels に存在する場を探索）
           if [ "${PID_IN}" = "ALL" ]; then
             echo ">>> pid=ALL: detect pids for date=${DATE}"
             mapfile -t PIDS < <(ls -1d TENKAI/features_c/v1/${DATE}/* 2>/dev/null | xargs -n1 basename || true)
@@ -72,10 +72,11 @@ jobs:
           echo ">>> targets: ${PIDS[*]}"
           for PID in "${PIDS[@]}"; do
             echo ">>> run: python TENKAI/build_training_table.py --date ${DATE} --pid ${PID} ${RACE_OPT}"
+            # build_training_table.py はデフォルトで --task both（単勝+決まり手）を出力
             PYTHONPATH="." python TENKAI/build_training_table.py --date "${DATE}" --pid "${PID}" ${RACE_OPT} || true
           done
 
-      - name: Commit outputs
+      - name: Commit outputs (tansyo + kimarite)
         shell: bash
         run: |
           set -euo pipefail
@@ -83,32 +84,50 @@ jobs:
           PID_IN="${{ github.event.inputs.pid }}"
           RACE_IN="${{ github.event.inputs.race }}"
 
+          # 追加パス（単勝/決まり手）の両方を用意
           if [ "${PID_IN}" = "ALL" ]; then
-            ADD_PATH="TENKAI/datasets/v1/${DATE}/**"
+            ADD_PATH1="TENKAI/datasets/v1/${DATE}/**"
+            ADD_PATH2="TENKAI/datasets_kimarite/v1/${DATE}/**"
           else
             if [ -z "${RACE_IN}" ] || [ "${RACE_IN}" = "ALL" ]; then
-              ADD_PATH="TENKAI/datasets/v1/${DATE}/${PID_IN}/**"
+              ADD_PATH1="TENKAI/datasets/v1/${DATE}/${PID_IN}/**"
+              ADD_PATH2="TENKAI/datasets_kimarite/v1/${DATE}/${PID_IN}/**"
             else
-              ADD_PATH="TENKAI/datasets/v1/${DATE}/${PID_IN}/${RACE_IN}*"
+              ADD_PATH1="TENKAI/datasets/v1/${DATE}/${PID_IN}/${RACE_IN}*"
+              ADD_PATH2="TENKAI/datasets_kimarite/v1/${DATE}/${PID_IN}/${RACE_IN}*"
             fi
           fi
-          echo ">>> git add ${ADD_PATH}"
+          echo ">>> git add:"
+          echo "    ${ADD_PATH1}"
+          echo "    ${ADD_PATH2}"
 
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git fetch origin
           git pull --rebase origin "${GITHUB_REF_NAME:-main}" || true
-          git add ${ADD_PATH} || true
-          git diff --cached --quiet || git commit -m "TENKAI training: ${DATE} pid=${PID_IN} race=${RACE_IN}"
+          git add ${ADD_PATH1} || true
+          git add ${ADD_PATH2} || true
+          git diff --cached --quiet || git commit -m "TENKAI training: ${DATE} pid=${PID_IN} race=${RACE_IN} (tansyo+kimarite)"
           git push || true
 
-      - name: Upload artifacts
+      - name: Upload artifacts (tansyo)
         uses: actions/upload-artifact@v4
         with:
-          name: tenkai-train-${{ github.event.inputs.date }}-${{ github.event.inputs.pid }}${{ github.event.inputs.race && format('-{0}', github.event.inputs.race) || '' }}
+          name: tenkai-train-tansyo-${{ github.event.inputs.date }}-${{ github.event.inputs.pid }}${{ github.event.inputs.race && format('-{0}', github.event.inputs.race) || '' }}
           path: ${{ (github.event.inputs.pid == 'ALL')
                     && format('TENKAI/datasets/v1/{0}/**', github.event.inputs.date)
                     || ((github.event.inputs.race == '' || github.event.inputs.race == 'ALL')
                           && format('TENKAI/datasets/v1/{0}/{1}/**', github.event.inputs.date, github.event.inputs.pid)
                           || format('TENKAI/datasets/v1/{0}/{1}/{2}*', github.event.inputs.date, github.event.inputs.pid, github.event.inputs.race)) }}
+          if-no-files-found: warn
+
+      - name: Upload artifacts (kimarite)
+        uses: actions/upload-artifact@v4
+        with:
+          name: tenkai-train-kimarite-${{ github.event.inputs.date }}-${{ github.event.inputs.pid }}${{ github.event.inputs.race && format('-{0}', github.event.inputs.race) || '' }}
+          path: ${{ (github.event.inputs.pid == 'ALL')
+                    && format('TENKAI/datasets_kimarite/v1/{0}/**', github.event.inputs.date)
+                    || ((github.event.inputs.race == '' || github.event.inputs.race == 'ALL')
+                          && format('TENKAI/datasets_kimarite/v1/{0}/{1}/**', github.event.inputs.date, github.event.inputs.pid)
+                          || format('TENKAI/datasets_kimarite/v1/{0}/{1}/{2}*', github.event.inputs.date, github.event.inputs.pid, github.event.inputs.race)) }}
           if-no-files-found: warn
