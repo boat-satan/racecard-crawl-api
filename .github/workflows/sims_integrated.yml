@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       DATE:   { description: "YYYYMMDD", required: true,  type: string }
-      PID:    { description: "場コード 01..24（カンマ可 / 空 or all = 全場）", required: false, default: "", type: string }
+      PID:    { description: "場コード 01..24（カンマ可, all/空=全場）", required: false, default: "all", type: string }
       MODE:   { description: "predict or eval", required: true, default: "predict", type: choice, options: [predict, eval] }
       SIMS:   { description: "試行回数/レース", required: true, default: "600", type: string }
       TOPN:   { description: "三連単 TOPN", required: true, default: "18", type: string }
@@ -37,21 +37,6 @@ jobs:
           set -e
           python -m pip install --upgrade pip
           pip install numpy pandas joblib scikit-learn
-
-      - name: Normalize PID (expand empty/all -> 01..24)
-        id: pidnorm
-        env:
-          RAW_PID: ${{ inputs.PID }}
-        run: |
-          set -euo pipefail
-          if [[ -z "${RAW_PID}" || "${RAW_PID,,}" == "all" ]]; then
-            EXP="$(printf '%s,' $(seq -w 1 24) | sed 's/,$//')"
-          else
-            EXP="${RAW_PID}"
-          fi
-          echo "PID_EXP=${EXP}"
-          echo "PID_EXP=${EXP}" >> $GITHUB_OUTPUT
-          echo "PID_EXP=${EXP}" >> $GITHUB_ENV
 
       - name: Parse FILTERS & KEYMAN
         id: parse
@@ -91,6 +76,38 @@ jobs:
           [ -n "${FILTERS:-}" ] && parse_kvlist "$FILTERS" "F_"
           [ -n "${KEYMAN:-}" ]  && parse_kvlist "$KEYMAN"  "K_"
 
+      - name: Normalize PID (all/空→01..24, カンマ区切り整形)
+        id: pidnorm
+        env:
+          PID_IN: ${{ inputs.PID }}
+        run: |
+          set -euo pipefail
+          PID_TRIM="$(echo "${PID_IN:-}" | tr '[:space:]' ' ' | xargs)"
+          # 空 or all -> 01..24
+          if [ -z "$PID_TRIM" ] || [ "${PID_TRIM,,}" = "all" ]; then
+            ALL=""
+            for i in $(seq -w 01 24); do
+              ALL="${ALL}${i},"
+            done
+            PID_EXP="${ALL%,}"
+          else
+            # 区切りを , に正規化（全角読点含む）
+            PID_NORM="$(echo "$PID_TRIM" | tr '、，;|' ',')"
+            # 個々をゼロ埋め2桁に
+            OUT=""
+            IFS=',' read -r -a arr <<< "$PID_NORM"
+            for p in "${arr[@]}"; do
+              p="$(echo "$p" | xargs)"
+              [ -z "$p" ] && continue
+              # 数値2桁化
+              printf -v two "%02d" "$p"
+              OUT="${OUT}${two},"
+            done
+            PID_EXP="${OUT%,}"
+          fi
+          echo "PID_EXP=$PID_EXP" | tee -a "$GITHUB_OUTPUT"
+          echo "[pidnorm] => $PID_EXP"
+
       # 1) Pass1: キーマン抽出（predict-only）
       - name: Run Pass1 (keyman only)
         env:
@@ -111,22 +128,26 @@ jobs:
             --predict-only \
             --outdir "$OUTDIR"
 
-      # 2) ML推論（TENKAI）
+      # 2) ML推論（TENKAI）— PIDごとに実行
       - name: Run TENKAI prediction
         env:
           DATE: ${{ inputs.DATE }}
-          PID:  ${{ steps.pidnorm.outputs.PID_EXP }}
+          PID_EXP: ${{ steps.pidnorm.outputs.PID_EXP }}
         run: |
           set -euo pipefail
           mkdir -p "TENKAI/predictions/v1/$DATE"
-          echo "[tenkai] $DATE / $PID"
-          # tenkai 側がカンマ区切りに対応している前提
-          python TENKAI/tenkai_predict_integrated.py \
-            --date "$DATE" --pid "$PID"
+          echo "[tenkai] $DATE / $PID_EXP"
+          IFS=',' read -r -a PIDS <<< "$PID_EXP"
+          for P in "${PIDS[@]}"; do
+            P="$(echo "$P" | xargs)"
+            [ -z "$P" ] && continue
+            echo "  -> pid=$P"
+            python TENKAI/tenkai_predict_integrated.py --date "$DATE" --pid "$P"
+          done
 
       - name: Show ML CSVs
         run: |
-          find TENKAI/predictions/v1/${{ inputs.DATE }} -maxdepth 3 -type f -name '*.csv' | sort || true
+          find TENKAI/predictions/v1/${{ inputs.DATE }} -maxdepth 4 -type f -name '*.csv' | sort || true
 
       # 3) Pass2: MLを読み込んだ統合SimS
       - name: Run Pass2 (SimS integrated with ML)
@@ -184,7 +205,6 @@ jobs:
             [[ "${F_REQUIRE_ODDS,,}" == "true" ]] && ARGS_FILTER="$ARGS_FILTER --require-odds"
             [[ -n "${F_MIN_EV}" && "$F_MIN_EV" != "0" ]] && ARGS_FILTER="$ARGS_FILTER --min-ev $F_MIN_EV"
 
-            # bands のクォート保持のため eval
             eval python scripts/sims/sims_integrated.py $ARGS_COMMON --odds-base public/odds/v1 $ARGS_FILTER
           fi
 
