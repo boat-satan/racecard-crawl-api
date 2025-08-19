@@ -54,25 +54,25 @@ jobs:
               if [[ "$kv" == *"="* ]]; then
                 k="$(echo "${kv%%=*}" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9_' '_' | xargs)"
                 v="$(echo "${kv#*=}" | xargs)"
-                echo "$prefix$k=$v" >> $GITHUB_OUTPUT
+                echo "$prefix$k=$v" >> "$GITHUB_OUTPUT"
               fi
             done
           }
           # filter defaults
-          echo "F_REQUIRE_ODDS=false" >> $GITHUB_OUTPUT
-          echo "F_MIN_EV=0"          >> $GITHUB_OUTPUT
-          echo "F_ODDS_BANDS="       >> $GITHUB_OUTPUT
-          echo "F_ODDS_MIN=0"        >> $GITHUB_OUTPUT
-          echo "F_ODDS_MAX=0"        >> $GITHUB_OUTPUT
-          echo "F_EXCLUDE_FIRST1=false" >> $GITHUB_OUTPUT
-          echo "F_ONLY_FIRST1=false"    >> $GITHUB_OUTPUT
-          echo "F_BUY_IN_TOP3=false"    >> $GITHUB_OUTPUT
-          echo "F_BUY_THR=0.7"          >> $GITHUB_OUTPUT
+          echo "F_REQUIRE_ODDS=false" >> "$GITHUB_OUTPUT"
+          echo "F_MIN_EV=0"          >> "$GITHUB_OUTPUT"
+          echo "F_ODDS_BANDS="       >> "$GITHUB_OUTPUT"
+          echo "F_ODDS_MIN=0"        >> "$GITHUB_OUTPUT"
+          echo "F_ODDS_MAX=0"        >> "$GITHUB_OUTPUT"
+          echo "F_EXCLUDE_FIRST1=false" >> "$GITHUB_OUTPUT"
+          echo "F_ONLY_FIRST1=false"    >> "$GITHUB_OUTPUT"
+          echo "F_BUY_IN_TOP3=false"    >> "$GITHUB_OUTPUT"
+          echo "F_BUY_THR=0.7"          >> "$GITHUB_OUTPUT"
           # keyman defaults
-          echo "K_ENABLE=true"   >> $GITHUB_OUTPUT
-          echo "K_THR=0.7"       >> $GITHUB_OUTPUT
-          echo "K_BOOST=0.15"    >> $GITHUB_OUTPUT
-          echo "K_AGGR=0.0"      >> $GITHUB_OUTPUT
+          echo "K_ENABLE=true"   >> "$GITHUB_OUTPUT"
+          echo "K_THR=0.7"       >> "$GITHUB_OUTPUT"
+          echo "K_BOOST=0.15"    >> "$GITHUB_OUTPUT"
+          echo "K_AGGR=0.0"      >> "$GITHUB_OUTPUT"
           [ -n "${FILTERS:-}" ] && parse_kvlist "$FILTERS" "F_"
           [ -n "${KEYMAN:-}" ]  && parse_kvlist "$KEYMAN"  "K_"
 
@@ -85,15 +85,19 @@ jobs:
           PID_TRIM="$(echo "${PID_IN:-}" | tr '[:space:]' ' ' | xargs)"
           if [ -z "$PID_TRIM" ] || [ "${PID_TRIM,,}" = "all" ]; then
             ALL=""
-            for i in $(seq -w 01 24); do ALL="${ALL}${i},"; done
+            for i in $(seq -w 01 24); do
+              ALL="${ALL}${i},"
+            done
             PID_EXP="${ALL%,}"
           else
             PID_NORM="$(echo "$PID_TRIM" | tr '、，;|' ',')"
             OUT=""
             IFS=',' read -r -a arr <<< "$PID_NORM"
             for p in "${arr[@]}"; do
-              p="$(echo "$p" | xargs)"; [ -z "$p" ] && continue
-              printf -v two "%02d" "$p"; OUT="${OUT}${two},"
+              p="$(echo "$p" | xargs)"
+              [ -z "$p" ] && continue
+              printf -v two "%02d" "$p"
+              OUT="${OUT}${two},"
             done
             PID_EXP="${OUT%,}"
           fi
@@ -131,7 +135,8 @@ jobs:
           echo "[tenkai] $DATE / $PID_EXP"
           IFS=',' read -r -a PIDS <<< "$PID_EXP"
           for P in "${PIDS[@]}"; do
-            P="$(echo "$P" | xargs)"; [ -z "$P" ] && continue
+            P="$(echo "$P" | xargs)"
+            [ -z "$P" ] && continue
             echo "  -> pid=$P"
             python TENKAI/tenkai_predict_integrated.py --date "$DATE" --pid "$P"
           done
@@ -183,90 +188,96 @@ jobs:
           else
             ARGS_FILTER=""
             [[ -n "${F_ODDS_BANDS}" ]] && ARGS_FILTER="$ARGS_FILTER --odds-bands \"$F_ODDS_BANDS\""
-            [[ -n "${F_MIN_EV}" && "$F_MIN_EV" != "0" ]] && ARGS_FILTER="$ARGS_FILTER --min-ev $F_MIN_EV"
-            [[ -n "${F_ODDS_MIN}" && "$F_ODDS_MIN" != "0" ]] && ARGS_FILTER="$ARGS_FILTER --odds-min $F_ODDS_MIN"
-            [[ -n "${F_ODDS_MAX}" && "$F_ODDS_MAX" != "0" ]] && ARGS_FILTER="$ARGS_FILTER --odds-max $F_ODDS_MAX"
+            [[ -n "${F_ODDS_MIN}"   && "$F_ODDS_MIN" != "0" ]] && ARGS_FILTER="$ARGS_FILTER --odds-min $F_ODDS_MIN"
+            [[ -n "${F_ODDS_MAX}"   && "$F_ODDS_MAX" != "0" ]] && ARGS_FILTER="$ARGS_FILTER --odds-max $F_ODDS_MAX"
             [[ "${F_REQUIRE_ODDS,,}" == "true" ]] && ARGS_FILTER="$ARGS_FILTER --require-odds"
+            [[ -n "${F_MIN_EV}" && "$F_MIN_EV" != "0" ]] && ARGS_FILTER="$ARGS_FILTER --min-ev $F_MIN_EV"
             eval python scripts/sims/sims_integrated.py $ARGS_COMMON --odds-base public/odds/v1 $ARGS_FILTER
           fi
 
-      # ★ ここだけ追加：overall.json を常に上書き生成
-      - name: Aggregate (overwrite overall.json)
-        if: always()
+      # 4) eval のときだけ集計して overall.json を常に上書き（オプションも保存）
+      - name: Aggregate & write overall.json (eval only, overwrite)
+        if: ${{ inputs.MODE == 'eval' }}
         env:
-          DATE:   ${{ inputs.DATE }}
-          MODE:   ${{ inputs.MODE }}
-          UNIT:   ${{ inputs.UNIT }}
+          DATE:  ${{ inputs.DATE }}
+          MODE:  ${{ inputs.MODE }}
+          UNIT:  ${{ inputs.UNIT }}
+          SIMS:  ${{ inputs.SIMS }}
+          TOPN:  ${{ inputs.TOPN }}
+          PID:   ${{ steps.pidnorm.outputs.PID_EXP }}
           OUTDIR: ${{ inputs.OUTDIR }}
+          # filters
+          F_REQUIRE_ODDS:   ${{ steps.parse.outputs.F_REQUIRE_ODDS }}
+          F_MIN_EV:         ${{ steps.parse.outputs.F_MIN_EV }}
+          F_ODDS_BANDS:     ${{ steps.parse.outputs.F_ODDS_BANDS }}
+          F_ODDS_MIN:       ${{ steps.parse.outputs.F_ODDS_MIN }}
+          F_ODDS_MAX:       ${{ steps.parse.outputs.F_ODDS_MAX }}
+          F_EXCLUDE_FIRST1: ${{ steps.parse.outputs.F_EXCLUDE_FIRST1 }}
+          F_ONLY_FIRST1:    ${{ steps.parse.outputs.F_ONLY_FIRST1 }}
+          F_BUY_IN_TOP3:    ${{ steps.parse.outputs.F_BUY_IN_TOP3 }}
+          F_BUY_THR:        ${{ steps.parse.outputs.F_BUY_THR }}
+          # keyman
+          K_ENABLE: ${{ steps.parse.outputs.K_ENABLE }}
+          K_THR:    ${{ steps.parse.outputs.K_THR }}
+          K_BOOST:  ${{ steps.parse.outputs.K_BOOST }}
+          K_AGGR:   ${{ steps.parse.outputs.K_AGGR }}
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import os, json, glob
-          date   = os.environ["DATE"]
-          mode   = os.environ["MODE"]
-          unit   = int(os.environ["UNIT"])
-          outdir = os.environ["OUTDIR"]
-          pred_dir = os.path.join(outdir, "pass2", "predict")
-          races = bets_total = stake_total = hits = payout_total = 0
+          CSV="$OUTDIR/pass2/per_race_results.csv"
+          [ -f "$CSV" ] || { echo "per_race_results.csv not found: $CSV"; exit 1; }
 
-          def load_results(date,pid,race):
-              root = os.path.join("public","results","v1",date,pid)
-              if not os.path.isdir(root): return {}
-              cand = os.path.join(root, f"{race if race.endswith('R') else race+'R'}.json")
-              if os.path.isfile(cand): return json.load(open(cand,encoding="utf-8"))
-              for f in os.listdir(root):
-                  if not f.endswith(".json"): continue
-                  d=json.load(open(os.path.join(root,f),encoding="utf-8"))
-                  cont=d.get("races",d) if isinstance(d,dict) else {}
-                  rk = race if race.endswith("R") else race+"R"
-                  if rk in cont: return cont[rk]
-              return {}
+          RACES=$(awk 'END{print NR-1}' "$CSV")
+          BETS=$(awk -F, 'NR>1{sum+=$4}END{print sum+0}' "$CSV")
+          STAKE=$(awk -v u="$UNIT" 'BEGIN{FS=","} NR>1{sum+=u*$4} END{print sum+0}' "$CSV")
+          PAYOUT=$(awk -F, 'NR>1{sum+=$6}END{print sum+0}' "$CSV")
+          HITS=$(awk -F, 'NR>1{sum+=$5}END{print sum+0}' "$CSV")
+          HIT_RATE=$(awk -v h="$HITS" -v r="$RACES" 'BEGIN{if(r==0)print 0; else printf "%.12f", h/r}')
+          ROI=$(awk -v p="$PAYOUT" -v s="$STAKE" 'BEGIN{if(s==0)print 0; else printf "%.12f", (p-s)/s}')
 
-          def actual(res):
-              trif=(res or {}).get("payouts",{}).get("trifecta")
-              combo=None; amt=0
-              if isinstance(trif,dict):
-                  combo=trif.get("combo"); amt=int(trif.get("amount") or 0)
-              if not combo and isinstance(res,dict):
-                  order=res.get("order")
-                  if isinstance(order,list) and len(order)>=3:
-                      lane=lambda x: str(x.get("lane") or x.get("course") or x.get("F") or x.get("number"))
-                      try:
-                          f,s,t=lane(order[0]),lane(order[1]),lane(order[2])
-                          if all([f,s,t]): combo=f"{f}-{s}-{t}"
-                      except: pass
-              return combo, amt
+          # bool 正規化
+          tf(){ v="${1:-false}"; v="$(echo "$v" | tr '[:upper:]' '[:lower:]')"; [ "$v" = "true" ] && echo true || echo false; }
+          REQ_ODDS=$(tf "$F_REQUIRE_ODDS")
+          EXC1=$(tf "$F_EXCLUDE_FIRST1")
+          ONLY1=$(tf "$F_ONLY_FIRST1")
+          BUY3=$(tf "$F_BUY_IN_TOP3")
+          KM_EN=$(tf "$K_ENABLE")
 
-          for f in glob.glob(os.path.join(pred_dir,"pred_*.json")):
-              d=json.load(open(f,encoding="utf-8"))
-              races += 1
-              bets = [x["ticket"] for x in d.get("buylist",[])]
-              bets_total += len(bets)
-              stake_total += unit * len(bets)
-              if mode == "eval":
-                  res = load_results(d["date"], d["pid"], d["race"])
-                  hit_combo, pay = actual(res)
-                  if hit_combo in bets:
-                      hits += 1
-                      payout_total += int(pay)
-
-          summary = {
-            "date": date,
-            "mode": mode,
-            "races": races,
-            "bets_total": bets_total,
-            "unit": unit,
-            "stake_total": stake_total,
-            "hits": hits,
-            "hit_rate": (hits / races) if races else 0.0,
-            "payout_total": payout_total,
-            "roi": ((payout_total - stake_total) / stake_total) if stake_total else 0.0,
-          }
-          os.makedirs(os.path.join(outdir,"pass2"), exist_ok=True)
-          with open(os.path.join(outdir,"pass2","overall.json"),"w",encoding="utf-8") as fp:
-              json.dump(summary, fp, ensure_ascii=False, indent=2)
-          print(">> wrote", os.path.join(outdir,"pass2","overall.json"))
-          PY
+          mkdir -p "$OUTDIR/pass2"
+          jq -n \
+            --arg date "$DATE" --arg mode "$MODE" --arg pid "$PID" \
+            --argjson unit $UNIT --argjson sims $SIMS --argjson topn $TOPN \
+            --argjson races $RACES --argjson bets $BETS \
+            --argjson stake $STAKE --argjson hits $HITS \
+            --argjson hit_rate $HIT_RATE --argjson payout $PAYOUT --argjson roi $ROI \
+            --argjson f_require_odds $REQ_ODDS --arg f_odds_bands "${F_ODDS_BANDS:-}" \
+            --argjson f_min_ev ${F_MIN_EV:-0} --argjson f_odds_min ${F_ODDS_MIN:-0} --argjson f_odds_max ${F_ODDS_MAX:-0} \
+            --argjson f_exclude_first1 $EXC1 --argjson f_only_first1 $ONLY1 \
+            --argjson f_buy_in_top3 $BUY3 --argjson f_buy_thr ${F_BUY_THR:-0} \
+            --argjson k_enable $KM_EN --argjson k_thr ${K_THR:-0} --argjson k_boost ${K_BOOST:-0} --argjson k_aggr ${K_AGGR:-0} \
+            '{
+              date: $date, mode: $mode, pid: $pid,
+              races: $races, bets_total: $bets, unit: $unit,
+              stake_total: $stake, hits: $hits, hit_rate: $hit_rate,
+              payout_total: $payout, roi: $roi,
+              options: {
+                sims: $sims, topn: $topn,
+                filters: {
+                  require_odds: $f_require_odds,
+                  min_ev: $f_min_ev,
+                  odds_bands: $f_odds_bands,
+                  odds_min: $f_odds_min, odds_max: $f_odds_max,
+                  exclude_first1: $f_exclude_first1,
+                  only_first1: $f_only_first1,
+                  buy_in_top3: $f_buy_in_top3,
+                  buy_thr: $f_buy_thr
+                },
+                keyman: {
+                  enable: $k_enable, threshold: $k_thr,
+                  boost: $k_boost, aggr: $k_aggr
+                }
+              }
+            }' > "$OUTDIR/pass2/overall.json"
+          echo "[overall] wrote $OUTDIR/pass2/overall.json"
 
       - name: Commit results into repo
         if: always()
