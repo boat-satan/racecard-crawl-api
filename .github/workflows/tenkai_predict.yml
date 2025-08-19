@@ -1,24 +1,24 @@
-name: Predict TENKAI (tansyo + kimarite)
+name: TENKAI Predict
 
 on:
   workflow_dispatch:
     inputs:
       date:
-        description: '対象日 (YYYYMMDD)'
+        description: "対象日 (YYYYMMDD)"
         required: true
       pid:
-        description: '場コード pid (例: 02) / ALL で全場'
+        description: "場コード pid (例: 02 / ALL)"
         required: true
       race:
-        description: 'レース (例: 2R) 空/ALL なら全R'
+        description: "レース (例: 1R) 空なら全R"
         required: false
-        default: ''
+        default: ""
 
 permissions:
   contents: write
 
 concurrency:
-  group: tenkai-predict-${{ github.ref }}
+  group: predict-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -37,79 +37,81 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # 予測に必要な最低限 + LightGBM（決まり手モデル用）
-          pip install pandas numpy joblib scikit-learn lightgbm
+          pip install -r requirements.txt || pip install pandas lightgbm scikit-learn joblib
 
       - name: Ensure TENKAI package
         run: |
           mkdir -p TENKAI
           [ -f TENKAI/__init__.py ] || printf "" > TENKAI/__init__.py
 
-      - name: Sanity check
-        run: |
-          test -f TENKAI/tenkai_predict_integrated.py || { echo "TENKAI/tenkai_predict_integrated.py がありません"; exit 1; }
-
-      - name: Run predictions (pid=ALL supported, latest models auto)
+      - name: Run prediction (tansyo + kimarite)
         shell: bash
         env:
           DATE: ${{ github.event.inputs.date }}
-          PID_IN: ${{ github.event.inputs.pid }}
-          RACE_IN: ${{ github.event.inputs.race }}
+          PID:  ${{ github.event.inputs.pid }}
+          RACE: ${{ github.event.inputs.race }}
         run: |
           set -euo pipefail
+          PYTHONPATH=.
 
-          RACE_OPT=""
-          if [ -n "${RACE_IN}" ] && [ "${RACE_IN}" != "ALL" ]; then
-            RACE_OPT="--race ${RACE_IN}"
-          fi
-
-          run_one () {
-            local date="$1" pid="$2"
-            echo ">>> python TENKAI/tenkai_predict_integrated.py --date ${date} --pid ${pid} ${RACE_OPT}"
-            PYTHONPATH="." python TENKAI/tenkai_predict_integrated.py --date "${date}" --pid "${pid}" ${RACE_OPT} || true
+          build_one() {
+            local d="$1" p="$2" r="${3:-}"
+            local r_opt=""
+            if [ -n "$r" ]; then r_opt="--race $r"; fi
+            echo ">>> run predict: $d $p $r_opt"
+            PYTHONPATH="$PYTHONPATH" python TENKAI/predict.py \
+              --date "$d" --pid "$p" $r_opt \
+              --outdir predictions
           }
 
-          if [ "${PID_IN}" = "ALL" ]; then
-            base="public/integrated/v1/${DATE}"
-            if [ ! -d "${base}" ]; then
-              echo "No integrated data: ${base}"
-              exit 0
+          if [ "${PID}" = "ALL" ]; then
+            BASE="public/integrated/v1/${DATE}"
+            if [ ! -d "$BASE" ]; then
+              echo "No integrated data for ${DATE}"; exit 0
             fi
-            mapfile -t PIDS < <(ls -1d "${base}"/* 2>/dev/null | xargs -n1 basename || true)
-            if [ ${#PIDS[@]} -eq 0 ]; then
-              echo "No pid directories under ${base}"
-              exit 0
-            fi
-            echo "Targets: ${PIDS[*]}"
-            for p in "${PIDS[@]}"; do
-              run_one "${DATE}" "${p}"
+            for dir in "$BASE"/*; do
+              [ -d "$dir" ] || continue
+              p="$(basename "$dir")"
+              build_one "${DATE}" "${p}" "${RACE}"
             done
           else
-            run_one "${DATE}" "${PID_IN}"
+            build_one "${DATE}" "${PID}" "${RACE}"
           fi
 
-      - name: Commit prediction outputs
+      - name: List predictions
+        run: |
+          echo "---- generated predictions ----"
+          ls -R predictions || true
+
+      - name: Commit predictions
         shell: bash
         env:
           DATE: ${{ github.event.inputs.date }}
-          PID_IN: ${{ github.event.inputs.pid }}
+          PID:  ${{ github.event.inputs.pid }}
+          RACE: ${{ github.event.inputs.race }}
         run: |
           set -euo pipefail
-          ADD_PATH="TENKAI/predictions/v1/${DATE}"
-          if [ ! -d "${ADD_PATH}" ]; then
-            echo "No predictions generated; skip commit."
-            exit 0
+          FILES="$(find predictions/${DATE} -type f -name '*.csv' -print 2>/dev/null || true)"
+          if [ -n "$FILES" ]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add $FILES
+            git diff --cached --quiet || git commit -m "TENKAI predictions: ${DATE} pid=${PID} race=${RACE:-ALL}"
+            set +e
+            git push
+            if [ $? -ne 0 ]; then
+              set -e
+              git fetch origin
+              git pull --rebase origin "${GITHUB_REF_NAME}"
+              git push
+            fi
+          else
+            echo "No prediction CSV generated; skip commit."
           fi
 
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add "${ADD_PATH}"/**/*.csv 2>/dev/null || true
-          git diff --cached --quiet || git commit -m "TENKAI predictions: date=${DATE} pid=${PID_IN}"
-          git push || true
-
-      - name: Upload artifacts
+      - name: Upload predictions
         uses: actions/upload-artifact@v4
         with:
-          name: tenkai-predictions-${{ github.event.inputs.date }}-${{ github.event.inputs.pid }}${{ github.event.inputs.race && format('-{0}', github.event.inputs.race) || '' }}
-          path: TENKAI/predictions/v1/${{ github.event.inputs.date }}/**/*.csv
+          name: predictions-${{ github.event.inputs.date }}-${{ github.event.inputs.pid }}${{ github.event.inputs.race && format('-{0}', github.event.inputs.race) || '' }}
+          path: predictions/${{ github.event.inputs.date }}/**/*.csv
           if-no-files-found: warn
