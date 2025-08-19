@@ -4,116 +4,116 @@
   "race": "1R",
   "buylist": [
     {
-      "ticket": "1-3-2",
-      "score": 0.125,
-      "odds": null,
-      "ev": null
-    },
-    {
-      "ticket": "1-3-4",
-      "score": 0.099167,
-      "odds": null,
-      "ev": null
-    },
-    {
       "ticket": "1-4-3",
-      "score": 0.095833,
+      "score": 0.1024,
       "odds": null,
       "ev": null
     },
     {
       "ticket": "1-2-3",
-      "score": 0.08,
+      "score": 0.0994,
+      "odds": null,
+      "ev": null
+    },
+    {
+      "ticket": "1-3-4",
+      "score": 0.0984,
+      "odds": null,
+      "ev": null
+    },
+    {
+      "ticket": "1-3-2",
+      "score": 0.0864,
       "odds": null,
       "ev": null
     },
     {
       "ticket": "1-3-5",
-      "score": 0.0775,
+      "score": 0.074,
       "odds": null,
       "ev": null
     },
     {
       "ticket": "1-2-4",
-      "score": 0.069167,
-      "odds": null,
-      "ev": null
-    },
-    {
-      "ticket": "1-4-5",
-      "score": 0.068333,
+      "score": 0.0712,
       "odds": null,
       "ev": null
     },
     {
       "ticket": "1-4-2",
-      "score": 0.056667,
-      "odds": null,
-      "ev": null
-    },
-    {
-      "ticket": "1-2-5",
-      "score": 0.055833,
-      "odds": null,
-      "ev": null
-    },
-    {
-      "ticket": "1-5-2",
-      "score": 0.048333,
+      "score": 0.0706,
       "odds": null,
       "ev": null
     },
     {
       "ticket": "1-5-3",
-      "score": 0.0425,
+      "score": 0.059,
+      "odds": null,
+      "ev": null
+    },
+    {
+      "ticket": "1-4-5",
+      "score": 0.058,
+      "odds": null,
+      "ev": null
+    },
+    {
+      "ticket": "1-2-5",
+      "score": 0.0546,
+      "odds": null,
+      "ev": null
+    },
+    {
+      "ticket": "1-5-2",
+      "score": 0.0406,
       "odds": null,
       "ev": null
     },
     {
       "ticket": "1-5-4",
-      "score": 0.041667,
-      "odds": null,
-      "ev": null
-    },
-    {
-      "ticket": "1-4-6",
-      "score": 0.015,
-      "odds": null,
-      "ev": null
-    },
-    {
-      "ticket": "1-2-6",
-      "score": 0.014167,
+      "score": 0.0404,
       "odds": null,
       "ev": null
     },
     {
       "ticket": "1-3-6",
-      "score": 0.014167,
+      "score": 0.0178,
       "odds": null,
       "ev": null
     },
     {
-      "ticket": "4-1-3",
-      "score": 0.011667,
+      "ticket": "2-1-3",
+      "score": 0.012,
+      "odds": null,
+      "ev": null
+    },
+    {
+      "ticket": "1-4-6",
+      "score": 0.0114,
+      "odds": null,
+      "ev": null
+    },
+    {
+      "ticket": "2-1-5",
+      "score": 0.0108,
+      "odds": null,
+      "ev": null
+    },
+    {
+      "ticket": "1-2-6",
+      "score": 0.0096,
       "odds": null,
       "ev": null
     },
     {
       "ticket": "2-1-4",
-      "score": 0.011667,
-      "odds": null,
-      "ev": null
-    },
-    {
-      "ticket": "3-1-5",
-      "score": 0.008333,
+      "score": 0.0094,
       "odds": null,
       "ev": null
     }
   ],
   "engine": "SimS integrated (E1+ML)",
-  "sims_per_race": 1200,
+  "sims_per_race": 5000,
   "ml_coeffs": {
     "st_gain": 0.3,
     "A_gain": 0.2,

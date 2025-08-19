@@ -1,30 +1,12 @@
 {
-  "engine": "SimS integrated (E1+ML)",
-  "pass": "pass2",
+  "date": "20250818",
+  "mode": "eval",
   "races": 168,
   "bets_total": 3024,
-  "stake_total": 302400,
-  "payout_total": 191820,
-  "hit_rate": 0.5238095238095238,
-  "roi": -0.36567460317460315,
-  "sims_per_race": 1200,
-  "topn": 18,
   "unit": 100,
-  "exclude_first1": false,
-  "only_first1": false,
-  "min_ev": 0.0,
-  "require_odds": false,
-  "odds_bands": "",
-  "odds_min": 0.0,
-  "odds_max": 0.0,
-  "keyman_threshold": 0.7,
-  "keyman_boost": 0.15,
-  "keyman_aggr": 0.0,
-  "buy_if_keyman_in_top3": false,
-  "buy_keyman_threshold": 0.7,
-  "ml_coeffs": {
-    "st_gain": 0.3,
-    "A_gain": 0.2,
-    "consistency": 0.3
-  }
+  "stake_total": 302400,
+  "hits": 90,
+  "hit_rate": 0.5357142857142857,
+  "payout_total": 203800,
+  "roi": -0.32605820105820105
 }
