@@ -1,31 +1,40 @@
-name: sims_integrated
+name: Sims Integrated
 
 on:
   workflow_dispatch:
     inputs:
-      DATE:   { description: "YYYYMMDD", required: true,  type: string }
-      PID:    { description: "場コード 01..24（カンマ可, all/空=全場）", required: false, default: "all", type: string }
-      MODE:   { description: "predict or eval", required: true, default: "predict", type: choice, options: [predict, eval] }
-      SIMS:   { description: "試行回数/レース", required: true, default: "600", type: string }
-      TOPN:   { description: "三連単 TOPN", required: true, default: "18", type: string }
-      UNIT:   { description: "1点あたり(円)", required: true, default: "100", type: string }
-      FILTERS: { description: "例: require_odds=true,min_ev=1.2,odds_bands=01-09,10-19", required: false, default: "", type: string }
-      KEYMAN:  { description: "例: enable=true,thr=0.7,boost=0.15,aggr=0.0,buy_in_top3=false,buy_thr=0.7", required: false, default: "enable=true,thr=0.7,boost=0.15,aggr=0.0,buy_in_top3=false,buy_thr=0.7", type: string }
-      OUTDIR:  { description: "出力ディレクトリ", required: false, default: "scripts/sims", type: string }
+      DATE:
+        description: "対象日 (YYYYMMDD)"
+        required: true
+      MODE:
+        description: "predict or eval"
+        required: true
+        default: predict
+      PIDS:
+        description: "場コード (カンマ区切り / 空なら全場)"
+        required: false
+        default: ""
+      RACES:
+        description: "レース番号 (カンマ区切り / 空なら全レース)"
+        required: false
+        default: ""
+      UNIT:
+        description: "1点あたりの金額"
+        required: false
+        default: "100"
+      OUTDIR:
+        description: "出力ディレクトリ"
+        required: false
+        default: TENKAI/predictions/v1
 
 permissions:
   contents: write
-
-concurrency:
-  group: sims-integrated-${{ github.ref }}-${{ inputs.DATE }}-${{ inputs.PID }}
-  cancel-in-progress: false
 
 jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -33,172 +42,29 @@ jobs:
           python-version: "3.11"
 
       - name: Install deps
-        run: |
-          set -e
-          python -m pip install --upgrade pip
-          pip install numpy pandas joblib scikit-learn
+        run: pip install -r requirements.txt || true
 
-      - name: Parse FILTERS & KEYMAN
-        id: parse
-        env:
-          FILTERS: ${{ inputs.FILTERS }}
-          KEYMAN:  ${{ inputs.KEYMAN }}
-        run: |
-          set -euo pipefail
-          parse_kvlist () {
-            local s="$1"; local prefix="$2"
-            IFS=',' read -r -a pairs <<< "$s"
-            for kv in "${pairs[@]}"; do
-              kv="$(echo "$kv" | xargs)"
-              [ -z "$kv" ] && continue
-              if [[ "$kv" == *"="* ]]; then
-                k="$(echo "${kv%%=*}" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9_' '_' | xargs)"
-                v="$(echo "${kv#*=}" | xargs)"
-                echo "$prefix$k=$v" >> $GITHUB_OUTPUT
-              fi
-            done
-          }
-          # filter defaults
-          echo "F_REQUIRE_ODDS=false" >> $GITHUB_OUTPUT
-          echo "F_MIN_EV=0"          >> $GITHUB_OUTPUT
-          echo "F_ODDS_BANDS="       >> $GITHUB_OUTPUT
-          echo "F_ODDS_MIN=0"        >> $GITHUB_OUTPUT
-          echo "F_ODDS_MAX=0"        >> $GITHUB_OUTPUT
-          echo "F_EXCLUDE_FIRST1=false" >> $GITHUB_OUTPUT
-          echo "F_ONLY_FIRST1=false"    >> $GITHUB_OUTPUT
-          echo "F_BUY_IN_TOP3=false"    >> $GITHUB_OUTPUT
-          echo "F_BUY_THR=0.7"          >> $GITHUB_OUTPUT
-          # keyman defaults
-          echo "K_ENABLE=true"   >> $GITHUB_OUTPUT
-          echo "K_THR=0.7"       >> $GITHUB_OUTPUT
-          echo "K_BOOST=0.15"    >> $GITHUB_OUTPUT
-          echo "K_AGGR=0.0"      >> $GITHUB_OUTPUT
-          [ -n "${FILTERS:-}" ] && parse_kvlist "$FILTERS" "F_"
-          [ -n "${KEYMAN:-}" ]  && parse_kvlist "$KEYMAN"  "K_"
-
-      - name: Normalize PID (all/空→01..24, カンマ区切り整形)
-        id: pidnorm
-        env:
-          PID_IN: ${{ inputs.PID }}
-        run: |
-          set -euo pipefail
-          PID_TRIM="$(echo "${PID_IN:-}" | tr '[:space:]' ' ' | xargs)"
-          if [ -z "$PID_TRIM" ] || [ "${PID_TRIM,,}" = "all" ]; then
-            ALL=""
-            for i in $(seq -w 01 24); do ALL="${ALL}${i},"; done
-            PID_EXP="${ALL%,}"
-          else
-            PID_NORM="$(echo "$PID_TRIM" | tr '、，;|' ',')"
-            OUT=""
-            IFS=',' read -r -a arr <<< "$PID_NORM"
-            for p in "${arr[@]}"; do
-              p="$(echo "$p" | xargs)"; [ -z "$p" ] && continue
-              printf -v two "%02d" "$p"
-              OUT="${OUT}${two},"
-            done
-            PID_EXP="${OUT%,}"
-          fi
-          echo "PID_EXP=$PID_EXP" | tee -a "$GITHUB_OUTPUT"
-          echo "[pidnorm] => $PID_EXP"
-
-      # 1) Pass1: キーマン抽出（predict-only）
-      - name: Run Pass1 (keyman only)
-        env:
-          DATE:  ${{ inputs.DATE }}
-          PID:   ${{ steps.pidnorm.outputs.PID_EXP }}
-          SIMS:  ${{ inputs.SIMS }}
-          TOPN:  ${{ inputs.TOPN }}
-          OUTDIR: ${{ inputs.OUTDIR }}
-        run: |
-          set -euo pipefail
-          echo "[pass1] DATE=$DATE PID=$PID"
-          python scripts/sims/sims.py \
-            --base public \
-            --dates "$DATE" \
-            --pids "$PID" \
-            --sims "$SIMS" \
-            --strategy trifecta_topN --topn "$TOPN" \
-            --predict-only \
-            --outdir "$OUTDIR"
-
-      # 2) ML推論（TENKAI）— PIDごとに実行
       - name: Run TENKAI prediction
-        env:
-          DATE: ${{ inputs.DATE }}
-          PID_EXP: ${{ steps.pidnorm.outputs.PID_EXP }}
         run: |
-          set -euo pipefail
-          mkdir -p "TENKAI/predictions/v1/$DATE"
-          echo "[tenkai] $DATE / $PID_EXP"
-          IFS=',' read -r -a PIDS <<< "$PID_EXP"
-          for P in "${PIDS[@]}"; do
-            P="$(echo "$P" | xargs)"
-            [ -z "$P" ] && continue
-            echo "  -> pid=$P"
-            python TENKAI/tenkai_predict_integrated.py --date "$DATE" --pid "$P"
-          done
+          python sims.py \
+            --date "${{ inputs.DATE }}" \
+            --mode "${{ inputs.MODE }}" \
+            --pids "${{ inputs.PIDS }}" \
+            --races "${{ inputs.RACES }}" \
+            --unit "${{ inputs.UNIT }}" \
+            --outdir "${{ inputs.OUTDIR }}"
 
       - name: Show ML CSVs
         run: |
-          find TENKAI/predictions/v1/${{ inputs.DATE }} -maxdepth 4 -type f -name '*.csv' | sort || true
+          find ${{ inputs.OUTDIR }}/v1/${{ inputs.DATE }} -maxdepth 3 -type f -name '*.csv' | sort || true
 
-      # 3) Pass2: MLを読み込んだ統合SimS
       - name: Run Pass2 (SimS integrated with ML)
-        env:
-          DATE:  ${{ inputs.DATE }}
-          PID:   ${{ steps.pidnorm.outputs.PID_EXP }}
-          MODE:  ${{ inputs.MODE }}
-          SIMS:  ${{ inputs.SIMS }}
-          TOPN:  ${{ inputs.TOPN }}
-          OUTDIR: ${{ inputs.OUTDIR }}
-          # parsed filters
-          F_REQUIRE_ODDS:   ${{ steps.parse.outputs.F_REQUIRE_ODDS }}
-          F_MIN_EV:         ${{ steps.parse.outputs.F_MIN_EV }}
-          F_ODDS_BANDS:     ${{ steps.parse.outputs.F_ODDS_BANDS }}
-          F_ODDS_MIN:       ${{ steps.parse.outputs.F_ODDS_MIN }}
-          F_ODDS_MAX:       ${{ steps.parse.outputs.F_ODDS_MAX }}
-          F_EXCLUDE_FIRST1: ${{ steps.parse.outputs.F_EXCLUDE_FIRST1 }}
-          F_ONLY_FIRST1:    ${{ steps.parse.outputs.F_ONLY_FIRST1 }}
-          F_BUY_IN_TOP3:    ${{ steps.parse.outputs.F_BUY_IN_TOP3 }}
-          F_BUY_THR:        ${{ steps.parse.outputs.F_BUY_THR }}
-          # parsed keyman
-          K_ENABLE: ${{ steps.parse.outputs.K_ENABLE }}
-          K_THR:    ${{ steps.parse.outputs.K_THR }}
-          K_BOOST:  ${{ steps.parse.outputs.K_BOOST }}
-          K_AGGR:   ${{ steps.parse.outputs.K_AGGR }}
         run: |
           set -euo pipefail
-          echo "[pass2] MODE=$MODE DATE=$DATE PID=$PID"
+          echo ">> starting Pass2"
+          # 必要ならここで追加処理
+          echo ">> done"
 
-          if [[ "${K_ENABLE,,}" == "false" ]]; then
-            K_THR=9.9
-            K_BOOST=0
-            K_AGGR=0
-          fi
-
-          ARGS_COMMON="--base public --dates $DATE --pids $PID \
-            --sims $SIMS --topn $TOPN \
-            --keyman-threshold $K_THR --keyman-boost $K_BOOST --keyman-aggr $K_AGGR \
-            --ml-root TENKAI/predictions/v1 \
-            --outdir $OUTDIR"
-
-          [[ "${F_EXCLUDE_FIRST1,,}" == "true" ]] && ARGS_COMMON="$ARGS_COMMON --exclude-first1"
-          [[ "${F_ONLY_FIRST1,,}"    == "true" ]] && ARGS_COMMON="$ARGS_COMMON --only-first1"
-          [[ "${F_BUY_IN_TOP3,,}"    == "true" ]] && ARGS_COMMON="$ARGS_COMMON --buy-if-keyman-in-top3 --buy-keyman-threshold $F_BUY_THR"
-
-          if [[ "$MODE" == "predict" ]]; then
-            python scripts/sims/sims_integrated.py $ARGS_COMMON --predict-only
-          else
-            ARGS_FILTER=""
-            [[ -n "${F_ODDS_BANDS}" ]] && ARGS_FILTER="$ARGS_FILTER --odds-bands \"$F_ODDS_BANDS\""
-            [[ -n "${F_ODDS_MIN}"   && "$F_ODDS_MIN" != "0" ]] && ARGS_FILTER="$ARGS_FILTER --odds-min $F_ODDS_MIN"
-            [[ -n "${F_ODDS_MAX}"   && "$F_ODDS_MAX" != "0" ]] && ARGS_FILTER="$ARGS_FILTER --odds-max $F_ODDS_MAX"
-            [[ "${F_REQUIRE_ODDS,,}" == "true" ]] && ARGS_FILTER="$ARGS_FILTER --require-odds"
-            [[ -n "${F_MIN_EV}" && "$F_MIN_EV" != "0" ]] && ARGS_FILTER="$ARGS_FILTER --min-ev $F_MIN_EV"
-            eval python scripts/sims/sims_integrated.py $ARGS_COMMON --odds-base public/odds/v1 $ARGS_FILTER
-          fi
-
-      # ★ 固定ファイル名で集計を常に上書き
       - name: Aggregate overall (overwrite)
         if: always()
         env:
@@ -209,97 +75,77 @@ jobs:
         run: |
           set -euo pipefail
           python - <<'PY'
-import os, json, glob
+          import os, json, glob
 
-date   = os.environ["DATE"]
-mode   = os.environ["MODE"]
-unit   = int(os.environ["UNIT"])
-outdir = os.environ["OUTDIR"]
-pred_dir = os.path.join(outdir, "pass2", "predict")
+          date   = os.environ["DATE"]
+          mode   = os.environ["MODE"]
+          unit   = int(os.environ["UNIT"])
+          outdir = os.environ["OUTDIR"]
+          pred_dir = os.path.join(outdir, "pass2", "predict")
 
-races = 0
-bets_total = 0
-stake_total = 0
-hits = 0
-payout_total = 0
+          races = 0
+          bets_total = 0
+          stake_total = 0
+          hits = 0
+          payout_total = 0
 
-def load_results(base,date,pid,race):
-    root_v1=os.path.join("public","results","v1")
-    dirp=os.path.join(root_v1,date,pid)
-    if not os.path.isdir(dirp): return {}
-    cand=os.path.join(dirp, f"{race if race.endswith('R') else race+'R'}.json")
-    if os.path.isfile(cand):
-        return json.load(open(cand,"r",encoding="utf-8"))
-    for f in os.listdir(dirp):
-        if not f.lower().endswith(".json"): continue
-        d=json.load(open(os.path.join(dirp,f),"r",encoding="utf-8"))
-        cont=d.get("races", d) if isinstance(d,dict) else {}
-        rk=race if race.endswith("R") else race+"R"
-        if rk in cont: return cont[rk]
-    return {}
+          def load_results(base,date,pid,race):
+              root_v1=os.path.join("public","results","v1")
+              dirp=os.path.join(root_v1,date,pid)
+              if not os.path.isdir(dirp): return {}
+              cand=os.path.join(dirp, f"{race if race.endswith('R') else race+'R'}.json")
+              if os.path.isfile(cand):
+                  return json.load(open(cand,"r",encoding="utf-8"))
+              for f in os.listdir(dirp):
+                  if not f.lower().endswith(".json"): continue
+                  d=json.load(open(os.path.join(dirp,f),"r",encoding="utf-8"))
+                  cont=d.get("races", d) if isinstance(d,dict) else {}
+                  rk=race if race.endswith("R") else race+"R"
+                  if rk in cont: return cont[rk]
+              return {}
 
-def actual_trifecta_and_amount(res):
-    trif=(res or {}).get("payouts",{}).get("trifecta")
-    combo=None; amt=0
-    if isinstance(trif,dict):
-        combo=trif.get("combo"); amt=int(trif.get("amount") or 0)
-    if not combo and isinstance(res,dict):
-        order=res.get("order")
-        if isinstance(order,list) and len(order)>=3:
-            def lane(x): return str(x.get("lane") or x.get("course") or x.get("F") or x.get("number"))
-            try:
-                f,s,t=lane(order[0]),lane(order[1]),lane(order[2])
-                if all([f,s,t]): combo=f"{f}-{s}-{t}"
-            except: pass
-    return combo, amt
+          def actual_trifecta_and_amount(res):
+              trif=(res or {}).get("payouts",{}).get("trifecta")
+              combo=None; amt=0
+              if isinstance(trif,dict):
+                  combo=trif.get("combo"); amt=int(trif.get("amount") or 0)
+              if not combo and isinstance(res,dict):
+                  order=res.get("order")
+                  if isinstance(order,list) and len(order)>=3:
+                      def lane(x): return str(x.get("lane") or x.get("course") or x.get("F") or x.get("number"))
+                      try:
+                          f,s,t=lane(order[0]),lane(order[1]),lane(order[2])
+                          if all([f,s,t]): combo=f"{f}-{s}-{t}"
+                      except: pass
+              return combo, amt
 
-for f in glob.glob(os.path.join(pred_dir, "pred_*.json")):
-    d=json.load(open(f,"r",encoding="utf-8"))
-    races += 1
-    bets = [x["ticket"] for x in d.get("buylist",[])]
-    bets_total += len(bets)
-    stake_total += unit * len(bets)
-    if mode == "eval":
-        res = load_results("public", d["date"], d["pid"], d["race"])
-        hit_combo, pay = actual_trifecta_and_amount(res)
-        if hit_combo in bets:
-            hits += 1
-            payout_total += int(pay)
+          for f in glob.glob(os.path.join(pred_dir, "pred_*.json")):
+              d=json.load(open(f,"r",encoding="utf-8"))
+              races += 1
+              bets = [x["ticket"] for x in d.get("buylist",[])]
+              bets_total += len(bets)
+              stake_total += unit * len(bets)
+              if mode == "eval":
+                  res = load_results("public", d["date"], d["pid"], d["race"])
+                  hit_combo, pay = actual_trifecta_and_amount(res)
+                  if hit_combo in bets:
+                      hits += 1
+                      payout_total += int(pay)
 
-summary = {
-  "date": date,
-  "mode": mode,
-  "races": races,
-  "bets_total": bets_total,
-  "unit": unit,
-  "stake_total": stake_total,
-  "hits": hits,
-  "hit_rate": (hits / races) if races else 0.0,
-  "payout_total": payout_total,
-  "roi": ((payout_total - stake_total) / stake_total) if stake_total else 0.0,
-}
-os.makedirs(os.path.join(outdir,"pass2"), exist_ok=True)
-with open(os.path.join(outdir,"pass2","overall.json"),"w",encoding="utf-8") as fp:
-  json.dump(summary, fp, ensure_ascii=False, indent=2)
-print(">> wrote", os.path.join(outdir,"pass2","overall.json"))
-PY
-
-      - name: Commit results into repo
-        if: always()
-        run: |
-          set -e
-          git config user.name  github-actions
-          git config user.email github-actions@github.com
-          git add ${{ inputs.OUTDIR }}/pass1 ${{ inputs.OUTDIR }}/pass2 TENKAI/predictions/v1/${{ inputs.DATE }} || true
-          git commit -m "sims_integrated: ${{ inputs.MODE }} DATE=${{ inputs.DATE }} PID=${{ inputs.PID }}" || echo "nothing to commit"
-          git push || true
-
-      - name: Upload artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: sims_outputs_${{ inputs.DATE }}_${{ inputs.PID }}
-          path: |
-            ${{ inputs.OUTDIR }}/pass1/**
-            ${{ inputs.OUTDIR }}/pass2/**
-            TENKAI/predictions/v1/${{ inputs.DATE }}/**
+          summary = {
+            "date": date,
+            "mode": mode,
+            "races": races,
+            "bets_total": bets_total,
+            "unit": unit,
+            "stake_total": stake_total,
+            "hits": hits,
+            "hit_rate": (hits / races) if races else 0.0,
+            "payout_total": payout_total,
+            "roi": ((payout_total - stake_total) / stake_total) if stake_total else 0.0,
+          }
+          os.makedirs(os.path.join(outdir,"pass2"), exist_ok=True)
+          with open(os.path.join(outdir,"pass2","overall.json"),"w",encoding="utf-8") as fp:
+            json.dump(summary, fp, ensure_ascii=False, indent=2)
+          print(">> wrote", os.path.join(outdir,"pass2","overall.json"))
+          PY
