@@ -36,7 +36,7 @@ jobs:
         run: |
           set -e
           python -m pip install --upgrade pip
-          pip install numpy pandas joblib
+          pip install numpy pandas joblib scikit-learn
 
       - name: Parse FILTERS & KEYMAN
         id: parse
@@ -49,7 +49,8 @@ jobs:
             local s="$1"; local prefix="$2"
             IFS=',' read -r -a pairs <<< "$s"
             for kv in "${pairs[@]}"; do
-              kv="$(echo "$kv" | xargs)"; [ -z "$kv" ] && continue
+              kv="$(echo "$kv" | xargs)"
+              [ -z "$kv" ] && continue
               if [[ "$kv" == *"="* ]]; then
                 k="$(echo "${kv%%=*}" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9_' '_' | xargs)"
                 v="$(echo "${kv#*=}" | xargs)"
@@ -57,29 +58,31 @@ jobs:
               fi
             done
           }
-          echo "F_REQUIRE_ODDS=false"  >> $GITHUB_OUTPUT
-          echo "F_MIN_EV=0"            >> $GITHUB_OUTPUT
-          echo "F_ODDS_BANDS="         >> $GITHUB_OUTPUT
-          echo "F_ODDS_MIN=0"          >> $GITHUB_OUTPUT
-          echo "F_ODDS_MAX=0"          >> $GITHUB_OUTPUT
-          echo "F_EXCLUDE_FIRST1=false">> $GITHUB_OUTPUT
-          echo "F_ONLY_FIRST1=false"   >> $GITHUB_OUTPUT
-          echo "F_BUY_IN_TOP3=false"   >> $GITHUB_OUTPUT
-          echo "F_BUY_THR=0.7"         >> $GITHUB_OUTPUT
-          echo "K_ENABLE=true"         >> $GITHUB_OUTPUT
-          echo "K_THR=0.7"             >> $GITHUB_OUTPUT
-          echo "K_BOOST=0.15"          >> $GITHUB_OUTPUT
-          echo "K_AGGR=0.0"            >> $GITHUB_OUTPUT
+          # filter defaults
+          echo "F_REQUIRE_ODDS=false" >> $GITHUB_OUTPUT
+          echo "F_MIN_EV=0"          >> $GITHUB_OUTPUT
+          echo "F_ODDS_BANDS="       >> $GITHUB_OUTPUT
+          echo "F_ODDS_MIN=0"        >> $GITHUB_OUTPUT
+          echo "F_ODDS_MAX=0"        >> $GITHUB_OUTPUT
+          echo "F_EXCLUDE_FIRST1=false" >> $GITHUB_OUTPUT
+          echo "F_ONLY_FIRST1=false"    >> $GITHUB_OUTPUT
+          echo "F_BUY_IN_TOP3=false"    >> $GITHUB_OUTPUT
+          echo "F_BUY_THR=0.7"          >> $GITHUB_OUTPUT
+          # keyman defaults
+          echo "K_ENABLE=true"   >> $GITHUB_OUTPUT
+          echo "K_THR=0.7"       >> $GITHUB_OUTPUT
+          echo "K_BOOST=0.15"    >> $GITHUB_OUTPUT
+          echo "K_AGGR=0.0"      >> $GITHUB_OUTPUT
           [ -n "${FILTERS:-}" ] && parse_kvlist "$FILTERS" "F_"
           [ -n "${KEYMAN:-}" ]  && parse_kvlist "$KEYMAN"  "K_"
 
+      # 1) Pass1: キーマン抽出（predict-only）
       - name: Run Pass1 (keyman only)
         env:
           DATE:  ${{ inputs.DATE }}
           PID:   ${{ inputs.PID }}
           SIMS:  ${{ inputs.SIMS }}
           TOPN:  ${{ inputs.TOPN }}
-          UNIT:  ${{ inputs.UNIT }}
           OUTDIR: ${{ inputs.OUTDIR }}
         run: |
           set -euo pipefail
@@ -93,6 +96,7 @@ jobs:
             --predict-only \
             --outdir "$OUTDIR"
 
+      # 2) ML推論（TENKAI）— 出力は TENKAI/predictions/v1/<DATE>/<pid>/<race>.csv
       - name: Run TENKAI prediction
         env:
           DATE: ${{ inputs.DATE }}
@@ -102,13 +106,13 @@ jobs:
           mkdir -p "TENKAI/predictions/v1/$DATE"
           echo "[tenkai] $DATE / $PID"
           python TENKAI/tenkai_predict_integrated.py \
-            --date "$DATE" --pid "$PID" \
-            --out "TENKAI/predictions/v1"
+            --date "$DATE" --pid "$PID"
 
       - name: Show ML CSVs
         run: |
           find TENKAI/predictions/v1/${{ inputs.DATE }} -maxdepth 2 -type f -name '*.csv' | sort || true
 
+      # 3) Pass2: MLを読み込んだ統合SimS
       - name: Run Pass2 (SimS integrated with ML)
         env:
           DATE:  ${{ inputs.DATE }}
@@ -116,8 +120,8 @@ jobs:
           MODE:  ${{ inputs.MODE }}
           SIMS:  ${{ inputs.SIMS }}
           TOPN:  ${{ inputs.TOPN }}
-          UNIT:  ${{ inputs.UNIT }}
           OUTDIR: ${{ inputs.OUTDIR }}
+          # parsed filters
           F_REQUIRE_ODDS:   ${{ steps.parse.outputs.F_REQUIRE_ODDS }}
           F_MIN_EV:         ${{ steps.parse.outputs.F_MIN_EV }}
           F_ODDS_BANDS:     ${{ steps.parse.outputs.F_ODDS_BANDS }}
@@ -127,6 +131,7 @@ jobs:
           F_ONLY_FIRST1:    ${{ steps.parse.outputs.F_ONLY_FIRST1 }}
           F_BUY_IN_TOP3:    ${{ steps.parse.outputs.F_BUY_IN_TOP3 }}
           F_BUY_THR:        ${{ steps.parse.outputs.F_BUY_THR }}
+          # parsed keyman
           K_ENABLE: ${{ steps.parse.outputs.K_ENABLE }}
           K_THR:    ${{ steps.parse.outputs.K_THR }}
           K_BOOST:  ${{ steps.parse.outputs.K_BOOST }}
@@ -142,6 +147,7 @@ jobs:
             --ml-root TENKAI/predictions/v1 \
             --outdir $OUTDIR"
 
+          # optional filters
           [ "${F_EXCLUDE_FIRST1,,}" = "true" ] && ARGS_COMMON="$ARGS_COMMON --exclude-first1"
           [ "${F_ONLY_FIRST1,,}"    = "true" ] && ARGS_COMMON="$ARGS_COMMON --only-first1"
           [ "${F_BUY_IN_TOP3,,}"    = "true" ] && ARGS_COMMON="$ARGS_COMMON --buy-if-keyman-in-top3 --buy-keyman-threshold $F_BUY_THR"
@@ -155,6 +161,7 @@ jobs:
             [ -n "${F_ODDS_MAX}" ]   && [ "$F_ODDS_MAX" != "0" ] && ARGS_FILTER="$ARGS_FILTER --odds-max $F_ODDS_MAX"
             [ "${F_REQUIRE_ODDS,,}" = "true" ] && ARGS_FILTER="$ARGS_FILTER --require-odds"
             [ -n "${F_MIN_EV}" ] && [ "$F_MIN_EV" != "0" ] && ARGS_FILTER="$ARGS_FILTER --min-ev $F_MIN_EV"
+
             eval python scripts/sims/sims_integrated.py $ARGS_COMMON \
               --odds-base public/odds/v1 $ARGS_FILTER
           fi
