@@ -1,4 +1,4 @@
-# sims_integrated.py — Pass2: ML×Keyman を反映して SimS 再シム（predict/eval 両対応）
+# sims_integrated.py — Pass2: ML×Keyman を反映して SimS 再シム（predict/eval 両対応, eval集計出力付き）
 import os, json, math, argparse, shutil, csv
 from collections import Counter
 import numpy as np
@@ -169,7 +169,6 @@ def load_ml_row(path_csv):
     with open(path_csv, newline="", encoding="utf-8") as f:
         for r in csv.DictReader(f):
             rows.append(r)
-    # lane -> dict(prob_*)
     out={}
     for r in rows:
         lane=int(r["lane"])
@@ -197,7 +196,7 @@ def apply_ml_adjustments(inp, ml_probs, st_gain=0.30, A_gain=0.20, consistency=0
 
         # ST μ 前倒し（最大 0.003 s）
         mu0 = inp["ST_model"][str(l)]["mu"]
-        dmu = -min(Params.ml_max_mu_advance, st_gain * 0.010 * p_att)  # 目安 0.0〜0.003
+        dmu = -min(Params.ml_max_mu_advance, st_gain * 0.010 * p_att)
         inp["ST_model"][str(l)]["mu"] = max(0.05, mu0 + dmu)
 
         # σ縮小（控えめ）
@@ -209,7 +208,6 @@ def apply_ml_adjustments(inp, ml_probs, st_gain=0.30, A_gain=0.20, consistency=0
         scale = max(-Params.ml_max_A_scale, min(Params.ml_max_A_scale, A_gain*(p_att - p_def)))
         inp["A"][l]  *= (1.0 + scale)
         inp["Ap"][l] *= (1.0 + scale)
-
     return inp
 
 # ===== 1レース・シミュ（再利用）=====
@@ -302,6 +300,11 @@ def generate_tickets(tri, ex2, th3, topn=18, strategy="trifecta_topN", k=2, m=4,
     top=sorted(tri.items(), key=lambda kv: kv[1], reverse=True)[:topn]
     return [(k_,p_) for (k_,p_) in top if ((not only_first1) or k_[0]==1) and ((not exclude_first1) or k_[0]!=1)]
 
+def _filter_by_keyman(tickets, keyman, thr):
+    km=(keyman or {}).get("KEYMAN_RANK",{}) or {}
+    if not km: return tickets
+    return [(k,p) for (k,p) in tickets if any(float(km.get(str(l),0.0))>=thr for l in k)]
+
 def load_odds(odds_base,date,pid,race):
     try:
         race=race if race.upper().endswith("R") else f"{race}R"
@@ -336,13 +339,10 @@ def _actual_trifecta_and_amount(res_json: dict):
     return combo, amt
 
 def load_results(base,date,pid,race):
-    # results/v1/<date>/<pid>/<race>.json  or  results/v1/<date>/<pid>/summary.json#<race>
     root_v1=os.path.join(base,"results","v1"); root=root_v1 if os.path.isdir(root_v1) else os.path.join(base,"results")
     dirp=os.path.join(root,date,pid)
-    # per-race
     cand=os.path.join(dirp, f"{race if race.endswith('R') else race+'R'}.json")
     if os.path.isfile(cand): return json.load(open(cand,"r",encoding="utf-8"))
-    # summary
     for f in os.listdir(dirp):
         if not f.lower().endswith(".json"): continue
         data=json.load(open(os.path.join(dirp,f),"r",encoding="utf-8"))
@@ -380,6 +380,7 @@ def main():
     ap.add_argument("--exclude-first1",action="store_true")
     ap.add_argument("--only-first1",action="store_true")
     ap.add_argument("--limit",type=int,default=0)
+    ap.add_argument("--unit",type=int,default=100)  # ★追加: 1点あたり
     ap.add_argument("--outdir",default="./SimS_v1.0_eval")
     ap.add_argument("--predict-only",action="store_true")
     # ML
@@ -391,6 +392,8 @@ def main():
     ap.add_argument("--keyman-threshold",type=float,default=0.70)
     ap.add_argument("--keyman-boost",type=float,default=0.15)
     ap.add_argument("--keyman-aggr",type=float,default=0.25)
+    ap.add_argument("--buy-if-keyman-in-top3",action="store_true")          # ★追加
+    ap.add_argument("--buy-keyman-threshold",type=float,default=0.70)       # ★追加
     # odds/results
     ap.add_argument("--odds-base",default="./public/odds/v1")
     ap.add_argument("--min-ev",type=float,default=0.0)
@@ -447,7 +450,13 @@ def main():
     pred_dir=os.path.join(pass2_dir,"predict")
     if os.path.exists(pred_dir): shutil.rmtree(pred_dir)
     os.makedirs(pred_dir, exist_ok=True)
+
     rows_summary=[]
+    # ★eval 集計用
+    rows_eval=[]
+    stake_sum=0
+    pay_sum=0
+    bets_total=0
 
     for (date,pid,race) in keys:
         # 入力
@@ -457,7 +466,6 @@ def main():
         # ML 読み込み（無ければ素通し）
         ml_csv=os.path.join(args.ml_root, date, pid, f"{_norm_race(race)}.csv")
         if not os.path.isfile(ml_csv):
-            # 代替： race が "8R" などの場合、"8R" で保存していると仮定
             ml_csv=os.path.join(args.ml_root, date, pid, f"{race if race.endswith('R') else race+'R'}.csv")
         ml_probs={}
         if os.path.isfile(ml_csv):
@@ -491,6 +499,9 @@ def main():
         tri, ex2, th3 = simulate_one(inp, sims=args.sims, boost_map=boost_map, aggr_map=aggr_map)
         tickets = generate_tickets(tri, ex2, th3, topn=args.topn, strategy="trifecta_topN",
                                    k=args.k, m=args.m, exclude_first1=args.exclude_first1, only_first1=args.only_first1)
+        # ★キーマンでの buy フィルタ（任意）
+        if args.buy_if_keyman_in_top3:
+            tickets = _filter_by_keyman(tickets, kmjson, args.buy_keyman_threshold)
 
         # オッズ/EV フィルタ（predict でも要求されれば適用）
         odds_map={}
@@ -523,22 +534,70 @@ def main():
         for i,t in enumerate(out_list,1):
             rows_summary.append({"date":date,"pid":pid,"race":race,"rank":i,"ticket":t["ticket"],"score":t["score"],"odds":t["odds"],"ev":t["ev"]})
 
-        # eval のみ：的中/ROI
+        # ===== eval のみ：的中 / 収支を per-race に保存 =====
         if not args.predict_only:
             d_res = load_results(args.base, date, pid, race)
             hit_combo, pay = _actual_trifecta_and_amount(d_res)
             bets=[t["ticket"] for t in out_list]
-            hit = 1 if hit_combo in bets else 0
-            # 1点100円固定（unit はワークフローで外から渡す前提なら追加してOK）
-            # ここでは JSON 側は predict 中心なので集計はワークフローで揃える想定
-            if args.log_level=="debug":
-                print(f"[debug] {date}/{pid}/{race}: bets={len(bets)}, hit={hit}, hit_combo={hit_combo}, payout={pay}")
+            stake = args.unit * len(bets)
+            payout = pay if (hit_combo in bets) else 0
+            hit = 1 if payout>0 else 0
+            roi = ((payout-stake)/stake) if stake>0 else 0.0
 
-    # summary CSV
+            rows_eval.append({
+                "date":date, "pid":pid, "race":race,
+                "bets":len(bets), "stake":stake, "payout":payout,
+                "hit":hit, "hit_combo":hit_combo
+            })
+            stake_sum += stake
+            pay_sum += payout
+            bets_total += len(bets)
+
+            if args.log_level=="debug":
+                print(f"[debug] {date}/{pid}/{race}: bets={len(bets)}, stake={stake}, hit={hit}, hit_combo={hit_combo}, payout={payout}, roi={roi:.4f}")
+
+    # summary CSV（予測一覧）
     pd.DataFrame(rows_summary).to_csv(os.path.join(pred_dir,"predictions_summary.csv"), index=False, encoding="utf-8")
     print(f"[predict/pass2] {len(keys)} races -> {pred_dir}")
+
+    # ===== eval 集計の保存 =====
     if not args.predict_only:
-        print("[eval] 集計はワークフロー側で per_race/overall にまとめる設計（必要なら追加実装可）")
+        per_path = os.path.join(pass2_dir, "per_race_results.csv")
+        pd.DataFrame(rows_eval).to_csv(per_path, index=False, encoding="utf-8")
+
+        races = len(rows_eval)
+        hit_rate = (sum(r["hit"] for r in rows_eval)/races) if races>0 else 0.0
+        overall = {
+            "engine": "SimS integrated (E1+ML)",
+            "pass": "pass2",
+            "races": int(races),
+            "bets_total": int(bets_total),
+            "stake_total": int(stake_sum),
+            "payout_total": int(pay_sum),
+            "hit_rate": float(hit_rate),
+            "roi": float((pay_sum-stake_sum)/stake_sum) if stake_sum>0 else 0.0,
+            "sims_per_race": int(args.sims),
+            "topn": int(args.topn),
+            "unit": int(args.unit),
+            "exclude_first1": bool(args.exclude_first1),
+            "only_first1": bool(args.only_first1),
+            "min_ev": float(args.min_ev),
+            "require_odds": bool(args.require_odds),
+            "odds_bands": args.odds_bands or "",
+            "odds_min": float(args.odds_min),
+            "odds_max": float(args.odds_max),
+            "keyman_threshold": float(args.keyman_threshold),
+            "keyman_boost": float(args.keyman_boost),
+            "keyman_aggr": float(args.keyman_aggr),
+            "buy_if_keyman_in_top3": bool(args.buy_if_keyman_in_top3),
+            "buy_keyman_threshold": float(args.buy_keyman_threshold),
+            "ml_coeffs": {"st_gain":args.ml_st_gain,"A_gain":args.ml_A_gain,"consistency":args.ml_consistency},
+        }
+        with open(os.path.join(pass2_dir, "overall.json"), "w", encoding="utf-8") as f:
+            json.dump(overall, f, ensure_ascii=False, indent=2)
+
+        print("=== OVERALL (pass2) ===")
+        print(json.dumps(overall, ensure_ascii=False, indent=2))
 
 if __name__=="__main__":
     main()
