@@ -39,6 +39,8 @@ def _rank(values: List[Optional[float]]) -> List[int]:
         r += 1
     return ranks
 
+KIMARITE_KEYS = ["逃げ","差し","まくり","まくり差し","抜き","恵まれ"]
+
 def build_c_features(date: str, pid: str, race: str = ""):
     base_dir = os.path.join(BASE, date, pid)
     targets = [race] if race else [f"{i}R" for i in range(1, 12 + 1)]
@@ -78,6 +80,8 @@ def build_c_features(date: str, pid: str, race: str = ""):
             ec = _safe_get(e, "stats", "entryCourse", default={}) or {}
             ss = _safe_get(e, "stats", "entryCourse", "selfSummary", default={}) or {}
             ms = _safe_get(e, "stats", "entryCourse", "matrixSelf", default={}) or {}
+            winK = _safe_get(e, "stats", "entryCourse", "winKimariteSelf", default={}) or {}
+            loseK = _safe_get(e, "stats", "entryCourse", "loseKimarite", default={}) or {}
 
             prefix = f"L{lane}_"
 
@@ -98,11 +102,15 @@ def build_c_features(date: str, pid: str, race: str = ""):
                 "ms_winRate": _to_float(ms.get("winRate")),
                 "ms_top2Rate": _to_float(ms.get("top2Rate")),
                 "ms_top3Rate": _to_float(ms.get("top3Rate")),
-
-                # 勝敗近似（firstCount を win、負けは loseKimarite の「まくり」を参考値）
-                "win_k": ss.get("firstCount", 0),
-                "lose_k": (_safe_get(e, "stats", "entryCourse", "loseKimarite", default={}) or {}).get("まくり", 0),
             }
+
+            # 決まり手別 勝ち/負けカウント（存在しないキーは 0）
+            for k in KIMARITE_KEYS:
+                feat[f"winK_{k}"]  = int(winK.get(k, 0) or 0)
+                feat[f"loseK_{k}"] = int(loseK.get(k, 0) or 0)
+            # 合計
+            feat["winK_total"]  = sum(feat[f"winK_{k}"]  for k in KIMARITE_KEYS)
+            feat["loseK_total"] = sum(feat[f"loseK_{k}"] for k in KIMARITE_KEYS)
 
             # 差分系（基準は経験的中央値）
             feat["d_avgST_rc"] = (feat["avgST_rc"] if feat["avgST_rc"] is not None else 0.16) - 0.16
