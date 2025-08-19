@@ -7,15 +7,11 @@ on:
       PID:    { description: "場コード 01..24（カンマ可）", required: true, type: string }
       MODE:   { description: "predict or eval", required: true, default: "predict", type: choice, options: [predict, eval] }
       SIMS:   { description: "試行回数/レース", required: true, default: "600", type: string }
-      TOPN:   { description: "trifecta_topN", required: true, default: "18", type: string }
+      TOPN:   { description: "三連単 TOPN", required: true, default: "18", type: string }
       UNIT:   { description: "1点あたり(円)", required: true, default: "100", type: string }
-      REQUIRE_ODDS: { description: "オッズ必須（eval時）", required: false, default: "false", type: choice, options: [false, true] }
-      KEYMAN_ENABLE: { description: "pass2有効", required: false, default: "true", type: choice, options: [true, false] }
-      FILTERS:
-        description: "フィルタまとめ入力 (例: MIN_EV=1.5,ODDS_BANDS=01-19,KEYMAN_THR=0.7,KEYMAN_BOOST=0.15,KEYMAN_AGGR=0.3)"
-        required: false
-        default: ""
-        type: string
+      FILTERS: { description: "例: require_odds=true,min_ev=1.2,odds_bands=01-09,10-19", required: false, default: "", type: string }
+      KEYMAN:  { description: "例: enable=true,thr=0.7,boost=0.15,aggr=0.0,buy_in_top3=false,buy_thr=0.7", required: false, default: "enable=true,thr=0.7,boost=0.15,aggr=0.0,buy_in_top3=false,buy_thr=0.7", type: string }
+      OUTDIR:  { description: "出力ディレクトリ", required: false, default: "scripts/sims", type: string }
 
 permissions:
   contents: write
@@ -41,7 +37,51 @@ jobs:
           python -m pip install --upgrade pip
           pip install numpy pandas
 
-      # 1) Pass1（キーマン抽出だけ）
+      - name: Parse FILTERS & KEYMAN
+        id: parse
+        env:
+          FILTERS: ${{ inputs.FILTERS }}
+          KEYMAN:  ${{ inputs.KEYMAN }}
+        run: |
+          set -euo pipefail
+          parse_kvlist () {
+            # usage: parse_kvlist "a=1,b=2,c=3" PREFIX
+            local s="$1"; local prefix="$2"
+            # split by comma, then by '='
+            IFS=',' read -r -a pairs <<< "$s"
+            for kv in "${pairs[@]}"; do
+              kv="$(echo "$kv" | xargs)"
+              [ -z "$kv" ] && continue
+              if [[ "$kv" == *"="* ]]; then
+                k="$(echo "${kv%%=*}" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9_' '_' | xargs)"
+                v="$(echo "${kv#*=}" | xargs)"
+                echo "$prefix$k=$v" >> $GITHUB_OUTPUT
+              fi
+            done
+          }
+
+          # Defaults for filters (can be overridden)
+          echo "F_REQUIRE_ODDS=false" >> $GITHUB_OUTPUT
+          echo "F_MIN_EV=0" >> $GITHUB_OUTPUT
+          echo "F_ODDS_BANDS=" >> $GITHUB_OUTPUT
+          echo "F_ODDS_MIN=0" >> $GITHUB_OUTPUT
+          echo "F_ODDS_MAX=0" >> $GITHUB_OUTPUT
+          echo "F_EXCLUDE_FIRST1=false" >> $GITHUB_OUTPUT
+          echo "F_ONLY_FIRST1=false" >> $GITHUB_OUTPUT
+          echo "F_BUY_IN_TOP3=false" >> $GITHUB_OUTPUT
+          echo "F_BUY_THR=0.7" >> $GITHUB_OUTPUT
+
+          # Defaults for keyman pack
+          echo "K_ENABLE=true" >> $GITHUB_OUTPUT
+          echo "K_THR=0.7" >> $GITHUB_OUTPUT
+          echo "K_BOOST=0.15" >> $GITHUB_OUTPUT
+          echo "K_AGGR=0.0" >> $GITHUB_OUTPUT
+
+          # Parse user-provided FILTERS and KEYMAN
+          [ -n "${FILTERS:-}" ] && parse_kvlist "$FILTERS" "F_"
+          [ -n "${KEYMAN:-}" ] && parse_kvlist "$KEYMAN"  "K_"
+
+      # 1) Pass1: キーマン抽出（predict-onlyで OK）
       - name: Run Pass1 (keyman only)
         env:
           DATE:  ${{ inputs.DATE }}
@@ -49,6 +89,7 @@ jobs:
           SIMS:  ${{ inputs.SIMS }}
           TOPN:  ${{ inputs.TOPN }}
           UNIT:  ${{ inputs.UNIT }}
+          OUTDIR: ${{ inputs.OUTDIR }}
         run: |
           set -euo pipefail
           echo "[pass1] DATE=$DATE PID=$PID"
@@ -57,30 +98,28 @@ jobs:
             --dates "$DATE" \
             --pids "$PID" \
             --sims "$SIMS" \
-            --topn "$TOPN" \
+            --strategy trifecta_topN --topn "$TOPN" \
             --predict-only \
-            --outdir scripts/sims
+            --outdir "$OUTDIR"
 
-      # 2) ML推論（TENKAI）
-      - name: Run TENKAI prediction (generate CSVs)
+      # 2) ML推論（TENKAI）— 直読みでSimSが拾う前提のCSV生成
+      - name: Run TENKAI prediction
         env:
           DATE: ${{ inputs.DATE }}
           PID:  ${{ inputs.PID }}
         run: |
           set -euo pipefail
-          OUT_DIR="TENKAI/predictions/v1/$DATE"
-          mkdir -p "$OUT_DIR"
-          echo "[tenkai] generate predictions for $DATE / $PID"
+          mkdir -p "TENKAI/predictions/v1/$DATE"
+          echo "[tenkai] $DATE / $PID"
           python TENKAI/tenkai_predict_integrated.py \
             --date "$DATE" --pids "$PID" \
             --out "TENKAI/predictions/v1"
 
-      - name: Show ML files
+      - name: Show ML CSVs
         run: |
-          echo "ML outputs:"
-          find TENKAI/predictions/v1/${{ inputs.DATE }} -maxdepth 2 -type f -name '*.csv' | sort
+          find TENKAI/predictions/v1/${{ inputs.DATE }} -maxdepth 2 -type f -name '*.csv' | sort || true
 
-      # 3) Pass2（ML統合）
+      # 3) Pass2: MLを読み込んだ統合SimS
       - name: Run Pass2 (SimS integrated with ML)
         env:
           DATE:  ${{ inputs.DATE }}
@@ -89,24 +128,52 @@ jobs:
           SIMS:  ${{ inputs.SIMS }}
           TOPN:  ${{ inputs.TOPN }}
           UNIT:  ${{ inputs.UNIT }}
-          REQUIRE_ODDS: ${{ inputs.REQUIRE_ODDS }}
-          KEYMAN_ENABLE: ${{ inputs.KEYMAN_ENABLE }}
-          FILTERS: ${{ inputs.FILTERS }}
+          OUTDIR: ${{ inputs.OUTDIR }}
+          # parsed filters
+          F_REQUIRE_ODDS: ${{ steps.parse.outputs.F_REQUIRE_ODDS }}
+          F_MIN_EV:       ${{ steps.parse.outputs.F_MIN_EV }}
+          F_ODDS_BANDS:   ${{ steps.parse.outputs.F_ODDS_BANDS }}
+          F_ODDS_MIN:     ${{ steps.parse.outputs.F_ODDS_MIN }}
+          F_ODDS_MAX:     ${{ steps.parse.outputs.F_ODDS_MAX }}
+          F_EXCLUDE_FIRST1: ${{ steps.parse.outputs.F_EXCLUDE_FIRST1 }}
+          F_ONLY_FIRST1:    ${{ steps.parse.outputs.F_ONLY_FIRST1 }}
+          F_BUY_IN_TOP3:    ${{ steps.parse.outputs.F_BUY_IN_TOP3 }}
+          F_BUY_THR:        ${{ steps.parse.outputs.F_BUY_THR }}
+          # parsed keyman
+          K_ENABLE: ${{ steps.parse.outputs.K_ENABLE }}
+          K_THR:    ${{ steps.parse.outputs.K_THR }}
+          K_BOOST:  ${{ steps.parse.outputs.K_BOOST }}
+          K_AGGR:   ${{ steps.parse.outputs.K_AGGR }}
         run: |
           set -euo pipefail
           echo "[pass2] MODE=$MODE  DATE=$DATE PID=$PID"
+
           ARGS_COMMON="--base public --dates $DATE --pids $PID \
-            --sims $SIMS --topn $TOPN \
-            --keyman-enable $KEYMAN_ENABLE \
+            --sims $SIMS --strategy trifecta_topN --topn $TOPN \
+            --keyman-enable $K_ENABLE --keyman-threshold $K_THR \
+            --keyman-boost $K_BOOST --keyman-aggr $K_AGGR \
             --ml-root TENKAI/predictions/v1 \
-            --filters \"$FILTERS\""
+            --outdir $OUTDIR"
+
+          # optional filters
+          [ "${F_EXCLUDE_FIRST1,,}" = "true" ] && ARGS_COMMON="$ARGS_COMMON --exclude-first1"
+          [ "${F_ONLY_FIRST1,,}"    = "true" ] && ARGS_COMMON="$ARGS_COMMON --only-first1"
+          [ "${F_BUY_IN_TOP3,,}"    = "true" ] && ARGS_COMMON="$ARGS_COMMON --buy-if-keyman-in-top3 --buy-keyman-threshold $F_BUY_THR"
+
           if [ "$MODE" = "predict" ]; then
-            python scripts/sims/sims_integrated.py $ARGS_COMMON --predict-only --outdir scripts/sims
+            python scripts/sims/sims_integrated.py $ARGS_COMMON --predict-only
           else
-            python scripts/sims/sims_integrated.py $ARGS_COMMON \
-              --outdir scripts/sims \
-              --odds-base public/odds/v1 \
-              --require-odds $REQUIRE_ODDS
+            ARGS_FILTER=""
+            # odds gating
+            [ -n "${F_ODDS_BANDS}" ] && ARGS_FILTER="$ARGS_FILTER --odds-bands \"$F_ODDS_BANDS\""
+            [ -n "${F_ODDS_MIN}" ]   && [ "$F_ODDS_MIN" != "0" ] && ARGS_FILTER="$ARGS_FILTER --odds-min $F_ODDS_MIN"
+            [ -n "${F_ODDS_MAX}" ]   && [ "$F_ODDS_MAX" != "0" ] && ARGS_FILTER="$ARGS_FILTER --odds-max $F_ODDS_MAX"
+            [ "${F_REQUIRE_ODDS,,}" = "true" ] && ARGS_FILTER="$ARGS_FILTER --require-odds"
+            [ -n "${F_MIN_EV}" ] && [ "$F_MIN_EV" != "0" ] && ARGS_FILTER="$ARGS_FILTER --min-ev $F_MIN_EV"
+
+            # shellsafe eval to keep quotes in bands
+            eval python scripts/sims/sims_integrated.py $ARGS_COMMON \
+              --odds-base public/odds/v1 $ARGS_FILTER
           fi
 
       - name: Commit results into repo
@@ -115,10 +182,9 @@ jobs:
           set -e
           git config user.name  github-actions
           git config user.email github-actions@github.com
-          git add scripts/sims/pass1 scripts/sims/pass2 TENKAI/predictions/v1/${{ inputs.DATE }}
-          git commit -m "sims_integrated: ${{
-            inputs.MODE }} DATE=${{ inputs.DATE }} PID=${{ inputs.PID }}" || echo "nothing to commit"
-          git push
+          git add ${{ inputs.OUTDIR }}/pass1 ${{ inputs.OUTDIR }}/pass2 TENKAI/predictions/v1/${{ inputs.DATE }} || true
+          git commit -m "sims_integrated: ${{ inputs.MODE }} DATE=${{ inputs.DATE }} PID=${{ inputs.PID }}" || echo "nothing to commit"
+          git push || true
 
       - name: Upload artifacts
         if: always()
@@ -126,6 +192,6 @@ jobs:
         with:
           name: sims_outputs_${{ inputs.DATE }}_${{ inputs.PID }}
           path: |
-            scripts/sims/pass1/**
-            scripts/sims/pass2/**
+            ${{ inputs.OUTDIR }}/pass1/**
+            ${{ inputs.OUTDIR }}/pass2/**
             TENKAI/predictions/v1/${{ inputs.DATE }}/**
