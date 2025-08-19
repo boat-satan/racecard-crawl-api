@@ -8,7 +8,9 @@ on:
         required: true
       pid:
         description: '場コード pid (例: 02 / ALL)'
-        required: true
+        required: false
+        default: 'ALL' 
+        
       race:
         description: 'レース (例: 1R) 空なら全R'
         required: false
