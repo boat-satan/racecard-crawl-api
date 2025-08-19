@@ -3,52 +3,15 @@ name: sims_integrated
 on:
   workflow_dispatch:
     inputs:
-      DATE:
-        description: "YYYYMMDD"
-        required: true
-        type: string
-      PID:
-        description: "場コード 01..24（カンマ可）"
-        required: true
-        type: string
-      MODE:
-        description: "predict or eval"
-        required: true
-        default: "predict"
-        type: choice
-        options:
-          - predict
-          - eval
-      SIMS:
-        description: "試行回数/レース"
-        required: true
-        default: "600"
-        type: string
-      TOPN:
-        description: "三連単 TOPN"
-        required: true
-        default: "18"
-        type: string
-      UNIT:
-        description: "1点あたり(円)"
-        required: true
-        default: "100"
-        type: string
-      FILTERS:
-        description: "例: require_odds=true,min_ev=1.2,odds_bands=01-09,10-19,exclude_first1=true,only_first1=false,buy_in_top3=true,buy_thr=0.7"
-        required: false
-        default: ""
-        type: string
-      KEYMAN:
-        description: "例: enable=true,thr=0.7,boost=0.15,aggr=0.0"
-        required: false
-        default: "enable=true,thr=0.7,boost=0.15,aggr=0.0"
-        type: string
-      OUTDIR:
-        description: "出力ディレクトリ"
-        required: false
-        default: "scripts/sims"
-        type: string
+      DATE:   { description: "YYYYMMDD", required: true,  type: string }
+      PID:    { description: "場コード 01..24（カンマ可）", required: true, type: string }
+      MODE:   { description: "predict or eval", required: true, default: "predict", type: choice, options: [predict, eval] }
+      SIMS:   { description: "試行回数/レース", required: true, default: "600", type: string }
+      TOPN:   { description: "三連単 TOPN", required: true, default: "18", type: string }
+      UNIT:   { description: "1点あたり(円)", required: true, default: "100", type: string }
+      FILTERS: { description: "例: require_odds=true,min_ev=1.2,odds_bands=01-09,10-19", required: false, default: "", type: string }
+      KEYMAN:  { description: "例: enable=true,thr=0.7,boost=0.15,aggr=0.0,buy_in_top3=false,buy_thr=0.7", required: false, default: "enable=true,thr=0.7,boost=0.15,aggr=0.0,buy_in_top3=false,buy_thr=0.7", type: string }
+      OUTDIR:  { description: "出力ディレクトリ", required: false, default: "scripts/sims", type: string }
 
 permissions:
   contents: write
@@ -82,9 +45,7 @@ jobs:
           KEYMAN:  ${{ inputs.KEYMAN }}
         run: |
           set -euo pipefail
-
           parse_kvlist () {
-            # $1: "a=1,b=2", $2: prefix ("F_" / "K_")
             local s="$1"; local prefix="$2"
             IFS=',' read -r -a pairs <<< "$s"
             for kv in "${pairs[@]}"; do
@@ -93,32 +54,25 @@ jobs:
               if [[ "$kv" == *"="* ]]; then
                 k="$(echo "${kv%%=*}" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9_' '_' | xargs)"
                 v="$(echo "${kv#*=}" | xargs)"
-                echo "$prefix$k=$v" >> "$GITHUB_OUTPUT"
+                echo "$prefix$k=$v" >> $GITHUB_OUTPUT
               fi
             done
           }
-
-          # FILTERS defaults
-          {
-            echo "F_REQUIRE_ODDS=false"
-            echo "F_MIN_EV=0"
-            echo "F_ODDS_BANDS="
-            echo "F_ODDS_MIN=0"
-            echo "F_ODDS_MAX=0"
-            echo "F_EXCLUDE_FIRST1=false"
-            echo "F_ONLY_FIRST1=false"
-            echo "F_BUY_IN_TOP3=false"
-            echo "F_BUY_THR=0.7"
-          } >> "$GITHUB_OUTPUT"
-
-          # KEYMAN defaults
-          {
-            echo "K_ENABLE=true"
-            echo "K_THR=0.7"
-            echo "K_BOOST=0.15"
-            echo "K_AGGR=0.0"
-          } >> "$GITHUB_OUTPUT"
-
+          # filter defaults
+          echo "F_REQUIRE_ODDS=false" >> $GITHUB_OUTPUT
+          echo "F_MIN_EV=0"          >> $GITHUB_OUTPUT
+          echo "F_ODDS_BANDS="       >> $GITHUB_OUTPUT
+          echo "F_ODDS_MIN=0"        >> $GITHUB_OUTPUT
+          echo "F_ODDS_MAX=0"        >> $GITHUB_OUTPUT
+          echo "F_EXCLUDE_FIRST1=false" >> $GITHUB_OUTPUT
+          echo "F_ONLY_FIRST1=false"    >> $GITHUB_OUTPUT
+          echo "F_BUY_IN_TOP3=false"    >> $GITHUB_OUTPUT
+          echo "F_BUY_THR=0.7"          >> $GITHUB_OUTPUT
+          # keyman defaults
+          echo "K_ENABLE=true"   >> $GITHUB_OUTPUT
+          echo "K_THR=0.7"       >> $GITHUB_OUTPUT
+          echo "K_BOOST=0.15"    >> $GITHUB_OUTPUT
+          echo "K_AGGR=0.0"      >> $GITHUB_OUTPUT
           [ -n "${FILTERS:-}" ] && parse_kvlist "$FILTERS" "F_"
           [ -n "${KEYMAN:-}" ]  && parse_kvlist "$KEYMAN"  "K_"
 
@@ -142,7 +96,7 @@ jobs:
             --predict-only \
             --outdir "$OUTDIR"
 
-      # 2) ML推論（TENKAI）— 出力: TENKAI/predictions/v1/<DATE>/<pid>/<race>.csv
+      # 2) ML推論（TENKAI）
       - name: Run TENKAI prediction
         env:
           DATE: ${{ inputs.DATE }}
@@ -158,7 +112,7 @@ jobs:
         run: |
           find TENKAI/predictions/v1/${{ inputs.DATE }} -maxdepth 2 -type f -name '*.csv' | sort || true
 
-      # 3) Pass2: ML を読み込んだ統合 SimS
+      # 3) Pass2: MLを読み込んだ統合SimS
       - name: Run Pass2 (SimS integrated with ML)
         env:
           DATE:  ${{ inputs.DATE }}
@@ -186,7 +140,7 @@ jobs:
           set -euo pipefail
           echo "[pass2] MODE=$MODE DATE=$DATE PID=$PID"
 
-          # KEYMAN disable 時はしきい値を上げ、boost/aggr=0 にして実質無効化
+          # KEYMAN を無効化する指定が来たら実質無効にする
           if [[ "${K_ENABLE,,}" == "false" ]]; then
             K_THR=9.9
             K_BOOST=0
@@ -194,15 +148,15 @@ jobs:
           fi
 
           ARGS_COMMON="--base public --dates $DATE --pids $PID \
-            --sims $SIMS --strategy trifecta_topN --topn $TOPN \
+            --sims $SIMS --topn $TOPN \
             --keyman-threshold $K_THR --keyman-boost $K_BOOST --keyman-aggr $K_AGGR \
             --ml-root TENKAI/predictions/v1 \
             --outdir $OUTDIR"
 
           # optional switches
-          if [[ "${F_EXCLUDE_FIRST1,,}" == "true" ]]; then ARGS_COMMON="$ARGS_COMMON --exclude-first1"; fi
-          if [[ "${F_ONLY_FIRST1,,}"    == "true" ]]; then ARGS_COMMON="$ARGS_COMMON --only-first1"; fi
-          if [[ "${F_BUY_IN_TOP3,,}"    == "true" ]]; then ARGS_COMMON="$ARGS_COMMON --buy-if-keyman-in-top3 --buy-keyman-threshold $F_BUY_THR"; fi
+          [[ "${F_EXCLUDE_FIRST1,,}" == "true" ]] && ARGS_COMMON="$ARGS_COMMON --exclude-first1"
+          [[ "${F_ONLY_FIRST1,,}"    == "true" ]] && ARGS_COMMON="$ARGS_COMMON --only-first1"
+          [[ "${F_BUY_IN_TOP3,,}"    == "true" ]] && ARGS_COMMON="$ARGS_COMMON --buy-if-keyman-in-top3 --buy-keyman-threshold $F_BUY_THR"
 
           if [[ "$MODE" == "predict" ]]; then
             python scripts/sims/sims_integrated.py $ARGS_COMMON --predict-only
@@ -214,7 +168,7 @@ jobs:
             [[ "${F_REQUIRE_ODDS,,}" == "true" ]] && ARGS_FILTER="$ARGS_FILTER --require-odds"
             [[ -n "${F_MIN_EV}" && "$F_MIN_EV" != "0" ]] && ARGS_FILTER="$ARGS_FILTER --min-ev $F_MIN_EV"
 
-            # keep quotes in bands
+            # bands のクォート保持のため eval
             eval python scripts/sims/sims_integrated.py $ARGS_COMMON --odds-base public/odds/v1 $ARGS_FILTER
           fi
 
