@@ -1,0 +1,117 @@
+{
+  "date": "20250818",
+  "pid": "14",
+  "race": "1R",
+  "source": {
+    "result": "https://www.boatrace.jp/owpc/pc/race/raceresult?rno=1&jcd=14&hd=20250818"
+  },
+  "generatedAt": "2025-08-19T12:31:50.385Z",
+  "order": [
+    {
+      "pos": 1,
+      "lane": 1,
+      "racerId": "4484",
+      "name": "稲生 夏季",
+      "time": "1'50\"2"
+    },
+    {
+      "pos": 2,
+      "lane": 6,
+      "racerId": "5357",
+      "name": "田中 瀬里奈",
+      "time": "1'50\"7"
+    },
+    {
+      "pos": 3,
+      "lane": 2,
+      "racerId": "5251",
+      "name": "沼田 七華",
+      "time": "1'53\"0"
+    },
+    {
+      "pos": 4,
+      "lane": 5,
+      "racerId": "4408",
+      "name": "仁科 さやか",
+      "time": "1'55\"7"
+    }
+  ],
+  "start": [
+    {
+      "lane": 1,
+      "st": 0.06
+    },
+    {
+      "lane": 2,
+      "st": 0.03
+    },
+    {
+      "lane": 3,
+      "st": 0.02
+    },
+    {
+      "lane": 4,
+      "st": 0.05
+    },
+    {
+      "lane": 5,
+      "st": 0.27
+    },
+    {
+      "lane": 6,
+      "st": 0.01
+    }
+  ],
+  "decision": "逃げ",
+  "weather": {
+    "condition": "晴",
+    "airTemp": 29,
+    "windSpeed": 2,
+    "windDirCode": 7,
+    "waterTemp": 30,
+    "wave": 2
+  },
+  "refunds": [
+    3,
+    4
+  ],
+  "payouts": {
+    "trifecta": {
+      "combo": "1-6-2",
+      "amount": 3460,
+      "popularity": 10
+    },
+    "trio": {
+      "combo": "1=2=6",
+      "amount": 650,
+      "popularity": 3
+    },
+    "exacta": {
+      "combo": "1-6",
+      "amount": 2430,
+      "popularity": 6
+    },
+    "quinella": {
+      "combo": "1=6",
+      "amount": 1850,
+      "popularity": 4
+    },
+    "wide": [
+      {
+        "combo": "1=6",
+        "amount": 460,
+        "popularity": 4
+      }
+    ],
+    "win": {
+      "combo": "1",
+      "amount": 110
+    },
+    "place": [
+      {
+        "combo": "1",
+        "amount": 100
+      }
+    ]
+  }
+}
