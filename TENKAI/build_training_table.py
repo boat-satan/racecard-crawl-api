@@ -7,13 +7,17 @@ C特徴(ワイド) × labels(レーン別) → 学習用テーブル（レーン
   TENKAI/labels/v1/{date}/{pid}/{race}.csv       … 例: 1R.csv
   TENKAI/labels/v1/{date}/{pid}/all.csv          … まとめ、race列で抽出
 出力:
-  TENKAI/datasets/v1/{date}/{pid}/{race}_train.csv
-  TENKAI/datasets/v1/{date}/{pid}/all_train.csv
+  単勝:     TENKAI/datasets/v1/{date}/{pid}/{race}_train.csv, all_train.csv
+  決まり手: TENKAI/datasets_kimarite/v1/{date}/{pid}/{race}_train.csv, all_train.csv
 使い方:
   PYTHONPATH="." python TENKAI/build_training_table.py --date 20250814 --pid 02
   # 単レース:
   PYTHONPATH="." python TENKAI/build_training_table.py --date 20250814 --pid 02 --race 1R
   # “--race”未指定 or "ALL" でそのpidの全レース
+  # 出力モード:
+  #   --task tansyo     … 単勝データのみ
+  #   --task kimarite   … 決まり手データのみ
+  #   --task both       … 両方（デフォルト）
 """
 
 import os
@@ -23,7 +27,8 @@ import pandas as pd
 
 FEAT_BASE = os.path.join("TENKAI", "features_c", "v1")
 LABL_BASE = os.path.join("TENKAI", "labels",    "v1")
-OUT_BASE  = os.path.join("TENKAI", "datasets",  "v1")
+OUT_BASE_TANSYO   = os.path.join("TENKAI", "datasets",          "v1")
+OUT_BASE_KIMARITE = os.path.join("TENKAI", "datasets_kimarite", "v1")
 
 LANES = [1, 2, 3, 4, 5, 6]
 PFX_RE = re.compile(r"^L([1-6])_(.+)$")
@@ -127,12 +132,32 @@ def _detect_targets(date: str, pid: str, race: str):
     return [f"{i}R" for i in range(1, 12 + 1)]
 
 
-def build_training(date: str, pid: str, race: str = ""):
-    out_dir = os.path.join(OUT_BASE, date, pid)
+def _write_outputs(df_list, out_base, date, pid):
+    """各レースCSVとallをまとめて書き出す"""
+    out_dir = os.path.join(out_base, date, pid)
     os.makedirs(out_dir, exist_ok=True)
 
-    targets = _detect_targets(date, pid, race)
     all_out = []
+    for r, df in df_list:
+        out_path = os.path.join(out_dir, f"{r}_train.csv")
+        df.to_csv(out_path, index=False, encoding="utf-8")
+        print(f"wrote {out_path} (rows={len(df)})")
+        all_out.append(df)
+
+    if all_out:
+        df_all = pd.concat(all_out, ignore_index=True)
+        all_path = os.path.join(out_dir, "all_train.csv")
+        df_all.to_csv(all_path, index=False, encoding="utf-8")
+        print(f"wrote {all_path} (rows={len(df_all)})")
+    else:
+        print("no outputs to write at", out_dir)
+
+
+def build_training(date: str, pid: str, race: str = "", task: str = "both"):
+    targets = _detect_targets(date, pid, race)
+
+    tansyo_list   = []  # (race, df)
+    kimarite_list = []  # (race, df)
 
     for r in targets:
         try:
@@ -153,7 +178,6 @@ def build_training(date: str, pid: str, race: str = ""):
         for c in ("date", "pid", "race"):
             df_feat[c] = df_feat[c].astype(str)
             df_lab[c]  = df_lab[c].astype(str)
-
         df_lab["lane"] = pd.to_numeric(df_lab["lane"], errors="coerce")
 
         # 結合
@@ -166,7 +190,10 @@ def build_training(date: str, pid: str, race: str = ""):
         prefer_feat = [
             "startCourse","class","age","avgST_rc","ec_avgST",
             "flying","late","ss_starts","ss_first","ss_second","ss_third",
-            "ms_winRate","ms_top2Rate","ms_top3Rate","win_k","lose_k",
+            "ms_winRate","ms_top2Rate","ms_top3Rate",
+            # 旧: win_k/lose_k はfeatures_cの新仕様で winK_* / loseK_* 系に
+            # 新しい列は存在チェックで自動混在許容
+            "win_k","lose_k",
             "d_avgST_rc","d_age","d_class","rank_avgST","rank_age","rank_class",
             "mean_avgST_rc","mean_age","mean_class"
         ]
@@ -174,19 +201,18 @@ def build_training(date: str, pid: str, race: str = ""):
         others = [c for c in df.columns if c not in set(cols_front + exist_pref + cols_target)]
         df = df.reindex(columns=cols_front + exist_pref + others + cols_target)
 
-        out_path = os.path.join(out_dir, f"{r}_train.csv")
-        df.to_csv(out_path, index=False, encoding="utf-8")
-        print(f"wrote {out_path} (rows={len(df)})")
+        # それぞれのバケットへ
+        if task in ("both", "tansyo"):
+            tansyo_list.append((r, df))
+        if task in ("both", "kimarite"):
+            # 決まり手学習では train 時に win==1 でフィルタする想定。
+            # ここは単勝と同じ結合表をそのまま出力して OK（最小変更）。
+            kimarite_list.append((r, df))
 
-        all_out.append(df)
-
-    if all_out:
-        df_all = pd.concat(all_out, ignore_index=True)
-        all_path = os.path.join(out_dir, "all_train.csv")
-        df_all.to_csv(all_path, index=False, encoding="utf-8")
-        print(f"wrote {all_path} (rows={len(df_all)})")
-    else:
-        print("no outputs")
+    if task in ("both", "tansyo"):
+        _write_outputs(tansyo_list, OUT_BASE_TANSYO, date, pid)
+    if task in ("both", "kimarite"):
+        _write_outputs(kimarite_list, OUT_BASE_KIMARITE, date, pid)
 
 
 def main():
@@ -194,8 +220,10 @@ def main():
     ap.add_argument("--date", required=True)
     ap.add_argument("--pid",  required=True)
     ap.add_argument("--race", default="")  # "" or "ALL" で全レース
+    ap.add_argument("--task", choices=["tansyo", "kimarite", "both"], default="both",
+                    help="出力モード（既定: both）")
     args = ap.parse_args()
-    build_training(args.date, args.pid, args.race)
+    build_training(args.date, args.pid, args.race, args.task)
 
 
 if __name__ == "__main__":
