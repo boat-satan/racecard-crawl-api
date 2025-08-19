@@ -79,21 +79,25 @@ jobs:
         run: |
           set -euo pipefail
           DATE="${{ github.event.inputs.date }}"
-          PID="${{ github.event.inputs.pid }}"
-          RACE="${{ github.event.inputs.race }}"
-          ADD_PATH="TENKAI/predictions/v1/${DATE}/${PID}/**/*.csv"
 
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git fetch origin
           git pull --rebase origin "${GITHUB_REF_NAME:-main}" || true
-          git add ${ADD_PATH} || true
-          git diff --cached --quiet || git commit -m "TENKAI predictions: ${DATE} pid=${PID} race=${RACE:-ALL}"
-          git push || true
+          # date 配下を丸ごと追加 (pid/race の指定ミスでも拾える)
+          if [ -d "TENKAI/predictions/v1/${DATE}" ]; then
+            git add -A "TENKAI/predictions/v1/${DATE}"
+            git diff --cached --quiet || git commit -m "TENKAI predictions: ${DATE}"
+            git push || true
+          else
+            echo "No predictions generated under TENKAI/predictions/v1/${DATE}"
+          fi
 
       - name: Upload predictions artifact
         uses: actions/upload-artifact@v4
         with:
           name: tenkai-predict-${{ github.event.inputs.date }}-${{ github.event.inputs.pid }}${{ github.event.inputs.race && format('-{0}', github.event.inputs.race) || '' }}
-          path: TENKAI/predictions/v1/${{ github.event.inputs.date }}/${{ github.event.inputs.pid }}/**/*.csv
+          path: |
+            TENKAI/predictions/v1/${{ github.event.inputs.date }}/**/*.csv
+            TENKAI/predictions/v1/${{ github.event.inputs.date }}/**/*.json
           if-no-files-found: warn
