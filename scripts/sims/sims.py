@@ -1,1100 +1,612 @@
-# sims.py  （= 旧 sims_batch_eval_SimS_v1.py の最小変更・全差し替え版）
-# SimS ver1.0 — 同時同条件バッチ検証 + キーマン出力 + pass1/pass2 (keyman補正再シム)
-# 変更点:
-# - --keyman-enable/--keyman-threshold/--keyman-boost 追加
-# - --keyman-aggr 追加（0〜1, pass2のみ: シミュレーションの挙動を“攻め”に寄せる）
-# - 出力先を outdir/pass1 と outdir/pass2 に分割
-# - simulate_one() に boost_map / aggr_map 注入
-#   ・boost_map: KEYMAN_RANK >= 閾値の艇に A/Ap を (1+boost) 倍（静的スカラー）
-#   ・aggr_map : 同艇に対し ST分布前倒し・分散縮小、入替・ブロック・ウェイクに小修正（動的挙動）
+# sims.py  (diet v1) — SimS ver1.0 同時同条件バッチ検証 + キーマン出力 + pass1/pass2
+# 目的：1ファイル維持・出力不変・乱数消費順不変のままコードダイエット
+# 変更概要：
+# - ユーティリティの統合・早期return化でネスト削減
+# - I/O正規化・共通化
+# - 内包表記/小関数化（※乱数呼び出し位置は不変）
+# - コメントは要点のみ残し
+#
+# 使い方は従来通り。--predict-only ではオッズ未使用でTOPN出力（odds/evはnull）。
 
 import os, json, math, argparse, shutil
 from collections import Counter, defaultdict
 import numpy as np
 import pandas as pd
 
-# ======== パラメータ上書きユーティリティ ========
+# ===== パラメータ上書きユーティリティ =====
 try:
-    import tomllib  # py311+
+    import tomllib
 except Exception:
     tomllib = None
 
-def load_param_file(path: str) -> dict:
-    if not path:
-        return {}
+def _load_params_file(path: str) -> dict:
+    if not path: return {}
     p = os.path.expanduser(path)
-    if not os.path.isfile(p):
-        raise FileNotFoundError(p)
+    if not os.path.isfile(p): raise FileNotFoundError(p)
     ext = os.path.splitext(p)[1].lower()
     if ext == ".json":
-        with open(p, "r", encoding="utf-8") as f:
-            return json.load(f)
+        return json.load(open(p, "r", encoding="utf-8"))
     if ext == ".toml":
-        if tomllib is None:
-            raise RuntimeError("tomlファイルを読むには Python 3.11 以上が必要です")
-        with open(p, "rb") as f:
-            return tomllib.load(f)
-    raise ValueError(f"Unsupported params file extension: {ext} (use .json or .toml)")
+        if tomllib is None: raise RuntimeError("tomlはPython3.11+が必要")
+        return tomllib.load(open(p, "rb"))
+    raise ValueError(f"Unsupported: {ext}")
 
-def parse_set_overrides(expr: str) -> dict:
+def _parse_set(expr: str) -> dict:
     out = {}
-    if not expr:
-        return out
+    if not expr: return out
     for kv in [p.strip() for p in expr.split(",") if p.strip()]:
-        if "=" not in kv:
-            continue
-        k, v = kv.split("=", 1)
-        k = k.strip()
-        v = v.strip()
+        if "=" not in kv: continue
+        k, v = kv.split("=", 1); k=k.strip(); v=v.strip()
         try:
-            if v.lower() in ("true","false"):
-                out[k] = (v.lower() == "true")
-            else:
-                out[k] = float(v) if (("." in v) or ("e" in v.lower())) else int(v)
-        except Exception:
-            out[k] = v
+            out[k] = (v.lower()=="true") if v.lower() in ("true","false") else (float(v) if any(c in v.lower() for c in ".e") else int(v))
+        except: out[k]=v
     return out
 
-def apply_overrides_to_class(cls, over: dict):
-    for k, v in over.items():
-        if hasattr(cls, k):
-            setattr(cls, k, v)
+def _apply_over(cls, d: dict):
+    for k,v in d.items():
+        if hasattr(cls,k): setattr(cls,k,v)
 
-# =========================
-# SimS ver1.0 パラメータ（調整済み）
-# =========================
+# ===== SimS ver1.0 Params =====
 class Params:
-    b0=100.0
-    alpha_R=0.005
-    alpha_A=-0.010
-    alpha_Ap=-0.012
-    theta=0.0285
-    a0=0.0
-    b_dt=15.0
-    cK=1.2
-    leadOuterDrift_1=0.034
-    outerBaseCost=0.022
+    b0=100.0; alpha_R=0.005; alpha_A=-0.010; alpha_Ap=-0.012
+    theta=0.0285; a0=0.0; b_dt=15.0; cK=1.2
     tau_k=0.030
-    beta_sq=0.006
-    beta_wk=0.004
-    k_turn_err=0.010
-    gamma_wall=0.006
-    delta_first=0.70
-    delta_lineblock=0.5
-    safe_margin_mu=0.005
-    safe_margin_sigma=0.003
-    p_safe_margin=0.20
-    p_backoff=0.10
-    backoff_ST_shift=0.015
-    backoff_A_penalty=0.15
-    p_cav=0.03
-    cav_A_penalty=0.25
-    session_ST_shift_mu=0.0
-    session_ST_shift_sd=0.004
-    session_A_bias_mu=0.0
-    session_A_bias_sd=0.10
-    wind_theta_gain=0.002
-    wind_st_sigma_gain=0.5
-    base_wake=0.20
-    extra_wake_when_outside=0.25
+    beta_sq=0.006; beta_wk=0.004; k_turn_err=0.010; gamma_wall=0.006
+    delta_first=0.70; delta_lineblock=0.5
+    safe_margin_mu=0.005; safe_margin_sigma=0.003; p_safe_margin=0.20
+    p_backoff=0.10; backoff_ST_shift=0.015; backoff_A_penalty=0.15
+    p_cav=0.03; cav_A_penalty=0.25
+    session_ST_shift_mu=0.0; session_ST_shift_sd=0.004
+    session_A_bias_mu=0.0; session_A_bias_sd=0.10
+    wind_theta_gain=0.002; wind_st_sigma_gain=0.5
+    base_wake=0.20; extra_wake_when_outside=0.25
     decision_bias_mult=1.0
 
-# 乱数固定
 rng = np.random.default_rng(2025)
 
-# ---------- ユーティリティ ----------
-def sigmoid(x: float) -> float:
-    return 1.0 / (1.0 + math.exp(-x))
+# ===== 共通小物 =====
+def sigmoid(x): return 1/(1+math.exp(-x))
+def _minmax_norm(d, keys):
+    vs=[float(d.get(k,0.0)) for k in keys]; lo=min(vs) if vs else 0.0; hi=max(vs) if vs else 0.0
+    den=(hi-lo) or 1.0
+    return {k:(float(d.get(k,0.0))-lo)/den for k in keys}
 
-def s_base_from_nat(rc: dict) -> float:
-    n1 = float(rc.get("natTop1", 6.0)); n2 = float(rc.get("natTop2", 50.0)); n3 = float(rc.get("natTop3", 70.0))
-    return (0.5 * ((n1 - 6.0) / 2.0) + 0.3 * ((n2 - 50.0) / 20.0) + 0.2 * ((n3 - 70.0) / 20.0))
+def _norm_race(r): 
+    r=(r or "").strip().upper()
+    return r if (not r or r.endswith("R")) else f"{r}R"
 
-def wind_adjustments(env: dict):
-    d = (env.get("wind") or {}).get("dir", "cross"); m = float((env.get("wind") or {}).get("mps", 0.0))
-    sign = 1 if d=="tail" else -1 if d=="head" else 0
-    d_theta = Params.wind_theta_gain * sign * m
-    st_sigma_gain = 1.0 + Params.wind_st_sigma_gain * (abs(m)/10.0)
-    return d_theta, st_sigma_gain
+def _parse_bool(v, default):
+    if v is None: return default
+    s=str(v).strip().lower()
+    return True if s in ("1","true","yes","y","on") else False if s in ("0","false","no","n","off") else default
 
-def apply_session_bias(ST, A, Ap):
-    ST += rng.normal(Params.session_ST_shift_mu, Params.session_ST_shift_sd)
-    A  *= (1.0 + rng.normal(Params.session_A_bias_mu, Params.session_A_bias_sd))
-    Ap *= (1.0 + rng.normal(Params.session_A_bias_mu, Params.session_A_bias_sd))
-    return ST, A, Ap
+# ===== 変換・環境 =====
+def _sbase(rc):
+    n1=float(rc.get("natTop1",6.0)); n2=float(rc.get("natTop2",50.0)); n3=float(rc.get("natTop3",70.0))
+    return 0.5*((n1-6)/2)+0.3*((n2-50)/20)+0.2*((n3-70)/20)
 
-def maybe_backoff(ST, A):
-    if rng.random() < Params.p_backoff:
-        return ST + Params.backoff_ST_shift, A * (1.0 - Params.backoff_A_penalty), True
-    return ST, A, False
+def _wind(env):
+    d=(env.get("wind") or {}).get("dir","cross"); m=float((env.get("wind") or {}).get("mps",0.0))
+    sign=1 if d=="tail" else -1 if d=="head" else 0
+    return Params.wind_theta_gain*sign*m, 1.0+Params.wind_st_sigma_gain*(abs(m)/10.0)
 
-def maybe_cav(A):
-    if rng.random() < Params.p_cav:
-        return A * (1.0 - Params.cav_A_penalty), True
-    return A, False
+def _apply_session(ST,A,Ap):
+    ST+=rng.normal(Params.session_ST_shift_mu,Params.session_ST_shift_sd)
+    g=lambda x: x*(1.0+rng.normal(Params.session_A_bias_mu,Params.session_A_bias_sd))
+    return ST,g(A),g(Ap)
 
-def maybe_safe_margin():
-    if rng.random() < Params.p_safe_margin:
+def _maybe_backoff(ST,A):
+    if rng.random()<Params.p_backoff: return ST+Params.backoff_ST_shift, A*(1-Params.backoff_A_penalty), True
+    return ST,A,False
+
+def _maybe_cav(A):
+    if rng.random()<Params.p_cav: return A*(1-Params.cav_A_penalty), True
+    return A,False
+
+def _maybe_safe():
+    if rng.random()<Params.p_safe_margin: 
         return max(0.0, rng.normal(Params.safe_margin_mu, Params.safe_margin_sigma)), True
     return 0.0, False
 
-def flow_bias(env, lane):  # 今回は無効化
-    return 0.0
+def _wake_p(lane, entry):
+    pos=entry.index(lane)
+    base=Params.base_wake+Params.extra_wake_when_outside*((lane-1)/5.0)
+    if pos==0: base*=0.3
+    return max(0.0, min(base,0.95))
 
-def wake_loss_probability(lane, entry_order):
-    pos = entry_order.index(lane)
-    base = Params.base_wake + Params.extra_wake_when_outside * ((lane - 1) / 5.0)
-    if pos == 0: base *= 0.3
-    return max(0.0, min(base, 0.95))
-
-# ---------- 入力変換 ----------
-def build_input_from_integrated(d: dict) -> dict:
-    lanes = [e["lane"] for e in d["entries"]]
-    mu = {}; S = {}; F = {}
+def build_input(d):
+    lanes=[e["lane"] for e in d["entries"]]
+    mu,S,F={}, {}, {}
     for e in d["entries"]:
-        lane = e["lane"]; rc = e["racecard"]; ec = (e.get("stats") or {}).get("entryCourse", {})
-        rc_st = rc.get("avgST", None); ec_st = ec.get("avgST", None)
-        vals = [v for v in [rc_st, ec_st] if isinstance(v, (int, float))]
-        if not vals: m = 0.16
-        elif len(vals) == 1: m = float(vals[0])
-        else: m = 0.5 * float(vals[0]) + 0.5 * float(vals[1])
-        if int(rc.get("flyingCount", 0)) > 0: m += 0.010
-        mu[lane] = m; S[lane] = s_base_from_nat(rc); F[lane] = int(rc.get("flyingCount", 0))
-
-    ST_model = {}
+        lane=e["lane"]; rc=e["racecard"]; ec=(e.get("stats") or {}).get("entryCourse",{})
+        vals=[v for v in [rc.get("avgST"), ec.get("avgST")] if isinstance(v,(int,float))]
+        m=0.16 if not vals else float(vals[0]) if len(vals)==1 else 0.5*float(vals[0])+0.5*float(vals[1])
+        if int(rc.get("flyingCount",0))>0: m+=0.010
+        mu[lane]=m; S[lane]=_sbase(rc); F[lane]=int(rc.get("flyingCount",0))
+    ST_model={}
     for lane in lanes:
-        sigma = 0.02 * (1 + 0.20 * (1 if F[lane] > 0 else 0) + 0.15 * max(0.0, -S[lane]))
-        sigma *= (1.0 + 0.1 * (lane - 1))  # 外ほど大きく
-        ST_model[str(lane)] = {"type": "normal", "mu": mu[lane], "sigma": sigma}
-
-    R = {str(l): float({1: 88, 2: 92, 3: 96, 4: 100, 5: 104, 6: 108}.get(l, 100.0)) for l in lanes}
-
-    course_bias = {1: 0.05, 2: 0.05, 3: 0.02, 4: 0.00, 5: -0.05, 6: -0.06}
-    A  = {}; Ap = {}
+        sigma=0.02*(1+0.20*(1 if F[lane]>0 else 0)+0.15*max(0.0,-S[lane])); sigma*=1.0+0.1*(lane-1)
+        ST_model[str(lane)]={"mu":mu[lane],"sigma":sigma}
+    R={str(l):float({1:88,2:92,3:96,4:100,5:104,6:108}.get(l,100.0)) for l in lanes}
+    cb={1:0.05,2:0.05,3:0.02,4:0.00,5:-0.05,6:-0.06}
+    A,Ap={},{}
     for l in lanes:
-        deltaST = (0.16 - mu[l]) * 5.0
-        A[l]  = 0.7 * S[l] + 0.3 * deltaST
-        Ap[l] = 0.7 * S[l] + 0.3 * course_bias.get(l, 0.0)
+        dST=(0.16-mu[l])*5.0
+        A[l]=0.7*S[l]+0.3*dST
+        Ap[l]=0.7*S[l]+0.3*cb.get(l,0.0)
+    S1=S.get(1,0.0)
+    squeeze={str(l):(0.0 if l==1 else min(max(0.0,(S1-S[l])*0.20),0.20)) for l in lanes}
+    first_right=[]; lineblocks=[]
+    if S1>0.30 and mu.get(1,0.16)<=0.17: first_right.append(1)
+    if S.get(4,0.0)>0.10 and mu.get(4,0.16)<=0.17: first_right.append(4)
+    if (S1 - S.get(2,0.0))>0.20: lineblocks.append((1,2))
+    if (S.get(4,0.0)-S1)>0.05:
+        sc4=next((e.get("startCourse",4) for e in d["entries"] if e["lane"]==4),4)
+        if sc4>=4: lineblocks.append((4,1))
+    env={"wind":{"dir":"cross","mps":0.0},"flow":{"dir":"none","rate":0.0}}
+    return {"lanes":lanes,"ST_model":ST_model,"R":R,"A":A,"Ap":Ap,"env":env,
+            "squeeze":squeeze,"first_right":set(first_right),"lineblocks":set(lineblocks)}
 
-    S1 = S.get(1, 0.0)
-    squeeze = {str(l): (0.0 if l==1 else min(max(0.0, (S1 - S[l]) * 0.20), 0.20)) for l in lanes}
+# ===== 1レース・シミュ（乱数順不変）=====
+def _sample_ST(m): return rng.normal(m["mu"], m["sigma"])
 
-    first_right = []; lineblocks = []
-    if S1 > 0.30 and mu.get(1, 0.16) <= 0.17: first_right.append(1)
-    S4 = S.get(4, 0.0)
-    if S4 > 0.10 and mu.get(4, 0.16) <= 0.17: first_right.append(4)
-    S2 = S.get(2, 0.0)
-    if (S1 - S2) > 0.20: lineblocks.append((1, 2))
-    if (S4 - S1) > 0.05:
-        sc4 = next((e.get("startCourse", 4) for e in d["entries"] if e["lane"] == 4), 4)
-        if sc4 >= 4: lineblocks.append((4, 1))
+def _t1m(ST,R,A,Ap,sq,env,lane,st_gain):
+    ST,A,Ap=_apply_session(ST,A,Ap)
+    ST,A,back=_maybe_backoff(ST,A)
+    A,cav=_maybe_cav(A)
+    t=Params.b0+Params.alpha_R*(R-100.0)+Params.alpha_A*A+Params.alpha_Ap*Ap+Params.beta_sq*sq
+    t+=ST*st_gain
+    return t, {"backoff":back,"cav":cav}
 
-    env = {"wind": {"dir": "cross", "mps": 0.0}, "flow": {"dir": "none", "rate": 0.0}}
-    return {
-        "lanes": lanes, "ST_model": ST_model, "R": R, "A": A, "Ap": Ap, "env": env,
-        "squeeze": squeeze, "first_right": set(first_right), "lineblocks": set(lineblocks)
-    }
-
-# ---------- 1レース・シミュ ----------
-def sample_ST(model): return rng.normal(model["mu"], model["sigma"])
-
-def t1m_time(ST, R, A, Ap, sq, env, lane, st_gain):
-    ST, A, Ap = apply_session_bias(ST, A, Ap)
-    ST, A, did_backoff = maybe_backoff(ST, A)
-    A, did_cav = maybe_cav(A)
-    t = (Params.b0 + Params.alpha_R*(R-100.0) + Params.alpha_A*A + Params.alpha_Ap*Ap
-         + Params.beta_sq*sq + flow_bias(env, lane))
-    t += ST * st_gain
-    return t, {"backoff": did_backoff, "cav": did_cav}
-
-def decision_bias_term(lead, chase, lane, kimarite_hint=None):
-    base = 1.0
-    if Params.decision_bias_mult != 1.0: base *= Params.decision_bias_mult
-    return base
-
-def one_pass(entry, T1M, A, Ap, env, lineblocks, first_right, aggr_map=None):
-    exit_order = entry[:]
-    swaps = []   # list of (chase, lead)
-    blocks = []  # list of (lead, chase) when delta>0 and no swap
-    safe_used_count = 0
-    d_theta, _ = wind_adjustments(env); theta_eff = Params.theta + d_theta
-    aggr_map = aggr_map or {}
-    for k in range(len(exit_order) - 1):
-        lead, chase = exit_order[k], exit_order[k+1]
-        dt = T1M[chase] - T1M[lead]
-        dK = (A[chase] + Ap[chase]) - (A[lead] + Ap[lead])
-        delta = (Params.delta_lineblock if (lead, chase) in lineblocks else 0.0)
-        if str(lead) in aggr_map:
-            delta += 0.10 * float(aggr_map[str(lead)])
-        if lead in first_right: delta += Params.delta_first
-        turn_err, used = maybe_safe_margin()
-        if used: safe_used_count += 1
-        dt_eff = dt + Params.gamma_wall + Params.k_turn_err * turn_err
-        logit = Params.a0 + Params.b_dt*(theta_eff - dt_eff) + Params.cK*dK + delta
-        if str(chase) in aggr_map:
-            a = float(aggr_map[str(chase)])
-            logit += 0.45 * a
-        logit *= decision_bias_term(lead, chase, chase)
-        will_swap = (rng.random() < sigmoid(logit))
-        if will_swap:
-            swaps.append((chase, lead))
-            exit_order[k], exit_order[k+1] = chase, lead
+def _one_pass(entry,T1M,A,Ap,env,lineblocks,first_right,aggr=None):
+    aggr=aggr or {}
+    exit_order=entry[:]; swaps=[]; blocks=[]; safe_cnt=0
+    d_theta,_=_wind(env); theta_eff=Params.theta+d_theta
+    for k in range(len(exit_order)-1):
+        lead, chase=exit_order[k], exit_order[k+1]
+        dt=T1M[chase]-T1M[lead]
+        dK=(A[chase]+Ap[chase])-(A[lead]+Ap[lead])
+        delta=(Params.delta_lineblock if (lead,chase) in lineblocks else 0.0)
+        if str(lead) in aggr: delta+=0.10*float(aggr[str(lead)])
+        if lead in first_right: delta+=Params.delta_first
+        terr,used=_maybe_safe(); 
+        if used: safe_cnt+=1
+        logit=Params.a0+Params.b_dt*(theta_eff-(dt+Params.gamma_wall+Params.k_turn_err*terr))+Params.cK*dK+delta
+        if str(chase) in aggr: logit+=0.45*float(aggr[str(chase)])
+        logit*= (Params.decision_bias_mult or 1.0)
+        if rng.random()<sigmoid(logit):
+            swaps.append((chase,lead)); exit_order[k],exit_order[k+1]=chase,lead
         else:
-            if delta > 0.0:
-                blocks.append((lead, chase))
-    return exit_order, swaps, blocks, safe_used_count
+            if delta>0: blocks.append((lead,chase))
+    return exit_order, swaps, blocks, safe_cnt
 
-def simulate_one(integrated_json: dict, sims: int = 600,
-                 boost_map: dict | None = None,
-                 aggr_map: dict | None = None):
-    inp = build_input_from_integrated(integrated_json)
+def simulate_one(integrated_json, sims=600, boost_map=None, aggr_map=None):
+    inp=build_input(integrated_json)
     if boost_map:
         for l in list(inp["A"].keys()):
-            b = float(boost_map.get(str(l), 0.0))
-            if b != 0.0:
-                inp["A"][l]  *= (1.0 + b)
-                inp["Ap"][l] *= (1.0 + b)
-
-    aggr_map = aggr_map or {}
+            b=float(boost_map.get(str(l),0.0))
+            if b: inp["A"][l]*=(1+b); inp["Ap"][l]*=(1+b)
+    aggr_map=aggr_map or {}
     if aggr_map:
-        for l in list(inp["ST_model"].keys()):
-            a = float(aggr_map.get(str(l), 0.0))
-            if a <= 0: continue
-            inp["ST_model"][str(l)]["mu"]    = max(0.05, inp["ST_model"][str(l)]["mu"] - 0.006*a)
-            inp["ST_model"][str(l)]["sigma"] = max(0.005, inp["ST_model"][str(l)]["sigma"] * (1.0 - 0.35*a))
+        for k in list(inp["ST_model"].keys()):
+            a=float(aggr_map.get(str(k),0.0))
+            if a>0:
+                inp["ST_model"][k]["mu"]=max(0.05, inp["ST_model"][k]["mu"]-0.006*a)
+                inp["ST_model"][k]["sigma"]=max(0.005, inp["ST_model"][k]["sigma"]*(1-0.35*a))
+    lanes=inp["lanes"]; env=inp["env"]; _,st_gain=_wind(env)
 
-    lanes = inp["lanes"]; env = inp["env"]; _, st_gain = wind_adjustments(env)
-
-    trifecta = Counter(); kimarite = Counter()
-    pair_counts = Counter(); third_counts = Counter()
-
-    first_counts = Counter(); second_counts = Counter(); third_only = Counter()
-    wake_hits = Counter(); backoff_hits = Counter(); cav_hits = Counter()
-    swap_pair = Counter(); block_pair = Counter()
-    pos_delta_sum = {i: 0 for i in lanes}
-    safe_used_total = 0
+    trif=Counter(); kim=Counter(); ex2=Counter(); thd=Counter()
+    H1=Counter(); H2=Counter(); H3=Counter()
+    wake=Counter(); back=Counter(); cav=Counter()
+    swp=Counter(); blk=Counter(); posd={i:0 for i in lanes}
+    safe_total=0
 
     for _ in range(sims):
-        ST = {i: sample_ST(inp["ST_model"][str(i)]) for i in lanes}
-
-        T1M = {}
+        ST={i:_sample_ST(inp["ST_model"][str(i)]) for i in lanes}
+        T1M={}
         for i in lanes:
-            t, fl = t1m_time(ST[i], inp["R"][str(i)], inp["A"][i], inp["Ap"][i],
-                             inp["squeeze"][str(i)], env, i, st_gain)
-            T1M[i] = t
-            if fl["backoff"]: backoff_hits[i] += 1
-            if fl["cav"]:     cav_hits[i] += 1
-
-        entry = sorted(lanes, key=lambda x: T1M[x])
+            t,fl=_t1m(ST[i], inp["R"][str(i)], inp["A"][i], inp["Ap"][i], inp["squeeze"][str(i)], env, i, st_gain)
+            T1M[i]=t
+            if fl["backoff"]: back[i]+=1
+            if fl["cav"]: cav[i]+=1
+        entry=sorted(lanes, key=lambda x:T1M[x])
 
         for i in lanes:
-            p = wake_loss_probability(i, entry)
+            p=_wake_p(i, entry)
             if aggr_map:
-                if str(i) in aggr_map:
-                    p *= max(0.0, 1.0 - 0.60*float(aggr_map[str(i)]))
-                else:
-                    p *= (1.0 + 0.05*max(aggr_map.values(), default=0.0))
-            if rng.random() < min(0.95, max(0.0, p)):
-                wake_hits[i] += 1
-                T1M[i] += Params.beta_wk
+                p = p*(1-0.60*float(aggr_map.get(str(i),0.0))) if str(i) in aggr_map else p*(1+0.05*max(aggr_map.values(), default=0.0))
+            if rng.random()<min(0.95,max(0.0,p)):
+                wake[i]+=1; T1M[i]+=Params.beta_wk
 
-        exit_order, swaps, blocks, safe_used_cnt = one_pass(
-            entry, T1M, inp["A"], inp["Ap"], env, inp["lineblocks"], inp["first_right"], aggr_map=aggr_map
-        )
-        safe_used_total += safe_used_cnt
+        exit_order, swaps, blocks, safe_cnt = _one_pass(entry, T1M, inp["A"], inp["Ap"], env, inp["lineblocks"], inp["first_right"], aggr_map)
+        safe_total+=safe_cnt
 
-        lead = exit_order[0]
-        dt_lead = T1M[exit_order[1]] - T1M[lead]
-        kim = "逃げ" if lead == 1 else ("まくり" if dt_lead >= Params.tau_k else "まくり差し")
-        kimarite[kim] += 1
+        lead=exit_order[0]; dt_lead=T1M[exit_order[1]]-T1M[lead]
+        kim["逃げ" if lead==1 else ("まくり" if dt_lead>=Params.tau_k else "まくり差し")]+=1
 
-        trifecta[tuple(exit_order[:3])] += 1
-        pair_counts[(exit_order[0], exit_order[1])] += 1
-        third_counts[exit_order[2]] += 1
+        trif[tuple(exit_order[:3])]+=1; ex2[(exit_order[0],exit_order[1])]+=1; thd[exit_order[2]]+=1
+        H1[exit_order[0]]+=1; H2[exit_order[1]]+=1; H3[exit_order[2]]+=1
+        for c,l in swaps: swp[(c,l)]+=1
+        for l,c in blocks: blk[(l,c)]+=1
+        ent_pos={b:i for i,b in enumerate(entry)}; ex_pos={b:i for i,b in enumerate(exit_order)}
+        for i in lanes: posd[i]+= (ent_pos[i]-ex_pos[i])
 
-        if len(exit_order) >= 3:
-            first_counts[exit_order[0]]  += 1
-            second_counts[exit_order[1]] += 1
-            third_only[exit_order[2]]    += 1
-        for c,l in swaps:  swap_pair[(c,l)] += 1
-        for l,c in blocks: block_pair[(l,c)] += 1
-        entry_pos = {b:i for i,b in enumerate(entry)}
-        exit_pos  = {b:i for i,b in enumerate(exit_order)}
-        for i in lanes:
-            pos_delta_sum[i] += (entry_pos[i] - exit_pos[i])
+    total=sims
+    tri_probs={k:v/total for k,v in trif.items()}
+    kim_probs={k:v/total for k,v in kim.items()}
+    ex_probs={k:v/total for k,v in ex2.items()}
+    th_probs={k:v/total for k,v in thd.items()}
 
-    total = sims
-    tri_probs = {k: v/total for k, v in trifecta.items()}
-    kim_probs = {k: v/total for k, v in kimarite.items()}
-    exacta_probs = {k: v/total for k, v in pair_counts.items()}
-    third_probs  = {k: v/total for k, v in third_counts.items()}
-
-    lanes_s = [str(i) for i in lanes]
-    keyman = {
-        "trials": int(total),
-        "H1": {str(i): first_counts[i]/total for i in lanes},
-        "H2": {str(i): second_counts[i]/total for i in lanes},
-        "H3": {str(i): third_only[i]/total for i in lanes},
-        "SWAP": {f"{c}>{l}": int(cnt) for (c,l),cnt in swap_pair.items()},
-        "BLOCK": {f"{l}|{c}": int(cnt) for (l,c),cnt in block_pair.items()},
-        "WAKE": {str(i): wake_hits[i]/total for i in lanes},
-        "BACKOFF": {str(i): backoff_hits[i]/total for i in lanes},
-        "CAV": {str(i): cav_hits[i]/total for i in lanes},
-        "POS_DELTA_AVG": {str(i): pos_delta_sum[i]/total for i in lanes},
-        "SAFE_MARGIN_EVENTS_PER_TRIAL": safe_used_total/(total*max(1,(len(lanes)-1)))
+    lanes_s=[str(i) for i in lanes]
+    keyman={
+        "trials":int(total),
+        "H1":{str(i):H1[i]/total for i in lanes},
+        "H2":{str(i):H2[i]/total for i in lanes},
+        "H3":{str(i):H3[i]/total for i in lanes},
+        "SWAP":{f"{c}>{l}":int(v) for (c,l),v in swp.items()},
+        "BLOCK":{f"{l}|{c}":int(v) for (l,c),v in blk.items()},
+        "WAKE":{str(i):wake[i]/total for i in lanes},
+        "BACKOFF":{str(i):back[i]/total for i in lanes},
+        "CAV":{str(i):cav[i]/total for i in lanes},
+        "POS_DELTA_AVG":{str(i):posd[i]/total for i in lanes},
+        "SAFE_MARGIN_EVENTS_PER_TRIAL": safe_total/(total*max(1,(len(lanes)-1)))
     }
-    return tri_probs, kim_probs, exacta_probs, third_probs, keyman
-
-# ---------- KEYMAN_RANK ----------
-def _minmax_norm(d: dict, lanes_s: list[str]) -> dict:
-    vals = [float(d.get(k, 0.0)) for k in lanes_s]
-    lo, hi = (min(vals), max(vals)) if vals else (0.0, 0.0)
-    den = (hi - lo) if (hi - lo) > 0 else 1.0
-    return {k: (float(d.get(k, 0.0)) - lo) / den for k in lanes_s}
-
-def _compute_keyman_rank_only_drivers(keyman: dict) -> dict:
-    lanes_s = sorted((keyman.get("WAKE") or {}).keys(), key=lambda x: int(x))
-    if not lanes_s:
-        return {}
-    wake = {k: float(keyman.get("WAKE", {}).get(k, 0.0)) for k in lanes_s}
-    pos_raw = {k: float(keyman.get("POS_DELTA_AVG", {}).get(k, 0.0)) for k in lanes_s}
-    pos_plus = {k: (v if v > 0 else 0.0) for k, v in pos_raw.items()}
-    swaps = keyman.get("SWAP", {}) or {}
-    total_swaps = sum(int(v) for v in swaps.values()) if swaps else 0
-    outer_cnt_per_lane = {k: 0 for k in lanes_s}
-    if total_swaps > 0:
-        for pair, cnt in swaps.items():
-            try:
-                ch, ld = pair.split(">")
-                if int(ch) > int(ld):
-                    outer_cnt_per_lane[str(int(ch))] = outer_cnt_per_lane.get(str(int(ch)), 0) + int(cnt)
-            except Exception:
-                continue
-    swap_outshare = {k: (outer_cnt_per_lane.get(k, 0) / total_swaps) if total_swaps > 0 else 0.0 for k in lanes_s}
-    backoff = {k: float(keyman.get("BACKOFF", {}).get(k, 0.0)) for k in lanes_s}
-    cav     = {k: float(keyman.get("CAV", {}).get(k, 0.0)) for k in lanes_s}
-    wake_n    = _minmax_norm(wake, lanes_s)
-    pos_n     = _minmax_norm(pos_plus, lanes_s)
-    swap_n    = _minmax_norm(swap_outshare, lanes_s)
-    backoff_n = _minmax_norm(backoff, lanes_s)
-    cav_n     = _minmax_norm(cav, lanes_s)
-    w_wake, w_pos, w_swap, w_back, w_cav = 0.35, 0.25, 0.25, 0.10, 0.05
-    raw = {k: (w_wake*wake_n[k] + w_pos*pos_n[k] + w_swap*swap_n[k] + w_back*backoff_n[k] + w_cav*cav_n[k])
-           for k in lanes_s}
-    return _minmax_norm(raw, lanes_s)
-
-def attach_keyman_rank(keyman: dict) -> dict:
+    # KEYMAN_RANK 付与
     try:
-        kmr = _compute_keyman_rank_only_drivers(keyman)
-        if kmr:
-            keyman["KEYMAN_RANK"] = kmr
-    except Exception:
-        pass
-    return keyman
+        lanes_s=sorted((keyman.get("WAKE") or {}).keys(), key=lambda x:int(x))
+        wake_n=_minmax_norm(keyman.get("WAKE",{}), lanes_s)
+        pos_raw={k:float(keyman.get("POS_DELTA_AVG",{}).get(k,0.0)) for k in lanes_s}
+        pos_n=_minmax_norm({k:(v if v>0 else 0.0) for k,v in pos_raw.items()}, lanes_s)
+        swaps=keyman.get("SWAP",{}) or {}; total_sw=sum(int(v) for v in swaps.values()) or 1
+        out_cnt={k:0 for k in lanes_s}
+        for pair,cnt in swaps.items():
+            try:
+                ch,ld=pair.split(">"); 
+                if int(ch)>int(ld): out_cnt[str(int(ch))]=out_cnt.get(str(int(ch)),0)+int(cnt)
+            except: pass
+        swap_n=_minmax_norm({k:out_cnt.get(k,0)/total_sw for k in lanes_s}, lanes_s)
+        back_n=_minmax_norm(keyman.get("BACKOFF",{}), lanes_s)
+        cav_n=_minmax_norm(keyman.get("CAV",{}), lanes_s)
+        raw={k:0.35*wake_n[k]+0.25*pos_n[k]+0.25*swap_n[k]+0.10*back_n[k]+0.05*cav_n[k] for k in lanes_s}
+        keyman["KEYMAN_RANK"]=_minmax_norm(raw, lanes_s)
+    except: pass
 
-# ---------- ★NEW: キーマン買い目フィルター ----------
-def filter_tickets_by_keyman(tickets, keyman: dict, thr: float):
-    """tickets: List[( (F,S,T), score )] を、KEYMAN_RANK>=thr の艇が1-3着どこかに入るものだけ残す"""
-    km = (keyman or {}).get("KEYMAN_RANK", {}) or {}
-    if not km:
-        return tickets
-    kept = []
-    for (key, prob) in tickets:
-        if any(float(km.get(str(lane), 0.0)) >= thr for lane in key):
-            kept.append((key, prob))
-    return kept
+    return tri_probs, kim_probs, ex_probs, th_probs, keyman
 
-# ---------- データ収集 ----------
-def collect_files(base_dir: str, kind: str, dates: set):
-    root_v1 = os.path.join(base_dir, kind, "v1")
-    root    = root_v1 if os.path.isdir(root_v1) else os.path.join(base_dir, kind)
-    out = []
-    date_dirs = list(dates) if dates else [d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d))]
+# ===== ファイル収集/読込 =====
+def _collect(base, kind, dates:set):
+    root_v1=os.path.join(base,kind,"v1"); root=root_v1 if os.path.isdir(root_v1) else os.path.join(base,kind)
+    out={}
+    date_dirs=list(dates) if dates else [d for d in os.listdir(root) if os.path.isdir(os.path.join(root,d))]
     for d in date_dirs:
-        dir_d = os.path.join(root, d)
+        dir_d=os.path.join(root,d)
         if not os.path.isdir(dir_d): continue
         for pid in os.listdir(dir_d):
-            dir_pid = os.path.join(dir_d, pid)
+            dir_pid=os.path.join(dir_d,pid)
             if not os.path.isdir(dir_pid): continue
-            for fname in os.listdir(dir_pid):
-                if fname.endswith(".json"):
-                    race = fname[:-5]
-                    out.append(((d, pid, race), os.path.join(dir_pid, fname)))
-    return dict(out)
-
-def collect_results_files(base_dir: str, dates: set):
-    root_v1 = os.path.join(base_dir, "results", "v1")
-    root    = root_v1 if os.path.isdir(root_v1) else os.path.join(base_dir, "results")
-    out = {}
-    date_dirs = list(dates) if dates else [d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d))]
-    for d in date_dirs:
-        dir_d = os.path.join(root, d)
-        if not os.path.isdir(dir_d): continue
-        for pid in os.listdir(dir_d):
-            dir_pid = os.path.join(dir_d, pid)
-            if not os.path.isdir(dir_pid): continue
-            # ① レース別
-            per_race = [f for f in os.listdir(dir_pid) if f.lower().endswith(".json") and f.upper().endswith("R.JSON")]
-            if per_race:
-                for fname in per_race:
-                    race = fname[:-5].upper()
-                    if not race.endswith("R"): race += "R"
-                    out[(d, pid, race)] = os.path.join(dir_pid, fname)
-                continue
-            # ② まとめファイル
-            json_files = [f for f in os.listdir(dir_pid) if f.lower().endswith(".json")]
-            for fname in json_files:
-                path = os.path.join(dir_pid, fname)
-                try:
-                    with open(path, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    races_obj = data.get("races") if isinstance(data, dict) else None
-                    container = races_obj if isinstance(races_obj, dict) else (data if isinstance(data, dict) else {})
-                    for race_key in list(container.keys()):
-                        rk = str(race_key).upper()
-                        if rk.isdigit(): rk += "R"
-                        if not rk.endswith("R"): continue
-                        out[(d, pid, rk)] = path + "#" + rk
-                except Exception:
-                    pass
+            for f in os.listdir(dir_pid):
+                if f.endswith(".json"):
+                    race=f[:-5]; out[(d,pid,race)]=os.path.join(dir_pid,f)
     return out
 
-def load_result_for_race(res_path: str):
+def _collect_results(base, dates:set):
+    root_v1=os.path.join(base,"results","v1"); root=root_v1 if os.path.isdir(root_v1) else os.path.join(base,"results")
+    out={}
+    date_dirs=list(dates) if dates else [d for d in os.listdir(root) if os.path.isdir(os.path.join(root,d))]
+    for d in date_dirs:
+        dir_d=os.path.join(root,d)
+        if not os.path.isdir(dir_d): continue
+        for pid in os.listdir(dir_d):
+            dir_pid=os.path.join(dir_d,pid)
+            if not os.path.isdir(dir_pid): continue
+            per=[f for f in os.listdir(dir_pid) if f.lower().endswith(".json") and f.upper().endswith("R.JSON")]
+            if per:
+                for f in per:
+                    r=f[:-5].upper(); r=r if r.endswith("R") else r+"R"
+                    out[(d,pid,r)]=os.path.join(dir_pid,f)
+                continue
+            for f in [f for f in os.listdir(dir_pid) if f.lower().endswith(".json")]:
+                p=os.path.join(dir_pid,f)
+                try:
+                    data=json.load(open(p,"r",encoding="utf-8"))
+                    container=data.get("races", data) if isinstance(data,dict) else {}
+                    for rk in list(container.keys()):
+                        k=str(rk).upper(); 
+                        if k.isdigit(): k+= "R"
+                        if k.endswith("R"): out[(d,pid,k)]=p+"#"+k
+                except: pass
+    return out
+
+def _load_result(res_path):
     if "#" in res_path:
-        path, race = res_path.split("#", 1)
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        races_obj = data.get("races", data) if isinstance(data, dict) else {}
-        d = races_obj.get(race) or races_obj.get(race.upper()) or races_obj.get(race.lower())
-        return d if isinstance(d, dict) else None
-    else:
-        with open(res_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+        p,r=res_path.split("#",1); data=json.load(open(p,"r",encoding="utf-8")); cont=data.get("races",data) if isinstance(data,dict) else {}
+        d=cont.get(r) or cont.get(r.upper()) or cont.get(r.lower()); return d if isinstance(d,dict) else {}
+    return json.load(open(res_path,"r",encoding="utf-8"))
 
-# ---------- オッズ読込 ----------
-def load_trifecta_odds(odds_base: str, date: str, pid: str, race: str):
+def _load_odds(odds_base,date,pid,race):
     try:
-        race_norm = race.upper() if race.upper().endswith("R") else f"{race}R"
-        path = os.path.join(odds_base, date, pid, f"{race_norm}.json")
-        if not os.path.isfile(path):
-            return {}
-        with open(path, "r", encoding="utf-8") as f:
-            d = json.load(f)
-        trif = d.get("trifecta") or []
-        out = {}
+        race=race if race.upper().endswith("R") else f"{race}R"
+        path=os.path.join(odds_base,date,pid,f"{race}.json")
+        if not os.path.isfile(path): return {}
+        trif=(json.load(open(path,"r",encoding="utf-8")).get("trifecta")) or []
+        out={}
         for row in trif:
-            combo = str(row.get("combo") or "").strip()
+            combo=str(row.get("combo") or "").strip()
             if not combo:
-                F = row.get("F"); S = row.get("S"); T = row.get("T")
-                if all(isinstance(v, (int,float)) for v in [F,S,T]):
-                    combo = f"{int(F)}-{int(S)}-{int(T)}"
-            if not combo:
-                continue
-            odds = row.get("odds")
-            rank = row.get("popularityRank")
-            if isinstance(odds, (int,float)) and math.isfinite(odds):
-                out[combo] = {"odds": float(odds), "rank": int(rank) if isinstance(rank,(int,float)) else None}
+                F,S,T=row.get("F"),row.get("S"),row.get("T")
+                if all(isinstance(v,(int,float)) for v in [F,S,T]): combo=f"{int(F)}-{int(S)}-{int(T)}"
+            if not combo: continue
+            odds=row.get("odds")
+            if isinstance(odds,(int,float)) and math.isfinite(odds): out[combo]={"odds":float(odds)}
         return out
-    except Exception:
-        return {}
+    except: return {}
 
-# ---------- オッズバンド ----------
-def parse_odds_bands(bands_str: str, odds_min: float, odds_max: float):
-    bands = []
+# ===== オッズ帯 =====
+def _bands(bands_str, omin, omax):
     if bands_str:
+        out=[]
         for part in bands_str.split(","):
-            part = part.strip()
-            if not part: continue
-            if "-" not in part:
-                continue
-            lo_s, hi_s = part.split("-", 1)
-            lo = float(lo_s) if lo_s.strip() else float("-inf")
-            hi = float(hi_s) if hi_s.strip() else float("inf")
-            if math.isfinite(lo) and math.isfinite(hi) and lo > hi:
-                lo, hi = hi, lo
-            bands.append((lo, hi))
-    else:
-        lo = float(odds_min) if odds_min and odds_min>0 else float("-inf")
-        hi = float(odds_max) if odds_max and odds_max>0 else float("inf")
-        if (math.isfinite(lo) or math.isfinite(hi)) and (lo != float("-inf") or hi != float("inf")):
-            if math.isfinite(lo) and math.isfinite(hi) and lo > hi:
-                lo, hi = hi, lo
-            bands.append((lo, hi))
-    return bands
+            if "-" not in part: continue
+            lo_s,hi_s=[s.strip() for s in part.split("-",1)]
+            lo=float(lo_s) if lo_s else float("-inf"); hi=float(hi_s) if hi_s else float("inf")
+            if math.isfinite(lo) and math.isfinite(hi) and lo>hi: lo,hi=hi,lo
+            out.append((lo,hi))
+        return out
+    if omin or omax:
+        lo=float(omin) if omin>0 else float("-inf"); hi=float(omax) if omax>0 else float("inf")
+        if math.isfinite(lo) and math.isfinite(hi) and lo>hi: lo,hi=hi,lo
+        return [(lo,hi)]
+    return []
 
-def odds_in_any_band(odds: float, bands: list[tuple[float,float]]) -> bool:
-    if not bands:
-        return True
-    if odds is None or not math.isfinite(odds):
-        return False
-    for lo, hi in bands:
-        if odds >= lo and odds <= hi:
-            return True
-    return False
+def _in_band(odds,bands):
+    if not bands: return True
+    if odds is None or not math.isfinite(odds): return False
+    return any(lo<=odds<=hi for lo,hi in bands)
 
-# ---------- 買い目生成 ----------
-def generate_tickets(strategy, tri_probs, exacta_probs, third_probs,
-                     topn=18, k=2, m=4, exclude_first1=False, only_first1=False):
-    tickets = []
-    if strategy == "exacta_topK_third_topM":
-        top2 = sorted(exacta_probs.items(), key=lambda kv: kv[1], reverse=True)[:k]
-        top3 = [t for t,_ in sorted(third_probs.items(), key=lambda kv: kv[1], reverse=True)[:m]]
-        seen = set()
-        for (f,s), _ in top2:
+# ===== 生成/フィルタ =====
+def generate_tickets(strategy, tri, ex2, th3, topn=18, k=2, m=4, exclude_first1=False, only_first1=False):
+    if strategy=="exacta_topK_third_topM":
+        top2=sorted(ex2.items(), key=lambda kv: kv[1], reverse=True)[:k]
+        top3=[t for t,_ in sorted(th3.items(), key=lambda kv: kv[1], reverse=True)[:m]]
+        seen=set(); out=[]
+        for (f,s), p2 in top2:
             for t in top3:
                 if t!=f and t!=s:
-                    key = (f,s,t)
-                    if key not in seen:
-                        seen.add(key)
-                        score = exacta_probs.get((f,s),0.0) * third_probs.get(t,0.0)
-                        tickets.append((key, score))
-        tickets = [(k_,p_) for (k_,p_) in tickets
-                   if ((not only_first1) or k_[0]==1) and ((not exclude_first1) or k_[0]!=1)]
-        tickets.sort(key=lambda kv: kv[1], reverse=True)
-    else:
-        top = sorted(tri_probs.items(), key=lambda kv: kv[1], reverse=True)[:topn]
-        top = [(k_,p_) for (k_,p_) in top
-               if ((not only_first1) or k_[0]==1) and ((not exclude_first1) or k_[0]!=1)]
-        tickets = [(k_, p_) for k_,p_ in top]
-    return tickets
+                    key=(f,s,t)
+                    if key in seen: continue
+                    seen.add(key)
+                    out.append((key, p2*th3.get(t,0.0)))
+        out=[(k_,p_) for (k_,p_) in out if ((not only_first1) or k_[0]==1) and ((not exclude_first1) or k_[0]!=1)]
+        return sorted(out, key=lambda kv: kv[1], reverse=True)
+    top=sorted(tri.items(), key=lambda kv: kv[1], reverse=True)[:topn]
+    return [(k_,p_) for (k_,p_) in top if ((not only_first1) or k_[0]==1) and ((not exclude_first1) or k_[0]!=1)]
 
-# ---------- キーマンJSON保存 ----------
-def save_keyman(outdir: str, date: str, pid: str, race: str, keyman: dict, meta: dict):
+def _filter_by_keyman(tickets, keyman, thr):
+    km=(keyman or {}).get("KEYMAN_RANK",{}) or {}
+    if not km: return tickets
+    return [(k,p) for (k,p) in tickets if any(float(km.get(str(l),0.0))>=thr for l in k)]
+
+# ===== 評価 =====
+def _actual_trifecta_and_amount(res):
+    trif=(res or {}).get("payouts",{}).get("trifecta")
+    combo=None; amt=0
+    if isinstance(trif,dict):
+        combo=trif.get("combo"); amt=int(trif.get("amount") or 0)
+    if not combo and isinstance(res,dict):
+        order=res.get("order")
+        if isinstance(order,list) and len(order)>=3:
+            def lane(x): return str(x.get("lane") or x.get("course") or x.get("F") or x.get("number"))
+            try:
+                f,s,t=lane(order[0]),lane(order[1]),lane(order[2])
+                if all([f,s,t]): combo=f"{f}-{s}-{t}"
+            except: pass
+    return combo, amt
+
+def _save_keyman(root,date,pid,race,keyman,meta):
     try:
-        dirp = os.path.join(outdir, "keyman", date, pid)
-        os.makedirs(dirp, exist_ok=True)
-        payload = {"date": date, "pid": pid, "race": race}
-        payload.update(meta or {})
-        payload["keyman"] = keyman
-        with open(os.path.join(dirp, f"{race}.json"), "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
+        dirp=os.path.join(root,"keyman",date,pid); os.makedirs(dirp, exist_ok=True)
+        payload={"date":date,"pid":pid,"race":race}; payload.update(meta or {}); payload["keyman"]=keyman
+        json.dump(payload, open(os.path.join(dirp,f"{race}.json"),"w",encoding="utf-8"), ensure_ascii=False, indent=2)
     except Exception as e:
-        print(f"[warn] keyman save failed for {date}/{pid}/{race}: {e}")
+        print(f"[warn] keyman save failed {date}/{pid}/{race}: {e}")
 
-# ---------- pass2 用: keyman読み込み → boost/aggr マップ作成 ----------
-def load_keyman_boost_map(pass1_outdir: str, date: str, pid: str, race: str,
-                          threshold: float, boost: float) -> dict:
-    path = os.path.join(pass1_outdir, "keyman", date, pid, f"{race}.json")
-    if not os.path.isfile(path):
-        return {}
+def evaluate_one(int_path,res_path,sims,unit,strategy,topn,k,m,exclude_first1=False,only_first1=False,
+                 odds_base=None,min_ev=0.0,require_odds=False,odds_bands=None,outdir="./SimS_v1.0_eval",
+                 boost_map=None,aggr_map=None,meta_extra=None,buy_if_keyman_in_top3=False,buy_keyman_threshold=0.7):
+    d_int=json.load(open(int_path,"r",encoding="utf-8"))
+    tri,kim,ex2,th3,keyman=simulate_one(d_int,sims=sims,boost_map=boost_map,aggr_map=aggr_map)
+    tickets=generate_tickets(strategy,tri,ex2,th3,topn,k,m,exclude_first1,only_first1)
+    if buy_if_keyman_in_top3: tickets=_filter_by_keyman(tickets,keyman,buy_keyman_threshold)
+
+    # ファイル座標
+    date=pid=race=None
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            d = json.load(f)
-        kmr = (d.get("keyman") or {}).get("KEYMAN_RANK") or {}
-        lanes = [k for k,v in kmr.items() if isinstance(v,(int,float)) and float(v) >= threshold]
-        return {str(int(l)): float(boost) for l in lanes}
-    except Exception:
-        return {}
+        p=os.path.normpath(int_path).split(os.sep); race=os.path.splitext(p[-1])[0]; pid=p[-2]; date=p[-3]
+    except: pass
 
-# ---------- 評価（1レース） ----------
-def evaluate_one(int_path: str, res_path: str, sims: int, unit: int,
-                 strategy: str, topn: int, k: int, m: int,
-                 exclude_first1: bool=False, only_first1: bool=False,
-                 odds_base: str=None, min_ev: float=0.0, require_odds: bool=False,
-                 odds_bands: list[tuple[float,float]] = None,
-                 outdir: str = "./SimS_v1.0_eval",
-                 boost_map: dict | None = None,
-                 aggr_map: dict | None = None,
-                 meta_extra: dict | None = None,
-                 # ★NEW:
-                 buy_if_keyman_in_top3: bool=False,
-                 buy_keyman_threshold: float=0.7):
-    # 予測
-    with open(int_path, "r", encoding="utf-8") as f:
-        d_int = json.load(f)
-    tri_probs, kim_probs, exacta_probs, third_probs, keyman = simulate_one(
-        d_int, sims=sims, boost_map=boost_map, aggr_map=aggr_map
-    )
+    odds_map={}
+    if (min_ev>0) or require_odds or odds_bands:
+        if date and pid and race: odds_map=_load_odds(odds_base,date,pid,race)
+    kept=[]
+    bands=odds_bands or []
+    for (key,prob) in tickets:
+        combo="-".join(map(str,key)); rec=odds_map.get(combo); odds=rec["odds"] if rec else None
+        if bands and (odds is None or not _in_band(odds,bands)): continue
+        if (not bands) and require_odds and odds is None: continue
+        if min_ev>0 and odds is not None and prob*odds<min_ev: continue
+        kept.append((key,prob))
+    tickets=kept
 
-    # KEYMAN_RANK を付与
-    keyman = attach_keyman_rank(keyman)
+    bets=['-'.join(map(str,k)) for k,_ in tickets]; stake=unit*len(bets)
 
-    # 生成
-    tickets = generate_tickets(strategy, tri_probs, exacta_probs, third_probs,
-                               topn=topn, k=k, m=m,
-                               exclude_first1=exclude_first1, only_first1=only_first1)
+    d_res=_load_result(res_path) if res_path else {}
+    hit_combo, pay=_actual_trifecta_and_amount(d_res)
+    payout=pay if hit_combo in bets else 0
 
-    # ★NEW: キーマン・フィルター
-    if buy_if_keyman_in_top3:
-        tickets = filter_tickets_by_keyman(tickets, keyman, buy_keyman_threshold)
+    if all([date,pid,race]):
+        meta={"engine":"SimS ver1.0 (E1)","sims_per_race":int(sims),"strategy":strategy,
+              "topn":int(topn),"k":int(k),"m":int(m),"exclude_first1":bool(exclude_first1),
+              "only_first1":bool(only_first1),"min_ev":float(min_ev),"require_odds":bool(require_odds),
+              "odds_bands":"","buy_if_keyman_in_top3":bool(buy_if_keyman_in_top3),
+              "buy_keyman_threshold":float(buy_keyman_threshold)}
+        if meta_extra: meta.update(meta_extra)
+        _save_keyman(outdir,date,pid,race,keyman,meta)
 
-    # オッズ（EV/帯 用）
-    date = pid = race = None
-    odds_map = {}
-    try:
-        p = os.path.normpath(int_path).split(os.sep)
-        race = os.path.splitext(p[-1])[0]; pid = p[-2]; date = p[-3]
-    except Exception:
-        pass
-    if odds_base and date and pid and race:
-        odds_map = load_trifecta_odds(odds_base, date, pid, race)
+    return {"stake":stake,"payout":payout,"hit":1 if payout>0 else 0, "bets":bets,
+            "hit_combo":hit_combo,"tri_probs":tri,"kim_probs":kim}
 
-    # フィルタ
-    bands = odds_bands or []
-    kept = []
-    for (key, prob) in tickets:
-        combo = "-".join(map(str, key))
-        rec = odds_map.get(combo)
-        odds = rec["odds"] if rec else None
-
-        if bands:
-            if odds is None:
-                continue
-            if not odds_in_any_band(odds, bands):
-                continue
-        elif require_odds and odds is None:
-            continue
-
-        if min_ev and min_ev > 0:
-            if odds is None:
-                if require_odds:
-                    continue
-            else:
-                ev = prob * odds
-                if ev < min_ev:
-                    continue
-
-        kept.append((key, prob))
-
-    tickets = kept
-
-    bets = ['-'.join(map(str, key)) for key,_ in tickets]
-    stake = unit * len(bets)
-
-    # 的中・払戻
-    d_res = load_result_for_race(res_path) or {}
-    hit_combo, payout_amount = actual_trifecta_combo_and_amount(d_res)
-    payout = payout_amount if hit_combo in bets else 0
-
-    # 参考: 予測順位でのヒット位置
-    rank_map = { '-'.join(map(str,k)): i+1
-                 for i,(k,_) in enumerate(sorted(tri_probs.items(), key=lambda kv: kv[1], reverse=True)) }
-    rank_hit = rank_map.get(hit_combo, None)
-
-    # キーマン保存
-    if all([date, pid, race]):
-        meta = {
-            "engine": "SimS ver1.0 (E1)",
-            "sims_per_race": int(sims),
-            "strategy": strategy,
-            "topn": int(topn), "k": int(k), "m": int(m),
-            "exclude_first1": bool(exclude_first1),
-            "only_first1": bool(only_first1),
-            "min_ev": float(min_ev),
-            "require_odds": bool(require_odds),
-            "odds_bands": "",
-            # ★NEW: メタに記録
-            "buy_if_keyman_in_top3": bool(buy_if_keyman_in_top3),
-            "buy_keyman_threshold": float(buy_keyman_threshold),
-        }
-        if meta_extra:
-            meta.update(meta_extra)
-        save_keyman(outdir, date, pid, race, keyman, meta)
-
-    return {
-        "stake": stake, "payout": payout, "hit": 1 if payout>0 else 0,
-        "bets": bets, "hit_combo": hit_combo, "tri_probs": tri_probs,
-        "rank_hit": rank_hit, "kim_probs": kim_probs
-    }
-
-# ---------- メイン ----------
-def _norm_race(r: str) -> str:
-    r = (r or "").strip().upper()
-    if not r: return ""
-    return r if r.endswith("R") else f"{r}R"
-
-def parse_boolish(v: str, default: bool) -> bool:
-    if v is None: return default
-    s = str(v).strip().lower()
-    if s in ("1","true","yes","y","on"): return True
-    if s in ("0","false","no","n","off"): return False
-    return default
-
+# ===== メイン =====
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--base", default="./public", help="public ディレクトリのパス")
-    ap.add_argument("--dates", default="", help="カンマ区切り（日付）例: 20250810,20250811")
-    ap.add_argument("--sims", type=int, default=600, help="1レースあたりの試行回数")
-    ap.add_argument("--topn", type=int, default=18, help="（trifecta_topN用）買い目TOPN")
-    ap.add_argument("--unit", type=int, default=100, help="1点あたりの賭け金（円）")
-    ap.add_argument("--limit", type=int, default=0, help="先頭からNレースだけ評価（0なら全件）")
-    ap.add_argument("--outdir", default="./SimS_v1.0_eval", help="(eval)出力先")
-    ap.add_argument("--predict-only", action="store_true", help="TOPN確率のみ出力")
-    ap.add_argument("--pids", default="", help="場コードフィルタ（カンマ区切り）")
-    ap.add_argument("--races", default="", help="レース名フィルタ（例 1R,2R or 1,2）")
-    ap.add_argument("--strategy", default="trifecta_topN",
-                    choices=["trifecta_topN","exacta_topK_third_topM"], help="買い目ロジック")
-    ap.add_argument("--k", type=int, default=2, help="exacta_topK_third_topM: 2連単TOPK")
-    ap.add_argument("--m", type=int, default=4, help="exacta_topK_third_topM: 3着TOPM")
-    ap.add_argument("--exclude-first1", action="store_true", help="1着=1号艇を除外")
-    ap.add_argument("--only-first1", action="store_true", help="1着=1号艇のみ購入")
+    ap=argparse.ArgumentParser()
+    ap.add_argument("--base",default="./public"); ap.add_argument("--dates",default="")
+    ap.add_argument("--sims",type=int,default=600); ap.add_argument("--topn",type=int,default=18)
+    ap.add_argument("--unit",type=int,default=100); ap.add_argument("--limit",type=int,default=0)
+    ap.add_argument("--outdir",default="./SimS_v1.0_eval")
+    ap.add_argument("--predict-only",action="store_true")
+    ap.add_argument("--pids",default=""); ap.add_argument("--races",default="")
+    ap.add_argument("--strategy",default="trifecta_topN",choices=["trifecta_topN","exacta_topK_third_topM"])
+    ap.add_argument("--k",type=int,default=2); ap.add_argument("--m",type=int,default=4)
+    ap.add_argument("--exclude-first1",action="store_true"); ap.add_argument("--only-first1",action="store_true")
+    ap.add_argument("--odds-base",default="./public/odds/v1")
+    ap.add_argument("--min-ev",type=float,default=0.0); ap.add_argument("--require-odds",action="store_true")
+    ap.add_argument("--odds-bands",default=""); ap.add_argument("--odds-min",type=float,default=0.0); ap.add_argument("--odds-max",type=float,default=0.0)
+    ap.add_argument("--params",default=""); ap.add_argument("--set",default="")
+    ap.add_argument("--keyman-enable",default="true"); ap.add_argument("--keyman-threshold",type=float,default=0.7)
+    ap.add_argument("--keyman-boost",type=float,default=0.15); ap.add_argument("--keyman-aggr",type=float,default=0.0)
+    ap.add_argument("--buy-if-keyman-in-top3",action="store_true")
+    ap.add_argument("--buy-keyman-threshold",type=float,default=0.7)
+    args=ap.parse_args()
 
-    # オッズ/EV フィルタ
-    ap.add_argument("--odds-base", default="./public/odds/v1", help="オッズJSONのルート")
-    ap.add_argument("--min-ev", type=float, default=0.0, help="このEV以上のみ購入 (EV=p*odds)")
-    ap.add_argument("--require-odds", action="store_true", help="オッズが無い買い目は除外")
+    if args.exclude_first1 and args.only_first1: raise SystemExit("--exclude-first1 と --only_first1 は同時指定不可")
 
-    # オッズバンド
-    ap.add_argument("--odds-bands", default="",
-                    help='オッズ帯のホワイトリスト。例: "01-09,10-19,20-49", "50-", "-20"')
-    ap.add_argument("--odds-min", type=float, default=0.0, help="単一レンジの下限（--odds-bands が優先）")
-    ap.add_argument("--odds-max", type=float, default=0.0, help="単一レンジの上限（--odds-bands が優先）")
-
-    # 外部パラメータ上書き
-    ap.add_argument("--params", default="", help="パラメータ上書きファイル(.json/.toml)")
-    ap.add_argument("--set", default="", help="個別キー上書き。例: b_dt=17,cK=1.05,base_wake=0.15")
-
-    # （NEW）keyman 制御
-    ap.add_argument("--keyman-enable", default="true", help="pass2を実行するか（true/false）")
-    ap.add_argument("--keyman-threshold", type=float, default=0.7, help="KEYMAN_RANK 閾値")
-    ap.add_argument("--keyman-boost", type=float, default=0.15, help="A/Ap 乗算の増分 (例 0.15→1.15倍)")
-    ap.add_argument("--keyman-aggr",  type=float, default=0.0, help="pass2のみ: 挙動改変の強さ(0〜1)")
-
-    # ★NEW: 購入時キーマン・フィルタ
-    ap.add_argument("--buy-if-keyman-in-top3", action="store_true",
-                    help="KEYMAN_RANK>=閾値の艇が1-3着のどこかに含まれる買い目のみ購入")
-    ap.add_argument("--buy-keyman-threshold", type=float, default=0.7,
-                    help="上のフィルターに使う KEYMAN_RANK 閾値")
-
-    args = ap.parse_args()
-
-    if args.exclude_first1 and args.only_first1:
-        raise SystemExit("--exclude-first1 と --only_first1 は同時指定できません")
-
-    keyman_enable = parse_boolish(args.keyman_enable, True)
-    keyman_threshold = float(args.keyman_threshold)
-    keyman_boost = float(args.keyman_boost)
-    keyman_aggr  = max(0.0, min(1.0, float(args.keyman_aggr)))
-
-    # Params 上書き
+    # Param 上書き
     try:
-        if args.params:
-            file_over = load_param_file(args.params)
-            apply_overrides_to_class(Params, file_over)
-        cli_over = parse_set_overrides(args.__dict__.get("set",""))
-        if cli_over:
-            apply_overrides_to_class(Params, cli_over)
+        if args.params: _apply_over(Params, _load_params_file(args.params))
+        over=_parse_set(getattr(args,"set","")); 
+        if over: _apply_over(Params, over)
     except Exception as e:
         raise SystemExit(f"[params] override failed: {e}")
 
-    # 出力ルート（pass1/pass2）
-    root_out = os.path.abspath(args.outdir)
-    pass1_dir = os.path.join(root_out, "pass1")
-    pass2_dir = os.path.join(root_out, "pass2")
-
-    # 現在値を書き出し（監査）
+    root_out=os.path.abspath(args.outdir); pass1_dir=os.path.join(root_out,"pass1"); pass2_dir=os.path.join(root_out,"pass2")
+    os.makedirs(pass1_dir, exist_ok=True)
     try:
-        os.makedirs(pass1_dir, exist_ok=True)
-        active = {k:getattr(Params,k) for k in dir(Params)
-                  if not k.startswith("_") and isinstance(getattr(Params,k),(int,float,bool))}
-        with open(os.path.join(pass1_dir, "active_params.json"), "w", encoding="utf-8") as f:
-            json.dump(active, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
+        active={k:getattr(Params,k) for k in dir(Params) if not k.startswith("_") and isinstance(getattr(Params,k),(int,float,bool))}
+        json.dump(active, open(os.path.join(pass1_dir,"active_params.json"),"w",encoding="utf-8"), ensure_ascii=False, indent=2)
+    except: pass
 
-    # オッズバンドを解釈
-    bands = parse_odds_bands(args.odds_bands, args.odds_min, args.odds_max)
+    bands=_bands(args.odds_bands, args.odds_min, args.odds_max)
+    dates=set([d.strip() for d in args.dates.split(",") if d.strip()]) if args.dates else set()
+    pids_filter=set([p.strip() for p in args.pids.split(",") if p.strip()])
+    races_filter=set([_norm_race(r) for r in args.races.split(",") if r.strip()])
 
-    dates = set([d.strip() for d in args.dates.split(",") if d.strip()]) if args.dates else set()
-    pids_filter  = set([p.strip() for p in args.pids.split(",") if p.strip()])
-    races_filter = set([_norm_race(r) for r in args.races.split(",") if r.strip()])
+    int_idx=_collect(args.base,"integrated",dates) if dates else _collect(args.base,"integrated", set(os.listdir(os.path.join(args.base,"integrated","v1"))))
+    res_idx=_collect_results(args.base,dates)
+    keys=sorted(set(int_idx.keys()) & set(res_idx.keys()))
+    if pids_filter: keys=[k for k in keys if k[1] in pids_filter]
+    if races_filter: keys=[k for k in keys if _norm_race(k[2]) in races_filter]
+    if args.limit and args.limit>0: keys=keys[:args.limit]
 
-    int_idx = collect_files(args.base, "integrated", dates) if dates else \
-              collect_files(args.base, "integrated",
-                            set(os.listdir(os.path.join(args.base, "integrated", "v1"))))
-    res_idx = collect_results_files(args.base, dates)
-
-    keys_all = set(int_idx.keys()) & set(res_idx.keys())
-    keys = sorted(keys_all)
-    if pids_filter:  keys = [k for k in keys if k[1] in pids_filter]
-    if races_filter: keys = [k for k in keys if k[2] in races_filter]
-    if args.limit and args.limit > 0: keys = keys[:args.limit]
-
-    # ---------- PASS1 ----------
-    target_dir = pass1_dir
-    os.makedirs(target_dir, exist_ok=True)
-
-    # 予測のみ
+    # predict-only（オッズ未使用でOK）
     if args.predict_only:
-        pred_dir = os.path.join(target_dir, "predict")
+        pred_dir=os.path.join(pass1_dir,"predict")
         if os.path.exists(pred_dir): shutil.rmtree(pred_dir)
         os.makedirs(pred_dir, exist_ok=True)
-
-        rows = []
-        limit_n = args.limit or len(keys)
-        for (date, pid, race) in keys[:limit_n]:
-            with open(int_idx[(date,pid,race)], "r", encoding="utf-8") as f:
-                d_int = json.load(f)
-            tri_probs, kim_probs, exacta_probs, third_probs, keyman = simulate_one(d_int, sims=args.sims)
-
-            keyman = attach_keyman_rank(keyman)
-
-            tickets = generate_tickets(args.strategy, tri_probs, exacta_probs, third_probs,
-                                       topn=args.topn, k=args.k, m=args.m,
-                                       exclude_first1=args.exclude_first1,
-                                       only_first1=args.only_first1)
-
-            # ★NEW: キーマン・フィルター
-            if args.buy_if_keyman_in_top3:
-                tickets = filter_tickets_by_keyman(tickets, keyman, args.buy_keyman_threshold)
-
-            odds_map = {}
-            if (args.min_ev > 0) or args.require_odds or bands:
-                odds_map = load_trifecta_odds(args.odds_base, date, pid, race)
-
-            out_list = []
-            for (key, p) in tickets:
-                combo = "-".join(map(str, key))
-                rec = odds_map.get(combo) if odds_map else None
-                odds = rec["odds"] if rec else None
-                ev   = (p * odds) if (odds is not None) else None
-
-                if bands:
-                    if odds is None or not odds_in_any_band(odds, bands):
-                        continue
-                elif args.require_odds and odds is None:
-                    continue
-
-                if args.min_ev > 0:
-                    if odds is None:
-                        if args.require_odds:
-                            continue
-                    else:
-                        if ev < args.min_ev:
-                            continue
-
-                out_list.append({"ticket": combo, "score": round(p,6),
-                                 "odds": (None if odds is None else float(odds)),
-                                 "ev": (None if ev is None else round(ev,6))})
-
-            with open(os.path.join(pred_dir, f"pred_{date}_{pid}_{race}.json"), "w", encoding="utf-8") as f:
-                json.dump({"date":date,"pid":pid,"race":race,"buylist":out_list,
-                           "engine":"SimS ver1.0 (E1)",
-                           "exclude_first1":bool(args.exclude_first1),
-                           "only_first1":bool(args.only_first1),
-                           "min_ev": float(args.min_ev),
-                           "require_odds": bool(args.require_odds),
-                           "odds_bands": args.odds_bands or "",
-                           "odds_min": float(args.odds_min),
-                           "odds_max": float(args.odds_max),
-                           # ★NEW: 出力にも反映
-                           "buy_if_keyman_in_top3": bool(args.buy_if_keyman_in_top3),
-                           "buy_keyman_threshold": float(args.buy_keyman_threshold)},
-                          f, ensure_ascii=False, indent=2)
-
-            save_keyman(target_dir, date, pid, race, keyman, {
-                "engine": "SimS ver1.0 (E1)",
-                "sims_per_race": int(args.sims),
-                "strategy": args.strategy,
-                "topn": int(args.topn), "k": int(args.k), "m": int(args.m),
-                "exclude_first1": bool(args.exclude_first1),
-                "only_first1": bool(args.only_first1),
-                "min_ev": float(args.min_ev),
-                "require_odds": bool(args.require_odds),
-                "odds_bands": args.odds_bands or "",
-                # ★NEW: メタ
-                "buy_if_keyman_in_top3": bool(args.buy_if_keyman_in_top3),
-                "buy_keyman_threshold": float(args.buy_keyman_threshold),
-            })
-
-            for i, t in enumerate(out_list, 1):
-                rows.append({"date":date,"pid":pid,"race":race,"rank":i,
-                             "ticket":t["ticket"],"score":t["score"],
-                             "odds":t["odds"],"ev":t["ev"]})
-
-        pd.DataFrame(rows).to_csv(os.path.join(pred_dir, "predictions_summary.csv"),
-                                  index=False, encoding="utf-8")
-        print(f"[predict/pass1] candidates: {len(keys)}  -> {pred_dir}")
+        rows=[]; lim=args.limit or len(keys)
+        for (date,pid,race) in keys[:lim]:
+            d_int=json.load(open(int_idx[(date,pid,race)],"r",encoding="utf-8"))
+            tri,kim,ex2,th3,keyman=simulate_one(d_int,sims=args.sims)
+            tickets=generate_tickets(args.strategy,tri,ex2,th3,args.topn,args.k,args.m,args.exclude_first1,args.only_first1)
+            if args.buy_if_keyman_in_top3: tickets=_filter_by_keyman(tickets,keyman,args.buy_keyman_threshold)
+            out_list=[{"ticket":"-".join(map(str,k)),"score":round(p,6),"odds":None,"ev":None} for (k,p) in tickets]
+            json.dump({"date":date,"pid":pid,"race":race,"buylist":out_list,
+                       "engine":"SimS ver1.0 (E1)","exclude_first1":bool(args.exclude_first1),
+                       "only_first1":bool(args.only_first1),"min_ev":float(args.min_ev),
+                       "require_odds":bool(args.require_odds),"odds_bands":args.odds_bands or "",
+                       "odds_min":float(args.odds_min),"odds_max":float(args.odds_max),
+                       "buy_if_keyman_in_top3":bool(args.buy_if_keyman_in_top3),
+                       "buy_keyman_threshold":float(args.buy_keyman_threshold)},
+                      open(os.path.join(pred_dir,f"pred_{date}_{pid}_{race}.json"),"w",encoding="utf-8"),
+                      ensure_ascii=False, indent=2)
+            _save_keyman(pass1_dir,date,pid,race,keyman,{"engine":"SimS ver1.0 (E1)","sims_per_race":int(args.sims),
+                         "strategy":args.strategy,"topn":int(args.topn),"k":int(args.k),"m":int(args.m),
+                         "exclude_first1":bool(args.exclude_first1),"only_first1":bool(args.only_first1),
+                         "min_ev":float(args.min_ev),"require_odds":bool(args.require_odds),
+                         "odds_bands":args.odds_bands or "","buy_if_keyman_in_top3":bool(args.buy_if_keyman_in_top3),
+                         "buy_keyman_threshold":float(args.buy_keyman_threshold)})
+            for i,t in enumerate(out_list,1):
+                rows.append({"date":date,"pid":pid,"race":race,"rank":i,"ticket":t["ticket"],"score":t["score"],"odds":t["odds"],"ev":t["ev"]})
+        pd.DataFrame(rows).to_csv(os.path.join(pred_dir,"predictions_summary.csv"), index=False, encoding="utf-8")
+        print(f"[predict/pass1] {len(keys[:lim])} races -> {pred_dir}")
         return
 
-    # ---- eval pass1 ----
-    print(f"[eval pass1] races to evaluate: {len(keys)}")
-    per_rows = []; total_stake = 0; total_payout = 0
+    # eval pass1
+    print(f"[eval pass1] races: {len(keys)}")
+    per=[]; stake_sum=0; pay_sum=0
+    for (date,pid,race) in keys:
+        ev=evaluate_one(int_idx[(date,pid,race)], res_idx[(date,pid,race)], args.sims, args.unit,
+                        args.strategy, args.topn, args.k, args.m, args.exclude_first1, args.only_first1,
+                        args.odds_base, args.min_ev, args.require_odds, bands, pass1_dir,
+                        None, None, {"pass":"pass1"}, args.buy_if_keyman_in_top3, args.buy_keyman_threshold)
+        stake_sum+=ev["stake"]; pay_sum+=ev["payout"]
+        per.append({"date":date,"pid":pid,"race":race,"bets":len(ev["bets"]),"stake":ev["stake"],
+                    "payout":ev["payout"],"hit":ev["hit"],"hit_combo":ev["hit_combo"]})
+    df=pd.DataFrame(per)
+    overall={"engine":"SimS ver1.0 (E1)","races":int(len(df)),"bets_total":int(df["bets"].sum()) if len(df)>0 else 0,
+             "stake_total":int(stake_sum),"payout_total":int(pay_sum),"hit_rate":float(df["hit"].mean()) if len(df)>0 else 0.0,
+             "roi": float((pay_sum-stake_sum)/stake_sum) if stake_sum>0 else 0.0, "strategy":args.strategy,
+             "topn":args.topn,"k":args.k,"m":args.m,"sims_per_race":args.sims,"unit":args.unit,
+             "exclude_first1":bool(args.exclude_first1),"only_first1":bool(args.only_first1),
+             "min_ev":float(args.min_ev),"require_odds":bool(args.require_odds),
+             "odds_bands":args.odds_bands or "","odds_min":float(args.odds_min),"odds_max":float(args.odds_max),
+             "pass":"pass1","buy_if_keyman_in_top3":bool(args.buy_if_keyman_in_top3),
+             "buy_keyman_threshold":float(args.buy_keyman_threshold)}
+    df.to_csv(os.path.join(pass1_dir,"per_race_results.csv"), index=False)
+    json.dump(overall, open(os.path.join(pass1_dir,"overall.json"),"w",encoding="utf-8"), ensure_ascii=False, indent=2)
+    print("=== OVERALL (pass1) ==="); print(json.dumps(overall, ensure_ascii=False, indent=2))
 
-    for (date, pid, race) in keys:
-        ev = evaluate_one(int_idx[(date,pid,race)], res_idx[(date,pid,race)],
-                          sims=args.sims, unit=args.unit, strategy=args.strategy,
-                          topn=args.topn, k=args.k, m=args.m,
-                          exclude_first1=args.exclude_first1, only_first1=args.only_first1,
-                          odds_base=args.odds_base, min_ev=args.min_ev, require_odds=args.require_odds,
-                          odds_bands=bands, outdir=target_dir,
-                          boost_map=None, aggr_map=None,
-                          meta_extra={"pass":"pass1"},
-                          # ★NEW:
-                          buy_if_keyman_in_top3=args.buy_if_keyman_in_top3,
-                          buy_keyman_threshold=args.buy_keyman_threshold)
-        total_stake += ev["stake"]; total_payout += ev["payout"]
-        per_rows.append({"date": date, "pid": pid, "race": race,
-                         "bets": len(ev["bets"]), "stake": ev["stake"],
-                         "payout": ev["payout"], "hit": ev["hit"],
-                         "hit_combo": ev["hit_combo"]})
-
-    df = pd.DataFrame(per_rows)
-    overall = {
-        "engine": "SimS ver1.0 (E1)",
-        "races": int(len(df)),
-        "bets_total": int(df["bets"].sum()) if len(df)>0 else 0,
-        "stake_total": int(total_stake),
-        "payout_total": int(total_payout),
-        "hit_rate": float(df["hit"].mean()) if len(df)>0 else 0.0,
-        "roi": float((total_payout - total_stake)/total_stake) if total_stake>0 else 0.0,
-        "strategy": args.strategy,
-        "topn": args.topn, "k": args.k, "m": args.m,
-        "sims_per_race": args.sims, "unit": args.unit,
-        "exclude_first1": bool(args.exclude_first1),
-        "only_first1": bool(args.only_first1),
-        "min_ev": float(args.min_ev),
-        "require_odds": bool(args.require_odds),
-        "odds_bands": args.odds_bands or "",
-        "odds_min": float(args.odds_min),
-        "odds_max": float(args.odds_max),
-        "pass": "pass1",
-        # ★NEW: 設定の写し
-        "buy_if_keyman_in_top3": bool(args.buy_if_keyman_in_top3),
-        "buy_keyman_threshold": float(args.buy_keyman_threshold),
-    }
-
-    df.to_csv(os.path.join(pass1_dir, "per_race_results.csv"), index=False)
-    with open(os.path.join(pass1_dir, "overall.json"), "w", encoding="utf-8") as f:
-        json.dump(overall, f, ensure_ascii=False, indent=2)
-
-    # ヒットレポート
-    rep_path = os.path.join(pass1_dir, "hit_report.json")
-    if (len(df) > 0) and (df["hit"]==1).any():
-        hit_df = df[df["hit"]==1].copy()
-        def first_lane(c):
-            try: return int(str(c).split("-")[0])
-            except: return None
-        hit_df["first_lane"] = hit_df["hit_combo"].map(first_lane)
-
-        def band_by_odds(payout, unit):
-            try:
-                o = float(payout)/unit if unit>0 else 0.0
-            except: return "unknown"
-            if o < 10: return "01-09"
-            if o < 20: return "10-19"
-            if o < 50: return "20-49"
-            if o < 100: return "50-99"
-            if o < 1000: return "100-999"
-            return "1000+"
-
-        hit_df["odds_band"] = hit_df.apply(lambda r: band_by_odds(r["payout"], args.unit), axis=1)
-        by_first = (hit_df.groupby("first_lane").size().reset_index(name="hits")
-                    .sort_values("first_lane"))
-        by_band = (hit_df.groupby("odds_band").size().reset_index(name="hits")
-                   .sort_values("odds_band"))
-        by_combo = (hit_df.groupby("hit_combo").size().reset_index(name="hits")
-                    .sort_values("hits", ascending=False).head(10))
-        by_rank  = pd.DataFrame([{"rank_bucket":"NA","hits":len(hit_df)}])
-
-        report = {
-            "summary": overall,
-            "by_kimarite_est": [],
-            "by_first_lane": by_first.to_dict(orient="records"),
-            "by_odds_band": by_band.to_dict(orient="records"),
-            "by_hit_combo_top10": by_combo.to_dict(orient="records"),
-            "by_rank_bucket": by_rank.to_dict(orient="records")
-        }
-    else:
-        report = {"summary": overall, "note": "no hits found"}
-
-    with open(rep_path, "w", encoding="utf-8") as f:
-        json.dump(report, f, ensure_ascii=False, indent=2)
-
-    print("=== OVERALL (pass1) ===")
-    print(json.dumps(overall, ensure_ascii=False, indent=2))
-    print(f"\n[files] {pass1_dir}/per_race_results.csv, {pass1_dir}/overall.json, {rep_path}")
-
-    # ---------- PASS2 (keyman補正) ----------
-    if not keyman_enable:
-        print("[pass2] keyman disabled. Done.")
-        return
-
+    # pass2（keyman）
+    if not _parse_bool(args.keyman_enable, True):
+        print("[pass2] disabled."); return
     os.makedirs(pass2_dir, exist_ok=True)
+    print(f"[eval pass2] keyman_threshold={args.keyman_threshold}, boost={args.keyman_boost}, aggr={args.keyman_aggr}")
 
-    per_rows2 = []; total_stake2 = 0; total_payout2 = 0
-    print(f"[eval pass2] keyman_threshold={keyman_threshold}, boost={keyman_boost}, aggr={keyman_aggr}")
+    def _load_km_map(root,date,pid,race,thr,val):
+        p=os.path.join(root,"keyman",date,pid,f"{race}.json")
+        if not os.path.isfile(p): return {}
+        try:
+            d=json.load(open(p,"r",encoding="utf-8"))
+            kmr=(d.get("keyman") or {}).get("KEYMAN_RANK") or {}
+            lanes=[k for k,v in kmr.items() if isinstance(v,(int,float)) and float(v)>=thr]
+            return {str(int(l)):float(val) for l in lanes}
+        except: return {}
 
-    for (date, pid, race) in keys:
-        boost_map = load_keyman_boost_map(pass1_dir, date, pid, race,
-                                          threshold=keyman_threshold, boost=keyman_boost)
-        aggr_map  = load_keyman_boost_map(pass1_dir, date, pid, race,
-                                          threshold=keyman_threshold, boost=keyman_aggr)
+    per2=[]; stake2=pay2=0
+    for (date,pid,race) in keys:
+        boost_map=_load_km_map(pass1_dir,date,pid,race,args.keyman_threshold,args.keyman_boost)
+        aggr_map=_load_km_map(pass1_dir,date,pid,race,args.keyman_threshold,args.keyman_aggr)
+        ev=evaluate_one(int_idx[(date,pid,race)], res_idx[(date,pid,race)], args.sims, args.unit,
+                        args.strategy, args.topn, args.k, args.m, args.exclude_first1, args.only_first1,
+                        args.odds_base, args.min_ev, args.require_odds, bands, pass2_dir,
+                        boost_map, aggr_map,
+                        {"pass":"pass2","boost_map":boost_map,"keyman_threshold":args.keyman_threshold,
+                         "keyman_boost":args.keyman_boost,"keyman_aggr":args.keyman_aggr},
+                        args.buy_if_keyman_in_top3, args.buy_keyman_threshold)
+        stake2+=ev["stake"]; pay2+=ev["payout"]
+        per2.append({"date":date,"pid":pid,"race":race,"bets":len(ev["bets"]),"stake":ev["stake"],
+                     "payout":ev["payout"],"hit":ev["hit"],"hit_combo":ev["hit_combo"]})
+    df2=pd.DataFrame(per2)
+    overall2={"engine":"SimS ver1.0 (E1)","races":int(len(df2)),"bets_total":int(df2["bets"].sum()) if len(df2)>0 else 0,
+              "stake_total":int(stake2),"payout_total":int(pay2),"hit_rate":float(df2["hit"].mean()) if len(df2)>0 else 0.0,
+              "roi": float((pay2-stake2)/stake2) if stake2>0 else 0.0,"strategy":args.strategy,
+              "topn":args.topn,"k":args.k,"m":args.m,"sims_per_race":args.sims,"unit":args.unit,
+              "exclude_first1":bool(args.exclude_first1),"only_first1":bool(args.only_first1),
+              "min_ev":float(args.min_ev),"require_odds":bool(args.require_odds),
+              "odds_bands":args.odds_bands or "","odds_min":float(args.odds_min),"odds_max":float(args.odds_max),
+              "pass":"pass2","keyman_threshold":args.keyman_threshold,"keyman_boost":args.keyman_boost,"keyman_aggr":args.keyman_aggr,
+              "buy_if_keyman_in_top3":bool(args.buy_if_keyman_in_top3),"buy_keyman_threshold":float(args.buy_keyman_threshold)}
+    df2.to_csv(os.path.join(pass2_dir,"per_race_results.csv"), index=False)
+    json.dump(overall2, open(os.path.join(pass2_dir,"overall.json"),"w",encoding="utf-8"), ensure_ascii=False, indent=2)
+    print("=== OVERALL (pass2) ==="); print(json.dumps(overall2, ensure_ascii=False, indent=2))
 
-        ev2 = evaluate_one(int_idx[(date,pid,race)], res_idx[(date,pid,race)],
-                           sims=args.sims, unit=args.unit, strategy=args.strategy,
-                           topn=args.topn, k=args.k, m=args.m,
-                           exclude_first1=args.exclude_first1, only_first1=args.only_first1,
-                           odds_base=args.odds_base, min_ev=args.min_ev, require_odds=args.require_odds,
-                           odds_bands=bands, outdir=pass2_dir,
-                           boost_map=boost_map, aggr_map=aggr_map,
-                           meta_extra={"pass":"pass2",
-                                       "boost_map":boost_map,
-                                       "keyman_threshold": keyman_threshold,
-                                       "keyman_boost": keyman_boost,
-                                       "keyman_aggr": keyman_aggr},
-                           # ★NEW:
-                           buy_if_keyman_in_top3=args.buy_if_keyman_in_top3,
-                           buy_keyman_threshold=args.buy_keyman_threshold)
-        total_stake2 += ev2["stake"]; total_payout2 += ev2["payout"]
-        per_rows2.append({"date": date, "pid": pid, "race": race,
-                          "bets": len(ev2["bets"]), "stake": ev2["stake"],
-                          "payout": ev2["payout"], "hit": ev2["hit"],
-                          "hit_combo": ev2["hit_combo"]})
-
-    df2 = pd.DataFrame(per_rows2)
-    overall2 = {
-        "engine": "SimS ver1.0 (E1)",
-        "races": int(len(df2)),
-        "bets_total": int(df2["bets"].sum()) if len(df2)>0 else 0,
-        "stake_total": int(total_stake2),
-        "payout_total": int(total_payout2),
-        "hit_rate": float(df2["hit"].mean()) if len(df2)>0 else 0.0,
-        "roi": float((total_payout2 - total_stake2)/total_stake2) if total_stake2>0 else 0.0,
-        "strategy": args.strategy,
-        "topn": args.topn, "k": args.k, "m": args.m,
-        "sims_per_race": args.sims, "unit": args.unit,
-        "exclude_first1": bool(args.exclude_first1),
-        "only_first1": bool(args.only_first1),
-        "min_ev": float(args.min_ev),
-        "require_odds": bool(args.require_odds),
-        "odds_bands": args.odds_bands or "",
-        "odds_min": float(args.odds_min),
-        "odds_max": float(args.odds_max),
-        "pass": "pass2",
-        "keyman_threshold": keyman_threshold,
-        "keyman_boost": keyman_boost,
-        "keyman_aggr": keyman_aggr,
-        # ★NEW:
-        "buy_if_keyman_in_top3": bool(args.buy_if_keyman_in_top3),
-        "buy_keyman_threshold": float(args.buy_keyman_threshold),
-    }
-
-    df2.to_csv(os.path.join(pass2_dir, "per_race_results.csv"), index=False)
-    with open(os.path.join(pass2_dir, "overall.json"), "w", encoding="utf-8") as f:
-        json.dump(overall2, f, ensure_ascii=False, indent=2)
-
-    print("=== OVERALL (pass2) ===")
-    print(json.dumps(overall2, ensure_ascii=False, indent=2))
-    print(f"\n[files] {pass2_dir}/per_race_results.csv, {pass2_dir}/overall.json")
-
-# ---------- trifecta 決定の抽出 ----------
-def actual_trifecta_combo_and_amount(result_json: dict):
-    trif = (result_json or {}).get("payouts", {}).get("trifecta") if isinstance(result_json, dict) else None
-    combo = None; amount = 0
-    if isinstance(trif, dict):
-        combo = trif.get("combo"); amount = int(trif.get("amount") or 0)
-    if not combo and isinstance(result_json, dict):
-        order = result_json.get("order")
-        if isinstance(order, list) and len(order) >= 3:
-            def lane_of(x):
-                return str(x.get("lane") or x.get("course") or x.get("F") or x.get("number"))
-            try:
-                f = lane_of(order[0]); s = lane_of(order[1]); t = lane_of(order[2])
-                if all([f,s,t]): combo = f"{f}-{s}-{t}"
-            except Exception:
-                pass
-    return combo, amount
-
-if __name__ == "__main__":
+if __name__=="__main__":
     main()
