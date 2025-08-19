@@ -9,9 +9,9 @@ on:
       SIMS:   { description: "試行回数/レース", required: true, default: "600", type: string }
       TOPN:   { description: "三連単 TOPN", required: true, default: "18", type: string }
       UNIT:   { description: "1点あたり(円)", required: true, default: "100", type: string }
-      FILTERS: { description: "例: require_odds=true,min_ev=1.2,odds_bands=01-09,10-19", required: false, default: "", type: string }
-      KEYMAN:  { description: "例: enable=true,thr=0.7,boost=0.15,aggr=0.0,buy_in_top3=false,buy_thr=0.7", required: false, default: "enable=true,thr=0.7,boost=0.15,aggr=0.0,buy_in_top3=false,buy_thr=0.7", type: string }
-      OUTDIR:  { description: "出力ディレクトリ", required: false, default: "scripts/sims", type: string }
+      FILTERS:{ description: "require_odds=true,min_ev=1.2,odds_bands=01-09,10-19,exclude_first1=true,only_first1=false,buy_in_top3=false,buy_thr=0.7", required: false, default: "", type: string }
+      KEYMAN: { description: "thr=0.7,boost=0.15,aggr=0.0 （無効化は thr=10,boost=0,aggr=0 等）", required: false, default: "thr=0.7,boost=0.15,aggr=0.0", type: string }
+      OUTDIR: { description: "出力ディレクトリ", required: false, default: "scripts/sims", type: string }
 
 permissions:
   contents: write
@@ -58,21 +58,20 @@ jobs:
               fi
             done
           }
-          # filter defaults
-          echo "F_REQUIRE_ODDS=false" >> $GITHUB_OUTPUT
-          echo "F_MIN_EV=0"          >> $GITHUB_OUTPUT
-          echo "F_ODDS_BANDS="       >> $GITHUB_OUTPUT
-          echo "F_ODDS_MIN=0"        >> $GITHUB_OUTPUT
-          echo "F_ODDS_MAX=0"        >> $GITHUB_OUTPUT
-          echo "F_EXCLUDE_FIRST1=false" >> $GITHUB_OUTPUT
-          echo "F_ONLY_FIRST1=false"    >> $GITHUB_OUTPUT
-          echo "F_BUY_IN_TOP3=false"    >> $GITHUB_OUTPUT
-          echo "F_BUY_THR=0.7"          >> $GITHUB_OUTPUT
-          # keyman defaults
-          echo "K_ENABLE=true"   >> $GITHUB_OUTPUT
-          echo "K_THR=0.7"       >> $GITHUB_OUTPUT
-          echo "K_BOOST=0.15"    >> $GITHUB_OUTPUT
-          echo "K_AGGR=0.0"      >> $GITHUB_OUTPUT
+          # FILTERS defaults
+          echo "F_REQUIRE_ODDS=false"   >> $GITHUB_OUTPUT
+          echo "F_MIN_EV=0"            >> $GITHUB_OUTPUT
+          echo "F_ODDS_BANDS="         >> $GITHUB_OUTPUT
+          echo "F_ODDS_MIN=0"          >> $GITHUB_OUTPUT
+          echo "F_ODDS_MAX=0"          >> $GITHUB_OUTPUT
+          echo "F_EXCLUDE_FIRST1=false">> $GITHUB_OUTPUT
+          echo "F_ONLY_FIRST1=false"   >> $GITHUB_OUTPUT
+          echo "F_BUY_IN_TOP3=false"   >> $GITHUB_OUTPUT
+          echo "F_BUY_THR=0.7"         >> $GITHUB_OUTPUT
+          # KEYMAN defaults
+          echo "K_THR=0.7"   >> $GITHUB_OUTPUT
+          echo "K_BOOST=0.15">> $GITHUB_OUTPUT
+          echo "K_AGGR=0.0"  >> $GITHUB_OUTPUT
           [ -n "${FILTERS:-}" ] && parse_kvlist "$FILTERS" "F_"
           [ -n "${KEYMAN:-}" ]  && parse_kvlist "$KEYMAN"  "K_"
 
@@ -96,7 +95,7 @@ jobs:
             --predict-only \
             --outdir "$OUTDIR"
 
-      # 2) ML推論（TENKAI）— 出力は TENKAI/predictions/v1/<DATE>/<pid>/<race>.csv
+      # 2) ML推論（TENKAI）
       - name: Run TENKAI prediction
         env:
           DATE: ${{ inputs.DATE }}
@@ -105,14 +104,13 @@ jobs:
           set -euo pipefail
           mkdir -p "TENKAI/predictions/v1/$DATE"
           echo "[tenkai] $DATE / $PID"
-          python TENKAI/tenkai_predict_integrated.py \
-            --date "$DATE" --pid "$PID"
+          python TENKAI/tenkai_predict_integrated.py --date "$DATE" --pid "$PID"
 
       - name: Show ML CSVs
         run: |
           find TENKAI/predictions/v1/${{ inputs.DATE }} -maxdepth 2 -type f -name '*.csv' | sort || true
 
-      # 3) Pass2: MLを読み込んだ統合SimS
+      # 3) Pass2: ML統合SimS
       - name: Run Pass2 (SimS integrated with ML)
         env:
           DATE:  ${{ inputs.DATE }}
@@ -121,7 +119,7 @@ jobs:
           SIMS:  ${{ inputs.SIMS }}
           TOPN:  ${{ inputs.TOPN }}
           OUTDIR: ${{ inputs.OUTDIR }}
-          # parsed filters
+          # parsed FILTERS
           F_REQUIRE_ODDS:   ${{ steps.parse.outputs.F_REQUIRE_ODDS }}
           F_MIN_EV:         ${{ steps.parse.outputs.F_MIN_EV }}
           F_ODDS_BANDS:     ${{ steps.parse.outputs.F_ODDS_BANDS }}
@@ -131,26 +129,19 @@ jobs:
           F_ONLY_FIRST1:    ${{ steps.parse.outputs.F_ONLY_FIRST1 }}
           F_BUY_IN_TOP3:    ${{ steps.parse.outputs.F_BUY_IN_TOP3 }}
           F_BUY_THR:        ${{ steps.parse.outputs.F_BUY_THR }}
-          # parsed keyman
-          K_ENABLE: ${{ steps.parse.outputs.K_ENABLE }}
-          K_THR:    ${{ steps.parse.outputs.K_THR }}
-          K_BOOST:  ${{ steps.parse.outputs.K_BOOST }}
-          K_AGGR:   ${{ steps.parse.outputs.K_AGGR }}
+          # parsed KEYMAN
+          K_THR:   ${{ steps.parse.outputs.K_THR }}
+          K_BOOST: ${{ steps.parse.outputs.K_BOOST }}
+          K_AGGR:  ${{ steps.parse.outputs.K_AGGR }}
         run: |
           set -euo pipefail
           echo "[pass2] MODE=$MODE  DATE=$DATE PID=$PID"
 
           ARGS_COMMON="--base public --dates $DATE --pids $PID \
-            --sims $SIMS --topn $TOPN \
-            --keyman-threshold $K_THR \
-            --keyman-boost $K_BOOST --keyman-aggr $K_AGGR \
+            --sims $SIMS --strategy trifecta_topN --topn $TOPN \
+            --keyman-threshold $K_THR --keyman-boost $K_BOOST --keyman-aggr $K_AGGR \
             --ml-root TENKAI/predictions/v1 \
             --outdir $OUTDIR"
-
-          # keyman-enable はフラグ
-          if [ "${K_ENABLE,,}" = "true" ]; then
-            ARGS_COMMON="$ARGS_COMMON --keyman-enable"
-          fi
 
           # optional filters
           [ "${F_EXCLUDE_FIRST1,,}" = "true" ] && ARGS_COMMON="$ARGS_COMMON --exclude-first1"
@@ -166,9 +157,7 @@ jobs:
             [ -n "${F_ODDS_MAX}" ]   && [ "$F_ODDS_MAX" != "0" ] && ARGS_FILTER="$ARGS_FILTER --odds-max $F_ODDS_MAX"
             [ "${F_REQUIRE_ODDS,,}" = "true" ] && ARGS_FILTER="$ARGS_FILTER --require-odds"
             [ -n "${F_MIN_EV}" ] && [ "$F_MIN_EV" != "0" ] && ARGS_FILTER="$ARGS_FILTER --min-ev $F_MIN_EV"
-
-            eval python scripts/sims/sims_integrated.py $ARGS_COMMON \
-              --odds-base public/odds/v1 $ARGS_FILTER
+            eval python scripts/sims/sims_integrated.py $ARGS_COMMON --odds-base public/odds/v1 $ARGS_FILTER
           fi
 
       - name: Commit results into repo
