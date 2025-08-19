@@ -1,12 +1,11 @@
-# sims.py  (diet v1) — SimS ver1.0 同時同条件バッチ検証 + キーマン出力 + pass1/pass2
+# sims.py  (diet v1.1) — SimS ver1.0 同時同条件バッチ検証 + キーマン出力 + pass1/pass2
 # 目的：1ファイル維持・出力不変・乱数消費順不変のままコードダイエット
 # 変更概要：
 # - ユーティリティの統合・早期return化でネスト削減
 # - I/O正規化・共通化
 # - 内包表記/小関数化（※乱数呼び出し位置は不変）
 # - コメントは要点のみ残し
-#
-# 使い方は従来通り。--predict-only ではオッズ未使用でTOPN出力（odds/evはnull）。
+# - ★ v1.1: predict-only 時は results 不要（integrated 単独で keys を作成）
 
 import os, json, math, argparse, shutil
 from collections import Counter, defaultdict
@@ -499,9 +498,16 @@ def main():
     pids_filter=set([p.strip() for p in args.pids.split(",") if p.strip()])
     races_filter=set([_norm_race(r) for r in args.races.split(",") if r.strip()])
 
+    # --- インデックス ---
     int_idx=_collect(args.base,"integrated",dates) if dates else _collect(args.base,"integrated", set(os.listdir(os.path.join(args.base,"integrated","v1"))))
-    res_idx=_collect_results(args.base,dates)
-    keys=sorted(set(int_idx.keys()) & set(res_idx.keys()))
+
+    # ★ここが v1.1 のポイント：predict-only なら results を見に行かない
+    if args.predict_only:
+        keys = sorted(int_idx.keys())
+    else:
+        res_idx=_collect_results(args.base,dates)
+        keys=sorted(set(int_idx.keys()) & set(res_idx.keys()))
+
     if pids_filter: keys=[k for k in keys if k[1] in pids_filter]
     if races_filter: keys=[k for k in keys if _norm_race(k[2]) in races_filter]
     if args.limit and args.limit>0: keys=keys[:args.limit]
@@ -539,7 +545,10 @@ def main():
         print(f"[predict/pass1] {len(keys[:lim])} races -> {pred_dir}")
         return
 
-    # eval pass1
+    # 以降は eval（results 必須）
+    res_idx=_collect_results(args.base,dates)
+    # keys は既に ∩ 済み
+
     print(f"[eval pass1] races: {len(keys)}")
     per=[]; stake_sum=0; pay_sum=0
     for (date,pid,race) in keys:
