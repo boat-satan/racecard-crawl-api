@@ -1,31 +1,45 @@
-name: Train models (tansyo + kimarite)
+name: Train TENKAI models (tansyo + kimarite)
 
 on:
   workflow_dispatch:
     inputs:
+      tasks:
+        description: "学習タスク: both / tansyo / kimarite"
+        required: false
+        default: "both"
       dates:
-        description: "学習対象日(カンマ区切り) or ALL"
+        description: "学習対象日(カンマ区切り) or ALL（例: 20250801,20250802 / ALL）"
         required: false
         default: "ALL"
+      date_tag:
+        description: "モデル保存用タグ日付（空=自動: --dates最大 or datasets最新）"
+        required: false
+        default: ""
       pid:
-        description: "場コード (空=ALL)"
+        description: "場コード pid（空=ALL場まとめ）"
         required: false
         default: ""
       race:
-        description: "レース (空=ALL)"
+        description: "レース（空=ALL）"
         required: false
         default: ""
 
 permissions:
   contents: write
 
+concurrency:
+  group: tenkai-train-models-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   train-models:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
@@ -34,32 +48,55 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas scikit-learn joblib lightgbm
 
-      - name: Ensure package
+      - name: Ensure TENKAI package
         run: |
           mkdir -p TENKAI
           [ -f TENKAI/__init__.py ] || printf "" > TENKAI/__init__.py
 
-      - name: Train (both by default)
+      - name: Train models (defaults to both)
+        shell: bash
         run: |
+          set -euo pipefail
+          TASKS="${{ github.event.inputs.tasks || 'both' }}"
+          DATES="${{ github.event.inputs.dates || 'ALL' }}"
+          PID_OPT=""
+          RACE_OPT=""
+          DATE_TAG_OPT=""
+
+          [ -n "${{ github.event.inputs.pid }}" ]  && PID_OPT="--pid ${{ github.event.inputs.pid }}"
+          [ -n "${{ github.event.inputs.race }}" ] && RACE_OPT="--race ${{ github.event.inputs.race }}"
+          [ -n "${{ github.event.inputs.date_tag }}" ] && DATE_TAG_OPT="--date ${{ github.event.inputs.date_tag }}"
+
+          echo ">>> RUN: python TENKAI/train_models.py --tasks ${TASKS} --dates ${DATES} ${DATE_TAG_OPT} ${PID_OPT} ${RACE_OPT}"
           PYTHONPATH="." python TENKAI/train_models.py \
-            --dates "${{ github.event.inputs.dates || 'ALL' }}" \
-            --pid   "${{ github.event.inputs.pid }}" \
-            --race  "${{ github.event.inputs.race }}" \
-            --mode both
+            --tasks "${TASKS}" \
+            --dates "${DATES}" \
+            ${DATE_TAG_OPT} \
+            ${PID_OPT} \
+            ${RACE_OPT}
 
       - name: Commit artifacts
+        shell: bash
         run: |
+          set -euo pipefail
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add TENKAI/models_tansyo/v1/** TENKAI/models_kimarite/v1/** || true
-          git diff --cached --quiet || git commit -m "models: dates=${{ github.event.inputs.dates || 'AUTO' }} pid=${{ github.event.inputs.pid || 'ALL' }} race=${{ github.event.inputs.race || 'ALL' }}"
+          # どちらのタスクでも出力があれば拾う
+          git add TENKAI/models_tansyo/v1/** || true
+          git add TENKAI/models_kimarite/v1/** || true
+          git diff --cached --quiet || git commit -m "TENKAI models: tasks=${{ github.event.inputs.tasks || 'both' }} dates=${{ github.event.inputs.dates || 'ALL' }} pid=${{ github.event.inputs.pid || 'ALL' }} race=${{ github.event.inputs.race || 'ALL' }} tag=${{ github.event.inputs.date_tag || 'AUTO' }}"
           git push || true
 
-      - name: Upload artifacts
+      - name: Upload artifacts (tansyo)
         uses: actions/upload-artifact@v4
         with:
-          name: models-${{ github.event.inputs.dates || 'AUTO' }}
-          path: |
-            TENKAI/models_tansyo/v1/**
-            TENKAI/models_kimarite/v1/**
+          name: tenkai-models-tansyo-${{ github.event.inputs.dates || 'ALL' }}-${{ github.event.inputs.pid && github.event.inputs.pid || 'ALL' }}-${{ github.event.inputs.race && github.event.inputs.race || 'ALL' }}-${{ github.event.inputs.date_tag || 'AUTO' }}
+          path: TENKAI/models_tansyo/v1/**
+          if-no-files-found: warn
+
+      - name: Upload artifacts (kimarite)
+        uses: actions/upload-artifact@v4
+        with:
+          name: tenkai-models-kimarite-${{ github.event.inputs.dates || 'ALL' }}-${{ github.event.inputs.pid && github.event.inputs.pid || 'ALL' }}-${{ github.event.inputs.race && github.event.inputs.race || 'ALL' }}-${{ github.event.inputs.date_tag || 'AUTO' }}
+          path: TENKAI/models_kimarite/v1/**
           if-no-files-found: warn
