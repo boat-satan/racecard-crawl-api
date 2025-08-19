@@ -141,11 +141,16 @@ jobs:
           echo "[pass2] MODE=$MODE  DATE=$DATE PID=$PID"
 
           ARGS_COMMON="--base public --dates $DATE --pids $PID \
-            --sims $SIMS --strategy trifecta_topN --topn $TOPN \
-            --keyman-enable $K_ENABLE --keyman-threshold $K_THR \
+            --sims $SIMS --topn $TOPN \
+            --keyman-threshold $K_THR \
             --keyman-boost $K_BOOST --keyman-aggr $K_AGGR \
             --ml-root TENKAI/predictions/v1 \
             --outdir $OUTDIR"
+
+          # keyman-enable はフラグ
+          if [ "${K_ENABLE,,}" = "true" ]; then
+            ARGS_COMMON="$ARGS_COMMON --keyman-enable"
+          fi
 
           # optional filters
           [ "${F_EXCLUDE_FIRST1,,}" = "true" ] && ARGS_COMMON="$ARGS_COMMON --exclude-first1"
