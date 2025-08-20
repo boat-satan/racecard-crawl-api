@@ -96,7 +96,6 @@ jobs:
               fi
             done
           }
-          # filter defaults
           {
             echo "F_REQUIRE_ODDS=false"
             echo "F_MIN_EV=0"
@@ -108,7 +107,6 @@ jobs:
             echo "F_BUY_IN_TOP3=false"
             echo "F_BUY_THR=0.7"
           } >> "$GITHUB_OUTPUT"
-          # keyman defaults
           {
             echo "K_ENABLE=true"
             echo "K_THR=0.7"
@@ -143,7 +141,6 @@ jobs:
           echo "PID_EXP=$PID_EXP" | tee -a "$GITHUB_OUTPUT"
           echo "[pidnorm] => $PID_EXP"
 
-      # 1) Pass1: キーマン抽出（predict-only）
       - name: Run Pass1 (keyman only)
         env:
           DATE:  ${{ inputs.DATE }}
@@ -163,7 +160,6 @@ jobs:
             --predict-only \
             --outdir "$OUTDIR"
 
-      # 2) ML推論（TENKAI）— PIDごとに実行
       - name: Run TENKAI prediction
         env:
           DATE: ${{ inputs.DATE }}
@@ -184,7 +180,6 @@ jobs:
         run: |
           find "TENKAI/predictions/v1/${{ inputs.DATE }}" -maxdepth 4 -type f -name '*.csv' | sort || true
 
-      # 3) Pass2: MLを読み込んだ統合SimS
       - name: Run Pass2 (SimS integrated with ML)
         env:
           DATE:  ${{ inputs.DATE }}
@@ -194,7 +189,6 @@ jobs:
           TOPN:  ${{ inputs.TOPN }}
           UNIT:  ${{ inputs.UNIT }}
           OUTDIR: ${{ inputs.OUTDIR }}
-          # parsed filters
           F_REQUIRE_ODDS:   ${{ steps.parse.outputs.F_REQUIRE_ODDS }}
           F_MIN_EV:         ${{ steps.parse.outputs.F_MIN_EV }}
           F_ODDS_BANDS:     ${{ steps.parse.outputs.F_ODDS_BANDS }}
@@ -204,7 +198,6 @@ jobs:
           F_ONLY_FIRST1:    ${{ steps.parse.outputs.F_ONLY_FIRST1 }}
           F_BUY_IN_TOP3:    ${{ steps.parse.outputs.F_BUY_IN_TOP3 }}
           F_BUY_THR:        ${{ steps.parse.outputs.F_BUY_THR }}
-          # parsed keyman
           K_ENABLE: ${{ steps.parse.outputs.K_ENABLE }}
           K_THR:    ${{ steps.parse.outputs.K_THR }}
           K_BOOST:  ${{ steps.parse.outputs.K_BOOST }}
@@ -212,21 +205,17 @@ jobs:
         run: |
           set -euo pipefail
           echo "[pass2] MODE=$MODE DATE=$DATE PID=$PID"
-          # K_ENABLE=false の場合は実質無効化
           if [[ "${K_ENABLE,,}" == "false" ]]; then
             K_THR=9.9; K_BOOST=0; K_AGGR=0
           fi
-
           ARGS_COMMON="--base public --dates $DATE --pids $PID \
             --sims $SIMS --topn $TOPN \
             --keyman-threshold $K_THR --keyman-boost $K_BOOST --keyman-aggr $K_AGGR \
             --ml-root TENKAI/predictions/v1 \
             --outdir $OUTDIR"
-
           [[ "${F_EXCLUDE_FIRST1,,}" == "true" ]] && ARGS_COMMON="$ARGS_COMMON --exclude-first1"
           [[ "${F_ONLY_FIRST1,,}"    == "true" ]] && ARGS_COMMON="$ARGS_COMMON --only-first1"
           [[ "${F_BUY_IN_TOP3,,}"    == "true" ]] && ARGS_COMMON="$ARGS_COMMON --buy-if-keyman-in-top3 --buy-keyman-threshold $F_BUY_THR"
-
           if [[ "$MODE" == "predict" ]]; then
             python scripts/sims/sims_integrated.py $ARGS_COMMON --predict-only
           else
@@ -239,7 +228,6 @@ jobs:
             eval python scripts/sims/sims_integrated.py $ARGS_COMMON --odds-base public/odds/v1 $ARGS_FILTER
           fi
 
-      # 4) 集計（overall.json を毎回上書き）
       - name: Aggregate & write overall.json (force overwrite)
         if: always()
         env:
@@ -248,7 +236,6 @@ jobs:
           MODE:  ${{ inputs.MODE }}
           UNIT:  ${{ inputs.UNIT }}
           OUTDIR: ${{ inputs.OUTDIR }}
-          # for options snapshot
           SIMS:  ${{ inputs.SIMS }}
           TOPN:  ${{ inputs.TOPN }}
           F_REQUIRE_ODDS:   ${{ steps.parse.outputs.F_REQUIRE_ODDS }}
@@ -266,15 +253,13 @@ jobs:
           K_AGGR:   ${{ steps.parse.outputs.K_AGGR }}
         run: |
           set -euo pipefail
-          python - << 'PY'
+          python - <<'PY'
 import os, json, glob
 base = os.environ["OUTDIR"]
 pred_dir = os.path.join(base, "pass2", "predict")
 unit = int(os.environ.get("UNIT","100"))
 mode = os.environ.get("MODE","predict")
 date = os.environ.get("DATE","")
-pids = os.environ.get("PID","")
-
 # options snapshot
 opts = {
   "sims": int(os.environ.get("SIMS","0")),
@@ -297,25 +282,20 @@ opts = {
     "aggr": float(os.environ.get("K_AGGR","0.0") or 0.0)
   }
 }
-
 races = 0; bets_total = 0; hits = 0; payout_total = 0
 def read_json(p):
   try:
     with open(p, "r", encoding="utf-8") as f: return json.load(f)
   except: return {}
-
-# gather predictions
 for p in sorted(glob.glob(os.path.join(pred_dir, "pred_*.json"))):
   d = read_json(p)
   races += 1
   buylist = d.get("buylist", [])
   bets_total += len(buylist)
-
   if mode == "eval":
     date = d.get("date", date)
     pid  = d.get("pid","")
     race = d.get("race","")
-    # result json path patterns
     cand = [
       os.path.join("public","results","v1",date,pid,f"{race if str(race).upper().endswith('R') else str(race)+'R'}.json"),
       os.path.join("public","results",date,pid,f"{race if str(race).upper().endswith('R') else str(race)+'R'}.json")
@@ -341,7 +321,6 @@ for p in sorted(glob.glob(os.path.join(pred_dir, "pred_*.json"))):
     bet_combos = { b.get("ticket") for b in buylist if isinstance(b,dict) }
     if hit_combo and hit_combo in bet_combos:
       hits += 1; payout_total += pay
-
 stake_total = bets_total * unit
 roi = ((payout_total - stake_total) / stake_total) if stake_total > 0 else 0.0
 overall = {
@@ -362,7 +341,7 @@ os.makedirs(os.path.dirname(out_path), exist_ok=True)
 with open(out_path, "w", encoding="utf-8") as f:
   json.dump(overall, f, ensure_ascii=False, indent=2)
 print(f"[overall] wrote {out_path}")
-PY
+          PY
 
       - name: Commit results into repo
         if: always()
