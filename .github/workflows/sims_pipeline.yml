@@ -66,10 +66,10 @@ jobs:
       F_ONLY_FIRST1:    ${{ steps.parse.outputs.F_ONLY_FIRST1 }}
       F_BUY_IN_TOP3:    ${{ steps.parse.outputs.F_BUY_IN_TOP3 }}
       F_BUY_THR:        ${{ steps.parse.outputs.F_BUY_THR }}
-      K_ENABLE: ${{ steps.parse.outputs.K_ENABLE }}
-      K_THR:    ${{ steps.parse.outputs.K_THR }}
-      K_BOOST:  ${{ steps.parse.outputs.K_BOOST }}
-      K_AGGR:   ${{ steps.parse.outputs.K_AGGR }}
+      K_ENABLE:         ${{ steps.parse.outputs.K_ENABLE }}
+      K_THR:            ${{ steps.parse.outputs.K_THR }}
+      K_BOOST:          ${{ steps.parse.outputs.K_BOOST }}
+      K_AGGR:           ${{ steps.parse.outputs.K_AGGR }}
 
     steps:
       - name: PID normalize
@@ -111,7 +111,6 @@ jobs:
             done
           }
 
-          # 初期化（フィルター）
           echo "F_REQUIRE_ODDS=false" >> "$GITHUB_OUTPUT"
           echo "F_MIN_EV=0" >> "$GITHUB_OUTPUT"
           echo "F_ODDS_BANDS=" >> "$GITHUB_OUTPUT"
@@ -121,8 +120,6 @@ jobs:
           echo "F_ONLY_FIRST1=false" >> "$GITHUB_OUTPUT"
           echo "F_BUY_IN_TOP3=false" >> "$GITHUB_OUTPUT"
           echo "F_BUY_THR=0.7" >> "$GITHUB_OUTPUT"
-
-          # 初期化（キーマン）
           echo "K_ENABLE=true" >> "$GITHUB_OUTPUT"
           echo "K_THR=0.7" >> "$GITHUB_OUTPUT"
           echo "K_BOOST=0.15" >> "$GITHUB_OUTPUT"
@@ -135,11 +132,11 @@ jobs:
     needs: [normalize-parse]
     uses: ./.github/workflows/wf_pass1_keyman.yml
     with:
-      DATE:  ${{ inputs.DATE }}
-      PID:   ${{ needs.normalize-parse.outputs.PID_EXP }}
-      SIMS:  ${{ inputs.SIMS }}
-      TOPN:  ${{ inputs.TOPN }}
-      OUTDIR:${{ inputs.OUTDIR }}
+      DATE:   ${{ inputs.DATE }}
+      PID:    ${{ needs.normalize-parse.outputs.PID_EXP }}
+      SIMS:   ${{ inputs.SIMS }}
+      TOPN:   ${{ inputs.TOPN }}
+      OUTDIR: ${{ inputs.OUTDIR }}
 
   pass2:
     needs: [normalize-parse, pass1]
@@ -158,8 +155,7 @@ jobs:
       SIMS:  ${{ inputs.SIMS }}
       TOPN:  ${{ inputs.TOPN }}
       UNIT:  ${{ inputs.UNIT }}
-      OUTDIR:${{ inputs.OUTDIR }}
-      # filters
+      OUTDIR: ${{ inputs.OUTDIR }}
       F_REQUIRE_ODDS:   ${{ needs.normalize-parse.outputs.F_REQUIRE_ODDS }}
       F_MIN_EV:         ${{ needs.normalize-parse.outputs.F_MIN_EV }}
       F_ODDS_BANDS:     ${{ needs.normalize-parse.outputs.F_ODDS_BANDS }}
@@ -169,7 +165,6 @@ jobs:
       F_ONLY_FIRST1:    ${{ needs.normalize-parse.outputs.F_ONLY_FIRST1 }}
       F_BUY_IN_TOP3:    ${{ needs.normalize-parse.outputs.F_BUY_IN_TOP3 }}
       F_BUY_THR:        ${{ needs.normalize-parse.outputs.F_BUY_THR }}
-      # keyman
       K_ENABLE: ${{ needs.normalize-parse.outputs.K_ENABLE }}
       K_THR:    ${{ needs.normalize-parse.outputs.K_THR }}
       K_BOOST:  ${{ needs.normalize-parse.outputs.K_BOOST }}
