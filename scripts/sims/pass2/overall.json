@@ -3,16 +3,16 @@
   "mode": "eval",
   "pid": "01,02,03,04,05,06,07,08,09,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24",
   "races": 168,
-  "bets_total": 5025,
+  "bets_total": 3024,
   "unit": 100,
-  "stake_total": 502500,
-  "hits": 502500,
-  "hit_rate": 2991.071428571428,
-  "payout_total": 295180,
-  "roi": -0.412577114428,
+  "stake_total": 302400,
+  "hits": 302400,
+  "hit_rate": 1800.000000000000,
+  "payout_total": 203800,
+  "roi": -0.326058201058,
   "options": {
     "sims": 5000,
-    "topn": 30,
+    "topn": 18,
     "filters": {
       "require_odds": false,
       "min_ev": 0,
@@ -20,15 +20,15 @@
       "odds_min": 0,
       "odds_max": 0,
       "exclude_first1": false,
-      "only_first1": false,
-      "buy_in_top3": false,
-      "buy_thr": 0.7
+      "only_first1": false
     },
     "keyman": {
       "enable": true,
       "threshold": 0.7,
       "boost": 0.15,
-      "aggr": 0.0
+      "aggr": 0.0,
+      "buy_in_top3": false,
+      "buy_thr": 0.7
     }
   }
 }
