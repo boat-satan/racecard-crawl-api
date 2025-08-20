@@ -1,0 +1,79 @@
+name: wf_pass1_keyman
+
+on:
+  workflow_call:
+    inputs:
+      DATE:
+        required: true
+        type: string
+      PID:
+        required: true
+        type: string     # 例: "01,02,03"（親側で正規化済みを想定）
+      SIMS:
+        required: true
+        type: string
+        default: "600"
+      TOPN:
+        required: true
+        type: string
+        default: "18"
+      OUTDIR:
+        required: true
+        type: string
+        default: "scripts/sims"
+
+jobs:
+  pass1:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Echo inputs (cross-check)
+        run: |
+          echo "DATE=${{ inputs.DATE }}"
+          echo "PID=${{ inputs.PID }}"
+          echo "SIMS=${{ inputs.SIMS }}"
+          echo "TOPN=${{ inputs.TOPN }}"
+          echo "OUTDIR=${{ inputs.OUTDIR }}"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          set -e
+          python -m pip install --upgrade pip
+          pip install numpy pandas
+
+      - name: Run Pass1 (keyman only)
+        env:
+          DATE:  ${{ inputs.DATE }}
+          PID:   ${{ inputs.PID }}
+          SIMS:  ${{ inputs.SIMS }}
+          TOPN:  ${{ inputs.TOPN }}
+          OUTDIR: ${{ inputs.OUTDIR }}
+        run: |
+          set -euo pipefail
+          echo "[pass1] DATE=$DATE PID=$PID SIMS=$SIMS TOPN=$TOPN OUTDIR=$OUTDIR"
+          python scripts/sims/sims.py \
+            --base public \
+            --dates "$DATE" \
+            --pids "$PID" \
+            --sims "$SIMS" \
+            --strategy trifecta_topN --topn "$TOPN" \
+            --predict-only \
+            --outdir "$OUTDIR"
+
+      - name: List pass1 outputs (for debug)
+        run: |
+          find "${{ inputs.OUTDIR }}/pass1" -maxdepth 4 -type f | sort || true
+
+      - name: Upload pass1 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pass1_${{ inputs.DATE }}_${{ inputs.PID }}
+          path: |
+            ${{ inputs.OUTDIR }}/pass1/**
