@@ -3,43 +3,57 @@ name: wf_pass3_sims_integrated
 on:
   workflow_call:
     inputs:
-      DATE:  { required: true,  type: string }
-      PID:   { required: true,  type: string }  # 正規化済み "01,..." 想定
-      MODE:  { required: true,  type: string, default: "predict" }
-      SIMS:  { required: true,  type: string, default: "600" }
-      TOPN:  { required: true,  type: string, default: "18" }
-      UNIT:  { required: true,  type: string, default: "100" }
-      OUTDIR:{ required: true,  type: string, default: "scripts/sims" }
-      # フィルタ・キーマンは“文字列”で親からパース済みを渡してくる想定
-      F_REQUIRE_ODDS:   { required: false, type: string, default: "false" }
-      F_MIN_EV:         { required: false, type: string, default: "0" }
-      F_ODDS_BANDS:     { required: false, type: string, default: "" }
-      F_ODDS_MIN:       { required: false, type: string, default: "0" }
-      F_ODDS_MAX:       { required: false, type: string, default: "0" }
-      F_EXCLUDE_FIRST1: { required: false, type: string, default: "false" }
-      F_ONLY_FIRST1:    { required: false, type: string, default: "false" }
-      F_BUY_IN_TOP3:    { required: false, type: string, default: "false" }
-      F_BUY_THR:        { required: false, type: string, default: "0.7" }
-      K_ENABLE:         { required: false, type: string, default: "true" }
-      K_THR:            { required: false, type: string, default: "0.7" }
-      K_BOOST:          { required: false, type: string, default: "0.15" }
-      K_AGGR:           { required: false, type: string, default: "0.0" }
+      DATE:
+        description: "YYYYMMDD"
+        required: true
+        type: string
+      PID:
+        description: "正規化済み PID（例: 01,02,...,24）"
+        required: true
+        type: string
+      MODE:
+        description: "predict or eval"
+        required: true
+        type: string
+        default: "predict"
+      SIMS:
+        description: "試行回数/レース"
+        required: true
+        type: string
+        default: "600"
+      TOPN:
+        description: "三連単 TOPN"
+        required: true
+        type: string
+        default: "18"
+      UNIT:
+        description: "1点あたり(円)"
+        required: true
+        type: string
+        default: "100"
+      FILTERS:
+        description: "例: require_odds=true,min_ev=1.2,odds_bands=01-09,10-19"
+        required: false
+        type: string
+        default: ""
+      KEYMAN:
+        description: "例: enable=true,thr=0.7,boost=0.15,aggr=0.0,buy_in_top3=false,buy_thr=0.7"
+        required: false
+        type: string
+        default: "enable=true,thr=0.7,boost=0.15,aggr=0.0,buy_in_top3=false,buy_thr=0.7"
+      OUTDIR:
+        description: "出力ディレクトリ"
+        required: true
+        type: string
+        default: "scripts/sims"
 
 permissions:
   contents: write
 
 jobs:
-  pass3:
+  run:
     runs-on: ubuntu-latest
     steps:
-      - name: Echo inputs (cross-check)
-        run: |
-          echo "DATE=${{ inputs.DATE }}  PID=${{ inputs.PID }}  MODE=${{ inputs.MODE }}"
-          echo "SIMS=${{ inputs.SIMS }}  TOPN=${{ inputs.TOPN }}  UNIT=${{ inputs.UNIT }}"
-          echo "F_* require_odds=${{ inputs.F_REQUIRE_ODDS }}  min_ev=${{ inputs.F_MIN_EV }}  bands='${{ inputs.F_ODDS_BANDS }}' min=${{ inputs.F_ODDS_MIN }} max=${{ inputs.F_ODDS_MAX }}"
-          echo "F_* exclude_first1=${{ inputs.F_EXCLUDE_FIRST1 }}  only_first1=${{ inputs.F_ONLY_FIRST1 }}  buy_in_top3=${{ inputs.F_BUY_IN_TOP3 }}  buy_thr=${{ inputs.F_BUY_THR }}"
-          echo "K_* enable=${{ inputs.K_ENABLE }}  thr=${{ inputs.K_THR }}  boost=${{ inputs.K_BOOST }}  aggr=${{ inputs.K_AGGR }}"
-
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -48,49 +62,87 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install deps & tools
+      - name: Install deps
         run: |
           set -e
           python -m pip install --upgrade pip
           pip install numpy pandas joblib scikit-learn
-          sudo apt-get update -y
-          sudo apt-get install -y jq
+
+      - name: Parse FILTERS & KEYMAN
+        id: parse
+        env:
+          FILTERS: ${{ inputs.FILTERS }}
+          KEYMAN:  ${{ inputs.KEYMAN }}
+        run: |
+          set -euo pipefail
+          parse_kvlist () {
+            local s="$1"; local prefix="$2"
+            IFS=',' read -r -a pairs <<< "$s"
+            for kv in "${pairs[@]}"; do
+              kv="$(echo "$kv" | xargs)"
+              [ -z "$kv" ] && continue
+              if [[ "$kv" == *"="* ]]; then
+                k="$(echo "${kv%%=*}" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9_' '_' | xargs)"
+                v="$(echo "${kv#*=}" | xargs)"
+                echo "$prefix$k=$v" >> "$GITHUB_OUTPUT"
+              fi
+            done
+          }
+          # filter defaults
+          {
+            echo "F_REQUIRE_ODDS=false"
+            echo "F_MIN_EV=0"
+            echo "F_ODDS_BANDS="
+            echo "F_ODDS_MIN=0"
+            echo "F_ODDS_MAX=0"
+            echo "F_EXCLUDE_FIRST1=false"
+            echo "F_ONLY_FIRST1=false"
+            echo "F_BUY_IN_TOP3=false"
+            echo "F_BUY_THR=0.7"
+          } >> "$GITHUB_OUTPUT"
+          # keyman defaults
+          {
+            echo "K_ENABLE=true"
+            echo "K_THR=0.7"
+            echo "K_BOOST=0.15"
+            echo "K_AGGR=0.0"
+          } >> "$GITHUB_OUTPUT"
+
+          [ -n "${FILTERS:-}" ] && parse_kvlist "$FILTERS" "F_"
+          [ -n "${KEYMAN:-}" ]  && parse_kvlist "$KEYMAN"  "K_"
 
       - name: Run Pass2 (SimS integrated with ML)
         env:
           DATE:  ${{ inputs.DATE }}
-          PID:   ${{ inputs.PID }}
+          PID:   ${{ inputs.PID }}              # ここは正規化済みを想定
           MODE:  ${{ inputs.MODE }}
           SIMS:  ${{ inputs.SIMS }}
           TOPN:  ${{ inputs.TOPN }}
-          UNIT:  ${{ inputs.UNIT }}
-          OUTDIR:${{ inputs.OUTDIR }}
-          # filters
-          F_REQUIRE_ODDS:   ${{ inputs.F_REQUIRE_ODDS }}
-          F_MIN_EV:         ${{ inputs.F_MIN_EV }}
-          F_ODDS_BANDS:     ${{ inputs.F_ODDS_BANDS }}
-          F_ODDS_MIN:       ${{ inputs.F_ODDS_MIN }}
-          F_ODDS_MAX:       ${{ inputs.F_ODDS_MAX }}
-          F_EXCLUDE_FIRST1: ${{ inputs.F_EXCLUDE_FIRST1 }}
-          F_ONLY_FIRST1:    ${{ inputs.F_ONLY_FIRST1 }}
-          F_BUY_IN_TOP3:    ${{ inputs.F_BUY_IN_TOP3 }}
-          F_BUY_THR:        ${{ inputs.F_BUY_THR }}
-          # keyman
-          K_ENABLE: ${{ inputs.K_ENABLE }}
-          K_THR:    ${{ inputs.K_THR }}
-          K_BOOST:  ${{ inputs.K_BOOST }}
-          K_AGGR:   ${{ inputs.K_AGGR }}
+          OUTDIR: ${{ inputs.OUTDIR }}
+          # parsed filters
+          F_REQUIRE_ODDS:   ${{ steps.parse.outputs.F_REQUIRE_ODDS }}
+          F_MIN_EV:         ${{ steps.parse.outputs.F_MIN_EV }}
+          F_ODDS_BANDS:     ${{ steps.parse.outputs.F_ODDS_BANDS }}
+          F_ODDS_MIN:       ${{ steps.parse.outputs.F_ODDS_MIN }}
+          F_ODDS_MAX:       ${{ steps.parse.outputs.F_ODDS_MAX }}
+          F_EXCLUDE_FIRST1: ${{ steps.parse.outputs.F_EXCLUDE_FIRST1 }}
+          F_ONLY_FIRST1:    ${{ steps.parse.outputs.F_ONLY_FIRST1 }}
+          F_BUY_IN_TOP3:    ${{ steps.parse.outputs.F_BUY_IN_TOP3 }}
+          F_BUY_THR:        ${{ steps.parse.outputs.F_BUY_THR }}
+          # parsed keyman
+          K_ENABLE: ${{ steps.parse.outputs.K_ENABLE }}
+          K_THR:    ${{ steps.parse.outputs.K_THR }}
+          K_BOOST:  ${{ steps.parse.outputs.K_BOOST }}
+          K_AGGR:   ${{ steps.parse.outputs.K_AGGR }}
         run: |
           set -euo pipefail
           echo "[pass3] MODE=$MODE DATE=$DATE PID=$PID"
-
-          # K_ENABLE=false の場合は実質無効化（しながら thresholds は overall.json へは渡す）
           if [[ "${K_ENABLE,,}" == "false" ]]; then
             K_THR=9.9; K_BOOST=0; K_AGGR=0
           fi
 
           ARGS_COMMON="--base public --dates $DATE --pids $PID \
-            --sims $SIMS --topn $TOPN --unit $UNIT \
+            --sims $SIMS --topn $TOPN \
             --keyman-threshold $K_THR --keyman-boost $K_BOOST --keyman-aggr $K_AGGR \
             --ml-root TENKAI/predictions/v1 \
             --outdir $OUTDIR"
@@ -111,7 +163,7 @@ jobs:
             eval python scripts/sims/sims_integrated.py $ARGS_COMMON --odds-base public/odds/v1 $ARGS_FILTER
           fi
 
-      - name: Aggregate & overwrite overall.json (always)
+      - name: Aggregate & write overall.json (overwrite always, robust python)
         env:
           DATE:  ${{ inputs.DATE }}
           MODE:  ${{ inputs.MODE }}
@@ -119,99 +171,106 @@ jobs:
           SIMS:  ${{ inputs.SIMS }}
           TOPN:  ${{ inputs.TOPN }}
           PID:   ${{ inputs.PID }}
-          OUTDIR:${{ inputs.OUTDIR }}
+          OUTDIR: ${{ inputs.OUTDIR }}
           # filters
-          F_REQUIRE_ODDS:   ${{ inputs.F_REQUIRE_ODDS }}
-          F_MIN_EV:         ${{ inputs.F_MIN_EV }}
-          F_ODDS_BANDS:     ${{ inputs.F_ODDS_BANDS }}
-          F_ODDS_MIN:       ${{ inputs.F_ODDS_MIN }}
-          F_ODDS_MAX:       ${{ inputs.F_ODDS_MAX }}
-          F_EXCLUDE_FIRST1: ${{ inputs.F_EXCLUDE_FIRST1 }}
-          F_ONLY_FIRST1:    ${{ inputs.F_ONLY_FIRST1 }}
-          F_BUY_IN_TOP3:    ${{ inputs.F_BUY_IN_TOP3 }}
-          F_BUY_THR:        ${{ inputs.F_BUY_THR }}
+          F_REQUIRE_ODDS:   ${{ steps.parse.outputs.F_REQUIRE_ODDS }}
+          F_MIN_EV:         ${{ steps.parse.outputs.F_MIN_EV }}
+          F_ODDS_BANDS:     ${{ steps.parse.outputs.F_ODDS_BANDS }}
+          F_ODDS_MIN:       ${{ steps.parse.outputs.F_ODDS_MIN }}
+          F_ODDS_MAX:       ${{ steps.parse.outputs.F_ODDS_MAX }}
+          F_EXCLUDE_FIRST1: ${{ steps.parse.outputs.F_EXCLUDE_FIRST1 }}
+          F_ONLY_FIRST1:    ${{ steps.parse.outputs.F_ONLY_FIRST1 }}
+          F_BUY_IN_TOP3:    ${{ steps.parse.outputs.F_BUY_IN_TOP3 }}
+          F_BUY_THR:        ${{ steps.parse.outputs.F_BUY_THR }}
           # keyman
-          K_ENABLE: ${{ inputs.K_ENABLE }}
-          K_THR:    ${{ inputs.K_THR }}
-          K_BOOST:  ${{ inputs.K_BOOST }}
-          K_AGGR:   ${{ inputs.K_AGGR }}
+          K_ENABLE: ${{ steps.parse.outputs.K_ENABLE }}
+          K_THR:    ${{ steps.parse.outputs.K_THR }}
+          K_BOOST:  ${{ steps.parse.outputs.K_BOOST }}
+          K_AGGR:   ${{ steps.parse.outputs.K_AGGR }}
         run: |
           set -euo pipefail
-          CSV="$OUTDIR/pass2/per_race_results.csv"
-          if [ -f "$CSV" ]; then
-            RACES=$(awk 'END{print NR-1}' "$CSV")
-            BETS=$(awk -F, 'NR>1{sum+=$4}END{print sum+0}' "$CSV")
-            STAKE=$(awk -v u="$UNIT" 'BEGIN{FS=","} NR>1{sum+=u*$4} END{print sum+0}' "$CSV")
-            PAYOUT=$(awk -F, 'NR>1{sum+=$6}END{print sum+0}' "$CSV")
-            HITS=$(awk -F, 'NR>1{sum+=$5}END{print sum+0}' "$CSV")
-          else
-            echo "[overall] per_race_results.csv not found -> zero summary"
-            RACES=0; BETS=0; STAKE=0; PAYOUT=0; HITS=0
-          fi
+          python - <<'PY'
+import os, json, csv, math
+from pathlib import Path
 
-          HIT_RATE=$(awk -v h="$HITS" -v r="$RACES" 'BEGIN{if(r==0)print 0; else printf "%.12f", h/r}')
-          ROI=$(awk -v p="$PAYOUT" -v s="$STAKE" 'BEGIN{if(s==0)print 0; else printf "%.12f", (p-s)/s}')
+OUTDIR  = os.environ["OUTDIR"]
+DATE    = os.environ["DATE"]
+MODE    = os.environ["MODE"]
+UNIT    = float(os.environ["UNIT"])
+SIMS    = int(os.environ["SIMS"])
+TOPN    = int(os.environ["TOPN"])
+PID     = os.environ["PID"]
 
-          tf(){ v="${1:-false}"; v="$(echo "$v" | tr '[:upper:]' '[:lower:]')"; [ "$v" = "true" ] && echo true || echo false; }
-          REQ_ODDS=$(tf "$F_REQUIRE_ODDS")
-          EXC1=$(tf "$F_EXCLUDE_FIRST1")
-          ONLY1=$(tf "$F_ONLY_FIRST1")
-          BUY3=$(tf "$F_BUY_IN_TOP3")
-          KM_EN=$(tf "$K_ENABLE")
+def tf(x:str)->bool:
+    return str(x).strip().lower() == "true"
 
-          mkdir -p "$OUTDIR/pass2"
-          jq -n \
-            --arg date "$DATE" --arg mode "$MODE" --arg pid "$PID" \
-            --argjson unit $UNIT --argjson sims $SIMS --argjson topn $TOPN \
-            --argjson races $RACES --argjson bets $BETS \
-            --argjson stake $STAKE --argjson hits $HITS \
-            --argjson hit_rate $HIT_RATE --argjson payout $PAYOUT --argjson roi $ROI \
-            --argjson f_require_odds $REQ_ODDS --arg f_odds_bands "${F_ODDS_BANDS:-}" \
-            --argjson f_min_ev ${F_MIN_EV:-0} --argjson f_odds_min ${F_ODDS_MIN:-0} --argjson f_odds_max ${F_ODDS_MAX:-0} \
-            --argjson f_exclude_first1 $EXC1 --argjson f_only_first1 $ONLY1 \
-            --argjson f_buy_in_top3 $BUY3 --argjson f_buy_thr ${F_BUY_THR:-0} \
-            --argjson k_enable $KM_EN --argjson k_thr ${K_THR:-0} --argjson k_boost ${K_BOOST:-0} --argjson k_aggr ${K_AGGR:-0} \
-            '{
-              date: $date, mode: $mode, pid: $pid,
-              races: $races, bets_total: $bets, unit: $unit,
-              stake_total: $stake, hits: $hits, hit_rate: $hit_rate,
-              payout_total: $payout, roi: $roi,
-              options: {
-                sims: $sims, topn: $topn,
-                filters: {
-                  require_odds: $f_require_odds,
-                  min_ev: $f_min_ev,
-                  odds_bands: $f_odds_bands,
-                  odds_min: $f_odds_min, odds_max: $f_odds_max,
-                  exclude_first1: $f_exclude_first1,
-                  only_first1: $f_only_first1,
-                  buy_in_top3: $f_buy_in_top3,
-                  buy_thr: $f_buy_thr
-                },
-                keyman: {
-                  enable: $k_enable, threshold: $k_thr,
-                  boost: $k_boost, aggr: $k_aggr
-                }
-              }
-            }' > "$OUTDIR/pass2/overall.json"
+filters = {
+  "require_odds": tf(os.environ.get("F_REQUIRE_ODDS","false")),
+  "min_ev": float(os.environ.get("F_MIN_EV","0") or 0),
+  "odds_bands": os.environ.get("F_ODDS_BANDS","") or "",
+  "odds_min": float(os.environ.get("F_ODDS_MIN","0") or 0),
+  "odds_max": float(os.environ.get("F_ODDS_MAX","0") or 0),
+  "exclude_first1": tf(os.environ.get("F_EXCLUDE_FIRST1","false")),
+  "only_first1": tf(os.environ.get("F_ONLY_FIRST1","false")),
+  "buy_in_top3": tf(os.environ.get("F_BUY_IN_TOP3","false")),
+  "buy_thr": float(os.environ.get("F_BUY_THR","0.7") or 0.7),
+}
 
-          echo "[overall] wrote $OUTDIR/pass2/overall.json"
+keyman = {
+  "enable": tf(os.environ.get("K_ENABLE","true")),
+  "threshold": float(os.environ.get("K_THR","0.7") or 0.7),
+  "boost": float(os.environ.get("K_BOOST","0.15") or 0.15),
+  "aggr": float(os.environ.get("K_AGGR","0.0") or 0.0),
+}
 
-      - name: Commit pass3 outputs
+pass2 = Path(OUTDIR) / "pass2"
+pass2.mkdir(parents=True, exist_ok=True)
+csv_path = pass2 / "per_race_results.csv"
+
+races=bets=stake=payout=hits=0
+if csv_path.exists():
+    with csv_path.open(newline='', encoding='utf-8') as f:
+        rd = csv.DictReader(f)
+        for r in rd:
+            races += 1
+            b = int(r.get("bets") or 0); bets += b
+            s = float(r.get("stake") or 0); stake += s
+            p = float(r.get("payout") or 0); payout += p
+            h = int(r.get("hit") or 0); hits += h
+
+hit_rate = (hits / races) if races else 0.0
+roi = ((payout-stake)/stake) if stake>0 else 0.0
+
+overall = {
+  "date": DATE, "mode": MODE, "pid": PID,
+  "races": int(races), "bets_total": int(bets), "unit": int(UNIT),
+  "stake_total": int(stake), "hits": int(hits), "hit_rate": float(hit_rate),
+  "payout_total": int(payout), "roi": float(roi),
+  "options": {
+    "sims": int(SIMS), "topn": int(TOPN),
+    "filters": filters, "keyman": keyman
+  }
+}
+(out_path := pass2/"overall.json").write_text(json.dumps(overall, ensure_ascii=False, indent=2), encoding="utf-8")
+print(f"[overall] wrote {out_path}")
+PY
+
+      - name: Commit results into repo
         if: always()
         run: |
           set -e
           git config user.name  github-actions
           git config user.email github-actions@github.com
-          git add "${{ inputs.OUTDIR }}/pass2" || true
-          git commit -m "pass3: DATE=${{ inputs.DATE }} PID=${{ inputs.PID }} MODE=${{ inputs.MODE }}" || echo "nothing to commit"
+          git add ${{ inputs.OUTDIR }}/pass2 || true
+          git commit -m "wf_pass3: write overall.json for ${{
+            inputs.DATE
+          }} PID=${{ inputs.PID }}" || echo "nothing to commit"
           git push || true
 
-      - name: Upload pass3 artifacts
+      - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pass3_${{ inputs.DATE }}_${{ inputs.PID }}
+          name: wf_pass3_outputs_${{ inputs.DATE }}_${{ inputs.PID }}
           path: |
             ${{ inputs.OUTDIR }}/pass2/**
-            TENKAI/predictions/v1/${{ inputs.DATE }}/**
