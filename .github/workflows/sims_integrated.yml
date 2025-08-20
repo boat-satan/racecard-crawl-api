@@ -3,15 +3,51 @@ name: sims_integrated
 on:
   workflow_dispatch:
     inputs:
-      DATE:   { description: "YYYYMMDD", required: true,  type: string }
-      PID:    { description: "場コード 01..24（カンマ可, all/空=全場）", required: false, default: "all", type: string }
-      MODE:   { description: "predict or eval", required: true, default: "predict", type: choice, options: [predict, eval] }
-      SIMS:   { description: "試行回数/レース", required: true, default: "600", type: string }
-      TOPN:   { description: "三連単 TOPN", required: true, default: "18", type: string }
-      UNIT:   { description: "1点あたり(円)", required: true, default: "100", type: string }
-      FILTERS:{ description: "例: require_odds=true,min_ev=1.2,odds_bands=01-09,10-19", required: false, default: "", type: string }
-      KEYMAN: { description: "例: enable=true,thr=0.7,boost=0.15,aggr=0.0,buy_in_top3=false,buy_thr=0.7", required: false, default: "enable=true,thr=0.7,boost=0.15,aggr=0.0,buy_in_top3=false,buy_thr=0.7", type: string }
-      OUTDIR: { description: "出力ディレクトリ", required: false, default: "scripts/sims", type: string }
+      DATE:
+        description: "YYYYMMDD"
+        required: true
+        type: string
+      PID:
+        description: "場コード 01..24（カンマ可, all/空=全場）"
+        required: false
+        default: "all"
+        type: string
+      MODE:
+        description: "predict or eval"
+        required: true
+        default: "predict"
+        type: choice
+        options: [predict, eval]
+      SIMS:
+        description: "試行回数/レース"
+        required: true
+        default: "600"
+        type: string
+      TOPN:
+        description: "三連単 TOPN"
+        required: true
+        default: "18"
+        type: string
+      UNIT:
+        description: "1点あたり(円)"
+        required: true
+        default: "100"
+        type: string
+      FILTERS:
+        description: "例: require_odds=true,min_ev=1.2,odds_bands=01-09,10-19"
+        required: false
+        default: ""
+        type: string
+      KEYMAN:
+        description: "例: enable=true,thr=0.7,boost=0.15,aggr=0.0,buy_in_top3=false,buy_thr=0.7"
+        required: false
+        default: "enable=true,thr=0.7,boost=0.15,aggr=0.0,buy_in_top3=false,buy_thr=0.7"
+        type: string
+      OUTDIR:
+        description: "出力ディレクトリ"
+        required: false
+        default: "scripts/sims"
+        type: string
 
 permissions:
   contents: write
@@ -198,32 +234,25 @@ jobs:
           set -euo pipefail
           python - <<'PY'
 import os, json, glob
-
 DATE=os.environ["DATE"]; MODE=os.environ["MODE"]
 SIMS=int(os.environ["SIMS"]); TOPN=int(os.environ["TOPN"])
 UNIT=int(os.environ["UNIT"]); OUTDIR=os.environ["OUTDIR"]
-
-F={
- "require_odds": os.environ.get("F_REQUIRE_ODDS","false").lower()=="true",
- "min_ev": float(os.environ.get("F_MIN_EV") or 0),
- "odds_bands": os.environ.get("F_ODDS_BANDS",""),
- "odds_min": float(os.environ.get("F_ODDS_MIN") or 0),
- "odds_max": float(os.environ.get("F_ODDS_MAX") or 0),
- "exclude_first1": os.environ.get("F_EXCLUDE_FIRST1","false").lower()=="true",
- "only_first1": os.environ.get("F_ONLY_FIRST1","false").lower()=="true",
- "buy_in_top3": os.environ.get("F_BUY_IN_TOP3","false").lower()=="true",
- "buy_thr": float(os.environ.get("F_BUY_THR") or 0.7),
-}
-
+F={"require_odds":os.environ.get("F_REQUIRE_ODDS","false").lower()=="true",
+   "min_ev":float(os.environ.get("F_MIN_EV") or 0),
+   "odds_bands":os.environ.get("F_ODDS_BANDS",""),
+   "odds_min":float(os.environ.get("F_ODDS_MIN") or 0),
+   "odds_max":float(os.environ.get("F_ODDS_MAX") or 0),
+   "exclude_first1":os.environ.get("F_EXCLUDE_FIRST1","false").lower()=="true",
+   "only_first1":os.environ.get("F_ONLY_FIRST1","false").lower()=="true",
+   "buy_in_top3":os.environ.get("F_BUY_IN_TOP3","false").lower()=="true",
+   "buy_thr":float(os.environ.get("F_BUY_THR") or 0.7)}
 K_ENABLE=os.environ.get("K_ENABLE","true").lower()=="true"
 K_THR=float(os.environ.get("K_THR") or 0.7)
 K_BOOST=float(os.environ.get("K_BOOST") or 0.15)
 K_AGGR=float(os.environ.get("K_AGGR") or 0.25)
-if not K_ENABLE: K_THR, K_BOOST, K_AGGR = 9.9, 0.0, 0.0
-
+if not K_ENABLE: K_THR,K_BOOST,K_AGGR=9.9,0.0,0.0
 pred_dir=os.path.join(OUTDIR,"pass2","predict")
 overall_path=os.path.join(OUTDIR,"pass2","overall.json")
-
 def _norm_race(r): r=(r or "").strip().upper(); return r if (not r or r.endswith("R")) else r+"R"
 def _res(date,pid,race):
   base="public"; root_v1=os.path.join(base,"results","v1")
@@ -240,8 +269,7 @@ def _res(date,pid,race):
   return {}
 def _hit(d):
   trif=(d or {}).get("payouts",{}).get("trifecta")
-  if isinstance(trif,dict):
-    return trif.get("combo"), int(trif.get("amount") or 0)
+  if isinstance(trif,dict): return trif.get("combo"), int(trif.get("amount") or 0)
   order=(d or {}).get("order")
   if isinstance(order,list) and len(order)>=3:
     lane=lambda x: str(x.get("lane") or x.get("course") or x.get("F") or x.get("number"))
@@ -249,7 +277,6 @@ def _hit(d):
       f,s,t=lane(order[0]),lane(order[1]),lane(order[2]); return f"{f}-{s}-{t}", 0
     except: pass
   return None, 0
-
 files=sorted(glob.glob(os.path.join(pred_dir,"pred_*_*_*.json")))
 races=len(files); bets_total=0; stake_total=0; hits=0; payout_total=0
 for fp in files:
@@ -257,23 +284,19 @@ for fp in files:
   buylist=d.get("buylist",[])
   bets=len(buylist); bets_total+=bets; stake_total+=bets*UNIT
   if MODE=="eval":
-    date, pid, race = d.get("date"), d.get("pid"), d.get("race")
-    res=_res(date,pid,race); combo, pay=_hit(res)
+    res=_res(d.get("date"),d.get("pid"),d.get("race"))
+    combo,pay=_hit(res)
     if combo and any(combo==it["ticket"] for it in buylist):
       hits+=1; payout_total+=int(pay)
-
 roi=(payout_total-stake_total)/stake_total if (MODE=="eval" and stake_total>0) else 0.0
-overall={
- "date":DATE,"mode":MODE,"races":races,"bets_total":bets_total,
- "unit":UNIT,"stake_total":stake_total,"hits":hits,
- "hit_rate":(hits/races if races>0 else 0.0),
- "payout_total":payout_total,"roi":roi,
- "options":{"sims":SIMS,"topn":TOPN,"filters":F,
-            "keyman":{"enable":K_ENABLE,"threshold":K_THR,"boost":K_BOOST,"aggr":K_AGGR}}
-}
+overall={"date":DATE,"mode":MODE,"races":races,"bets_total":bets_total,
+         "unit":UNIT,"stake_total":stake_total,"hits":hits,
+         "hit_rate":(hits/races if races>0 else 0.0),
+         "payout_total":payout_total,"roi":roi,
+         "options":{"sims":SIMS,"topn":TOPN,"filters":F,
+                    "keyman":{"enable":K_ENABLE,"threshold":K_THR,"boost":K_BOOST,"aggr":K_AGGR}}}
 os.makedirs(os.path.dirname(overall_path), exist_ok=True)
-with open(overall_path,"w",encoding="utf-8") as f:
-  json.dump(overall,f,ensure_ascii=False,indent=2)
+json.dump(overall, open(overall_path,"w",encoding="utf-8"), ensure_ascii=False, indent=2)
 print(f"[overall] wrote {overall_path}")
 PY
 
