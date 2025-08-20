@@ -3,15 +3,53 @@ name: sims_pipeline
 on:
   workflow_dispatch:
     inputs:
-      DATE:   { description: "YYYYMMDD", required: true,  type: string }
-      PID:    { description: "01..24, all/空=全場", required: false, default: "all", type: string }
-      MODE:   { description: "predict or eval", required: true, default: "predict", type: choice, options: [predict, eval] }
-      SIMS:   { description: "試行回数/レース", required: true, default: "600", type: string }
-      TOPN:   { description: "三連単 TOPN", required: true, default: "18", type: string }
-      UNIT:   { description: "1点あたり(円)", required: true, default: "100", type: string }
-      OUTDIR: { description: "出力ディレクトリ", required: true, default: "scripts/sims", type: string }
-      FILTERS:{ description: "例: require_odds=true,min_ev=1.2,odds_bands=01-09,10-19", required: false, default: "", type: string }
-      KEYMAN: { description: "例: enable=true,thr=0.7,boost=0.15,aggr=0.0,buy_in_top3=false,buy_thr=0.7", required: false, default: "enable=true,thr=0.7,boost=0.15,aggr=0.0,buy_in_top3=false,buy_thr=0.7", type: string }
+      DATE:
+        description: "YYYYMMDD"
+        required: true
+        type: string
+      PID:
+        description: "01..24, all/空=全場"
+        required: false
+        default: "all"
+        type: string
+      MODE:
+        description: "predict or eval"
+        required: true
+        type: choice
+        options:
+          - predict
+          - eval
+        default: predict
+      SIMS:
+        description: "試行回数/レース"
+        required: true
+        default: "600"
+        type: string
+      TOPN:
+        description: "三連単 TOPN"
+        required: true
+        default: "18"
+        type: string
+      UNIT:
+        description: "1点あたり(円)"
+        required: true
+        default: "100"
+        type: string
+      OUTDIR:
+        description: "出力ディレクトリ"
+        required: true
+        default: "scripts/sims"
+        type: string
+      FILTERS:
+        description: "例: require_odds=true,min_ev=1.2,odds_bands=01-09,10-19"
+        required: false
+        default: ""
+        type: string
+      KEYMAN:
+        description: "例: enable=true,thr=0.7,boost=0.15,aggr=0.0,buy_in_top3=false,buy_thr=0.7"
+        required: false
+        default: "enable=true,thr=0.7,boost=0.15,aggr=0.0,buy_in_top3=false,buy_thr=0.7"
+        type: string
 
 permissions:
   contents: write
@@ -21,7 +59,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       PID_EXP: ${{ steps.pidnorm.outputs.PID_EXP }}
-      # filters
       F_REQUIRE_ODDS:   ${{ steps.parse.outputs.F_REQUIRE_ODDS }}
       F_MIN_EV:         ${{ steps.parse.outputs.F_MIN_EV }}
       F_ODDS_BANDS:     ${{ steps.parse.outputs.F_ODDS_BANDS }}
@@ -31,7 +68,6 @@ jobs:
       F_ONLY_FIRST1:    ${{ steps.parse.outputs.F_ONLY_FIRST1 }}
       F_BUY_IN_TOP3:    ${{ steps.parse.outputs.F_BUY_IN_TOP3 }}
       F_BUY_THR:        ${{ steps.parse.outputs.F_BUY_THR }}
-      # keyman
       K_ENABLE: ${{ steps.parse.outputs.K_ENABLE }}
       K_THR:    ${{ steps.parse.outputs.K_THR }}
       K_BOOST:  ${{ steps.parse.outputs.K_BOOST }}
@@ -44,12 +80,18 @@ jobs:
           PID_IN="${{ inputs.PID }}"
           PID_TRIM="$(echo "${PID_IN:-}" | tr '[:space:]' ' ' | xargs)"
           if [ -z "$PID_TRIM" ] || [ "${PID_TRIM,,}" = "all" ]; then
-            ALL=""; for i in $(seq -w 01 24); do ALL="${ALL}${i},"; done
+            ALL=""
+            for i in $(seq -w 01 24); do ALL="${ALL}${i},"; done
             PID_EXP="${ALL%,}"
           else
             PID_NORM="$(echo "$PID_TRIM" | tr '、，;|' ',')"
-            OUT=""; IFS=',' read -r -a arr <<< "$PID_NORM"
-            for p in "${arr[@]}"; do p="$(echo "$p" | xargs)"; [ -z "$p" ] && continue; printf -v two "%02d" "$p"; OUT="${OUT}${two},"; done
+            OUT=""
+            IFS=',' read -r -a arr <<< "$PID_NORM"
+            for p in "${arr[@]}"; do
+              p="$(echo "$p" | xargs)"; [ -z "$p" ] && continue
+              printf -v two "%02d" "$p"
+              OUT="${OUT}${two},"
+            done
             PID_EXP="${OUT%,}"
           fi
           echo "PID_EXP=$PID_EXP" | tee -a "$GITHUB_OUTPUT"
@@ -119,7 +161,6 @@ jobs:
       TOPN:  ${{ inputs.TOPN }}
       UNIT:  ${{ inputs.UNIT }}
       OUTDIR: ${{ inputs.OUTDIR }}
-      # filters
       F_REQUIRE_ODDS:   ${{ needs.normalize-parse.outputs.F_REQUIRE_ODDS }}
       F_MIN_EV:         ${{ needs.normalize-parse.outputs.F_MIN_EV }}
       F_ODDS_BANDS:     ${{ needs.normalize-parse.outputs.F_ODDS_BANDS }}
@@ -129,7 +170,6 @@ jobs:
       F_ONLY_FIRST1:    ${{ needs.normalize-parse.outputs.F_ONLY_FIRST1 }}
       F_BUY_IN_TOP3:    ${{ needs.normalize-parse.outputs.F_BUY_IN_TOP3 }}
       F_BUY_THR:        ${{ needs.normalize-parse.outputs.F_BUY_THR }}
-      # keyman
       K_ENABLE: ${{ needs.normalize-parse.outputs.K_ENABLE }}
       K_THR:    ${{ needs.normalize-parse.outputs.K_THR }}
       K_BOOST:  ${{ needs.normalize-parse.outputs.K_BOOST }}
