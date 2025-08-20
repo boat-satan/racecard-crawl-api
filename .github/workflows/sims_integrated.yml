@@ -76,7 +76,7 @@ jobs:
             echo "F_BUY_THR=0.7"
 
             echo "K_ENABLE=true"
-            echo "K_THR=0.7"
+            echo "K_THR=1.0"
             echo "K_BOOST=0.15"
             echo "K_AGGR=0.0"
           } >> "$GITHUB_OUTPUT"
