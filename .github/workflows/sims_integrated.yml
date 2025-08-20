@@ -60,6 +60,7 @@ jobs:
               fi
             done
           }
+          # filters defaults
           echo "F_REQUIRE_ODDS=false" >> "$GITHUB_OUTPUT"
           echo "F_MIN_EV=0"          >> "$GITHUB_OUTPUT"
           echo "F_ODDS_BANDS="       >> "$GITHUB_OUTPUT"
@@ -67,12 +68,15 @@ jobs:
           echo "F_ODDS_MAX=0"        >> "$GITHUB_OUTPUT"
           echo "F_EXCLUDE_FIRST1=false" >> "$GITHUB_OUTPUT"
           echo "F_ONLY_FIRST1=false"    >> "$GITHUB_OUTPUT"
-          echo "F_BUY_IN_TOP3=false"    >> "$GITHUB_OUTPUT"
-          echo "F_BUY_THR=0.7"          >> "$GITHUB_OUTPUT"
-          echo "K_ENABLE=true"   >> "$GITHUB_OUTPUT"
-          echo "K_THR=0.7"       >> "$GITHUB_OUTPUT"
-          echo "K_BOOST=0.15"    >> "$GITHUB_OUTPUT"
-          echo "K_AGGR=0.0"      >> "$GITHUB_OUTPUT"
+
+          # keyman defaults（★ buy 系もここで定義）
+          echo "K_ENABLE=true"        >> "$GITHUB_OUTPUT"
+          echo "K_THR=0.7"            >> "$GITHUB_OUTPUT"
+          echo "K_BOOST=0.15"         >> "$GITHUB_OUTPUT"
+          echo "K_AGGR=0.0"           >> "$GITHUB_OUTPUT"
+          echo "K_BUY_IN_TOP3=false"  >> "$GITHUB_OUTPUT"
+          echo "K_BUY_THR=0.7"        >> "$GITHUB_OUTPUT"
+
           [ -n "${FILTERS:-}" ] && parse_kvlist "$FILTERS" "F_"
           [ -n "${KEYMAN:-}" ]  && parse_kvlist "$KEYMAN"  "K_"
 
@@ -92,15 +96,15 @@ jobs:
             OUT=""
             IFS=',' read -r -a arr <<< "$PID_NORM"
             for p in "${arr[@]}"; do
-              p="$(echo "$p" | xargs)"; [ -z "$p" ] && continue
-              printf -v two "%02d" "$p"; OUT="${OUT}${two},"
+              p="$(echo "$p" | xargs)" ; [ -z "$p" ] && continue
+              printf -v two "%02d" "$p" ; OUT="${OUT}${two},"
             done
             PID_EXP="${OUT%,}"
           fi
           echo "PID_EXP=$PID_EXP" | tee -a "$GITHUB_OUTPUT"
           echo "[pidnorm] => $PID_EXP"
 
-      # 1) Pass1
+      # 1) Pass1 (keyman only)
       - name: Run Pass1 (keyman only)
         env:
           DATE:  ${{ inputs.DATE }}
@@ -123,7 +127,7 @@ jobs:
       # 2) TENKAI (per PID)
       - name: Run TENKAI prediction
         env:
-          DATE: ${{ inputs.DATE }}
+          DATE:   ${{ inputs.DATE }}
           PID_EXP: ${{ steps.pidnorm.outputs.PID_EXP }}
         run: |
           set -euo pipefail
@@ -140,7 +144,7 @@ jobs:
         run: |
           find TENKAI/predictions/v1/${{ inputs.DATE }} -maxdepth 4 -type f -name '*.csv' | sort || true
 
-      # 3) Pass2
+      # 3) Pass2 (SimS + ML)
       - name: Run Pass2 (SimS integrated with ML)
         env:
           DATE:  ${{ inputs.DATE }}
@@ -149,6 +153,7 @@ jobs:
           SIMS:  ${{ inputs.SIMS }}
           TOPN:  ${{ inputs.TOPN }}
           OUTDIR: ${{ inputs.OUTDIR }}
+          # filters
           F_REQUIRE_ODDS:   ${{ steps.parse.outputs.F_REQUIRE_ODDS }}
           F_MIN_EV:         ${{ steps.parse.outputs.F_MIN_EV }}
           F_ODDS_BANDS:     ${{ steps.parse.outputs.F_ODDS_BANDS }}
@@ -156,12 +161,13 @@ jobs:
           F_ODDS_MAX:       ${{ steps.parse.outputs.F_ODDS_MAX }}
           F_EXCLUDE_FIRST1: ${{ steps.parse.outputs.F_EXCLUDE_FIRST1 }}
           F_ONLY_FIRST1:    ${{ steps.parse.outputs.F_ONLY_FIRST1 }}
-          F_BUY_IN_TOP3:    ${{ steps.parse.outputs.F_BUY_IN_TOP3 }}
-          F_BUY_THR:        ${{ steps.parse.outputs.F_BUY_THR }}
-          K_ENABLE: ${{ steps.parse.outputs.K_ENABLE }}
-          K_THR:    ${{ steps.parse.outputs.K_THR }}
-          K_BOOST:  ${{ steps.parse.outputs.K_BOOST }}
-          K_AGGR:   ${{ steps.parse.outputs.K_AGGR }}
+          # keyman
+          K_ENABLE:         ${{ steps.parse.outputs.K_ENABLE }}
+          K_THR:            ${{ steps.parse.outputs.K_THR }}
+          K_BOOST:          ${{ steps.parse.outputs.K_BOOST }}
+          K_AGGR:           ${{ steps.parse.outputs.K_AGGR }}
+          K_BUY_IN_TOP3:    ${{ steps.parse.outputs.K_BUY_IN_TOP3 }}
+          K_BUY_THR:        ${{ steps.parse.outputs.K_BUY_THR }}
         run: |
           set -euo pipefail
           echo "[pass2] MODE=$MODE DATE=$DATE PID=$PID"
@@ -175,7 +181,9 @@ jobs:
             --outdir $OUTDIR"
           [[ "${F_EXCLUDE_FIRST1,,}" == "true" ]] && ARGS_COMMON="$ARGS_COMMON --exclude-first1"
           [[ "${F_ONLY_FIRST1,,}"    == "true" ]] && ARGS_COMMON="$ARGS_COMMON --only-first1"
-          [[ "${F_BUY_IN_TOP3,,}"    == "true" ]] && ARGS_COMMON="$ARGS_COMMON --buy-if-keyman-in-top3 --buy-keyman-threshold $F_BUY_THR"
+          # ★ KEYMAN の buy 系は K_* を参照
+          [[ "${K_BUY_IN_TOP3,,}"    == "true" ]] && ARGS_COMMON="$ARGS_COMMON --buy-if-keyman-in-top3 --buy-keyman-threshold $K_BUY_THR"
+
           if [[ "$MODE" == "predict" ]]; then
             python scripts/sims/sims_integrated.py $ARGS_COMMON --predict-only
           else
@@ -188,7 +196,7 @@ jobs:
             eval python scripts/sims/sims_integrated.py $ARGS_COMMON --odds-base public/odds/v1 $ARGS_FILTER
           fi
 
-      # 4) 集計：常に実行し、overall.json を毎回上書き（CSVが無い場合はゼロ埋め）
+      # 4) 集計：常に実行、overall.json を毎回上書き（CSV無い場合はゼロ埋め）
       - name: Aggregate & write overall.json (overwrite always)
         env:
           DATE:  ${{ inputs.DATE }}
@@ -206,16 +214,17 @@ jobs:
           F_ODDS_MAX:       ${{ steps.parse.outputs.F_ODDS_MAX }}
           F_EXCLUDE_FIRST1: ${{ steps.parse.outputs.F_EXCLUDE_FIRST1 }}
           F_ONLY_FIRST1:    ${{ steps.parse.outputs.F_ONLY_FIRST1 }}
-          F_BUY_IN_TOP3:    ${{ steps.parse.outputs.F_BUY_IN_TOP3 }}
-          F_BUY_THR:        ${{ steps.parse.outputs.F_BUY_THR }}
           # keyman
-          K_ENABLE: ${{ steps.parse.outputs.K_ENABLE }}
-          K_THR:    ${{ steps.parse.outputs.K_THR }}
-          K_BOOST:  ${{ steps.parse.outputs.K_BOOST }}
-          K_AGGR:   ${{ steps.parse.outputs.K_AGGR }}
+          K_ENABLE:         ${{ steps.parse.outputs.K_ENABLE }}
+          K_THR:            ${{ steps.parse.outputs.K_THR }}
+          K_BOOST:          ${{ steps.parse.outputs.K_BOOST }}
+          K_AGGR:           ${{ steps.parse.outputs.K_AGGR }}
+          K_BUY_IN_TOP3:    ${{ steps.parse.outputs.K_BUY_IN_TOP3 }}
+          K_BUY_THR:        ${{ steps.parse.outputs.K_BUY_THR }}
         run: |
           set -euo pipefail
           CSV="$OUTDIR/pass2/per_race_results.csv"
+
           if [ -f "$CSV" ]; then
             RACES=$(awk 'END{print NR-1}' "$CSV")
             BETS=$(awk -F, 'NR>1{sum+=$4}END{print sum+0}' "$CSV")
@@ -226,6 +235,7 @@ jobs:
             echo "[overall] per_race_results.csv not found -> write zero summary"
             RACES=0; BETS=0; STAKE=0; PAYOUT=0; HITS=0
           fi
+
           if [ "$RACES" -gt 0 ]; then
             HIT_RATE=$(awk -v h="$HITS" -v r="$RACES" 'BEGIN{printf "%.12f", (r==0?0:h/r)}')
           else
@@ -238,24 +248,23 @@ jobs:
           fi
 
           tf(){ v="${1:-false}"; v="$(echo "$v" | tr '[:upper:]' '[:lower:]')"; [ "$v" = "true" ] && echo true || echo false; }
-          REQ_ODDS=$(tf "$F_REQUIRE_ODDS")
-          EXC1=$(tf "$F_EXCLUDE_FIRST1")
-          ONLY1=$(tf "$F_ONLY_FIRST1")
-          BUY3=$(tf "$F_BUY_IN_TOP3")
-          KM_EN=$(tf "$K_ENABLE")
 
           mkdir -p "$OUTDIR/pass2"
+          rm -f "$OUTDIR/pass2/overall.json"
+
           jq -n \
             --arg date "$DATE" --arg mode "$MODE" --arg pid "$PID" \
             --argjson unit $UNIT --argjson sims $SIMS --argjson topn $TOPN \
-            --argjson races $RACES --argjson bets $BETS \
-            --argjson stake $STAKE --argjson hits $HITS \
-            --argjson hit_rate $HIT_RATE --argjson payout $PAYOUT --argjson roi $ROI \
-            --argjson f_require_odds $REQ_ODDS --arg f_odds_bands "${F_ODDS_BANDS:-}" \
+            --argjson races $RACES --argjson bets $BETS --argjson stake $STAKE \
+            --argjson hits $HITS --argjson hit_rate $HIT_RATE --argjson payout $PAYOUT --argjson roi $ROI \
+            --argjson f_require_odds $(tf "$F_REQUIRE_ODDS") \
+            --arg f_odds_bands "${F_ODDS_BANDS:-}" \
             --argjson f_min_ev ${F_MIN_EV:-0} --argjson f_odds_min ${F_ODDS_MIN:-0} --argjson f_odds_max ${F_ODDS_MAX:-0} \
-            --argjson f_exclude_first1 $EXC1 --argjson f_only_first1 $ONLY1 \
-            --argjson f_buy_in_top3 $BUY3 --argjson f_buy_thr ${F_BUY_THR:-0} \
-            --argjson k_enable $KM_EN --argjson k_thr ${K_THR:-0} --argjson k_boost ${K_BOOST:-0} --argjson k_aggr ${K_AGGR:-0} \
+            --argjson f_exclude_first1 $(tf "$F_EXCLUDE_FIRST1") \
+            --argjson f_only_first1 $(tf "$F_ONLY_FIRST1") \
+            --argjson k_enable $(tf "$K_ENABLE") \
+            --argjson k_thr ${K_THR:-0} --argjson k_boost ${K_BOOST:-0} --argjson k_aggr ${K_AGGR:-0} \
+            --argjson k_buy_in_top3 $(tf "$K_BUY_IN_TOP3") --argjson k_buy_thr ${K_BUY_THR:-0} \
             '{
               date: $date, mode: $mode, pid: $pid,
               races: $races, bets_total: $bets, unit: $unit,
@@ -269,17 +278,18 @@ jobs:
                   odds_bands: $f_odds_bands,
                   odds_min: $f_odds_min, odds_max: $f_odds_max,
                   exclude_first1: $f_exclude_first1,
-                  only_first1: $f_only_first1,
-                  buy_in_top3: $f_buy_in_top3,
-                  buy_thr: $f_buy_thr
+                  only_first1: $f_only_first1
                 },
                 keyman: {
                   enable: $k_enable, threshold: $k_thr,
-                  boost: $k_boost, aggr: $k_aggr
+                  boost: $k_boost, aggr: $k_aggr,
+                  buy_in_top3: $k_buy_in_top3, buy_thr: $k_buy_thr
                 }
               }
             }' > "$OUTDIR/pass2/overall.json"
-          echo "[overall] wrote $OUTDIR/pass2/overall.json"
+
+          echo "----- overall.json -----"
+          cat "$OUTDIR/pass2/overall.json"
 
       - name: Commit results into repo
         if: always()
@@ -287,7 +297,7 @@ jobs:
           set -e
           git config user.name  github-actions
           git config user.email github-actions@github.com
-          git add ${{ inputs.OUTDIR }}/pass1 ${{ inputs.OUTDIR }}/pass2 TENKAI/predictions/v1/${{ inputs.DATE }} || true
+          git add -A
           git commit -m "sims_integrated: ${{ inputs.MODE }} DATE=${{ inputs.DATE }} PID=${{ inputs.PID }} (overall overwrite)" || echo "nothing to commit"
           git push || true
 
