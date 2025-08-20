@@ -1,0 +1,72 @@
+name: wf_pass2_tenkai
+
+on:
+  workflow_call:
+    inputs:
+      DATE:
+        required: true
+        type: string
+      PID:
+        required: true
+        type: string   # "01,02,...,24"（親で正規化済みを想定）
+
+permissions:
+  contents: write
+
+jobs:
+  tenkai:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Echo inputs (cross-check)
+        run: |
+          echo "DATE=${{ inputs.DATE }}"
+          echo "PID=${{ inputs.PID }}"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          set -e
+          python -m pip install --upgrade pip
+          pip install numpy pandas joblib scikit-learn
+
+      - name: Run TENKAI prediction (per PID)
+        env:
+          DATE: ${{ inputs.DATE }}
+          PID_EXP: ${{ inputs.PID }}
+        run: |
+          set -euo pipefail
+          mkdir -p "TENKAI/predictions/v1/$DATE"
+          IFS=',' read -r -a PIDS <<< "$PID_EXP"
+          echo "[tenkai] DATE=$DATE / PID(s)=$PID_EXP"
+          for P in "${PIDS[@]}"; do
+            P="$(echo "$P" | xargs)"
+            [ -z "$P" ] && continue
+            echo "  -> pid=$P"
+            python TENKAI/tenkai_predict_integrated.py --date "$DATE" --pid "$P"
+          done
+
+      - name: List ML CSVs (debug)
+        run: |
+          find "TENKAI/predictions/v1/${{ inputs.DATE }}" -maxdepth 4 -type f -name '*.csv' | sort || true
+
+      - name: Commit TENKAI outputs
+        run: |
+          set -e
+          git config user.name  github-actions
+          git config user.email github-actions@github.com
+          git add TENKAI/predictions/v1/${{ inputs.DATE }} || true
+          git commit -m "TENKAI: DATE=${{ inputs.DATE }} PID=${{ inputs.PID }}" || echo "nothing to commit"
+          git push || true
+
+      - name: Upload tenkai artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tenkai_${{ inputs.DATE }}_${{ inputs.PID }}
+          path: TENKAI/predictions/v1/${{ inputs.DATE }}/**
