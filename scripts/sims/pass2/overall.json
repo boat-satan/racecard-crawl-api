@@ -1,36 +1,30 @@
 {
-  "date": "20250818",
-  "mode": "eval",
-  "pid": "01,02,03,04,05,06,07,08,09,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24",
+  "engine": "SimS integrated (E1+ML)",
+  "pass": "pass2",
   "races": 168,
   "bets_total": 3024,
-  "unit": 100,
   "stake_total": 302400,
-  "hits": 302400,
-  "hit_rate": 1800.000000000000,
   "payout_total": 203800,
-  "roi": -0.326058201058,
-  "options": {
-    "sims": 5000,
-    "topn": 18,
-    "filters": {
-      "require_odds": false,
-      "min_ev": 0,
-      "odds_bands": "",
-      "odds_min": 0,
-      "odds_max": 0,
-      "exclude_first1": false,
-      "only_first1": false,
-      "buy_in_top3": false,
-      "buy_thr": 0.7
-    },
-    "keyman": {
-      "enable": true,
-      "threshold": 0.7,
-      "boost": 0.15,
-      "aggr": 0.0,
-      "buy_in_top3": false,
-      "buy_thr": 0.7
-    }
+  "hit_rate": 0.5357142857142857,
+  "roi": -0.32605820105820105,
+  "sims_per_race": 5000,
+  "topn": 18,
+  "unit": 100,
+  "exclude_first1": false,
+  "only_first1": false,
+  "min_ev": 0.0,
+  "require_odds": false,
+  "odds_bands": "",
+  "odds_min": 0.0,
+  "odds_max": 0.0,
+  "keyman_threshold": 0.7,
+  "keyman_boost": 0.15,
+  "keyman_aggr": 0.0,
+  "buy_if_keyman_in_top3": false,
+  "buy_keyman_threshold": 0.7,
+  "ml_coeffs": {
+    "st_gain": 0.3,
+    "A_gain": 0.2,
+    "consistency": 0.3
   }
 }
