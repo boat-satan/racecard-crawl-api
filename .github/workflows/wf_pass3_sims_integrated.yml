@@ -88,7 +88,6 @@ jobs:
               fi
             done
           }
-          # filter defaults
           {
             echo "F_REQUIRE_ODDS=false"
             echo "F_MIN_EV=0"
@@ -99,15 +98,11 @@ jobs:
             echo "F_ONLY_FIRST1=false"
             echo "F_BUY_IN_TOP3=false"
             echo "F_BUY_THR=0.7"
-          } >> "$GITHUB_OUTPUT"
-          # keyman defaults
-          {
             echo "K_ENABLE=true"
             echo "K_THR=0.7"
             echo "K_BOOST=0.15"
             echo "K_AGGR=0.0"
           } >> "$GITHUB_OUTPUT"
-
           [ -n "${FILTERS:-}" ] && parse_kvlist "$FILTERS" "F_"
           [ -n "${KEYMAN:-}" ]  && parse_kvlist "$KEYMAN"  "K_"
 
@@ -119,7 +114,6 @@ jobs:
           SIMS:  ${{ inputs.SIMS }}
           TOPN:  ${{ inputs.TOPN }}
           OUTDIR: ${{ inputs.OUTDIR }}
-          # parsed filters
           F_REQUIRE_ODDS:   ${{ steps.parse.outputs.F_REQUIRE_ODDS }}
           F_MIN_EV:         ${{ steps.parse.outputs.F_MIN_EV }}
           F_ODDS_BANDS:     ${{ steps.parse.outputs.F_ODDS_BANDS }}
@@ -129,7 +123,6 @@ jobs:
           F_ONLY_FIRST1:    ${{ steps.parse.outputs.F_ONLY_FIRST1 }}
           F_BUY_IN_TOP3:    ${{ steps.parse.outputs.F_BUY_IN_TOP3 }}
           F_BUY_THR:        ${{ steps.parse.outputs.F_BUY_THR }}
-          # parsed keyman
           K_ENABLE: ${{ steps.parse.outputs.K_ENABLE }}
           K_THR:    ${{ steps.parse.outputs.K_THR }}
           K_BOOST:  ${{ steps.parse.outputs.K_BOOST }}
@@ -172,7 +165,6 @@ jobs:
           TOPN:  ${{ inputs.TOPN }}
           PID:   ${{ inputs.PID }}
           OUTDIR: ${{ inputs.OUTDIR }}
-          # filters
           F_REQUIRE_ODDS:   ${{ steps.parse.outputs.F_REQUIRE_ODDS }}
           F_MIN_EV:         ${{ steps.parse.outputs.F_MIN_EV }}
           F_ODDS_BANDS:     ${{ steps.parse.outputs.F_ODDS_BANDS }}
@@ -182,7 +174,6 @@ jobs:
           F_ONLY_FIRST1:    ${{ steps.parse.outputs.F_ONLY_FIRST1 }}
           F_BUY_IN_TOP3:    ${{ steps.parse.outputs.F_BUY_IN_TOP3 }}
           F_BUY_THR:        ${{ steps.parse.outputs.F_BUY_THR }}
-          # keyman
           K_ENABLE: ${{ steps.parse.outputs.K_ENABLE }}
           K_THR:    ${{ steps.parse.outputs.K_THR }}
           K_BOOST:  ${{ steps.parse.outputs.K_BOOST }}
@@ -193,12 +184,17 @@ jobs:
 import os, json, csv
 from pathlib import Path
 
-OUTDIR=os.environ["OUTDIR"]; DATE=os.environ["DATE"]; MODE=os.environ["MODE"]
-UNIT=float(os.environ["UNIT"]); SIMS=int(os.environ["SIMS"]); TOPN=int(os.environ["TOPN"]); PID=os.environ["PID"]
+OUTDIR  = os.environ["OUTDIR"]
+DATE    = os.environ["DATE"]
+MODE    = os.environ["MODE"]
+UNIT    = float(os.environ["UNIT"])
+SIMS    = int(os.environ["SIMS"])
+TOPN    = int(os.environ["TOPN"])
+PID     = os.environ["PID"]
 
-def tf(x): return str(x).strip().lower()=="true"
+def tf(x): return str(x).strip().lower() == "true"
 
-filters={
+filters = {
   "require_odds": tf(os.environ.get("F_REQUIRE_ODDS","false")),
   "min_ev": float(os.environ.get("F_MIN_EV","0") or 0),
   "odds_bands": os.environ.get("F_ODDS_BANDS","") or "",
@@ -210,31 +206,32 @@ filters={
   "buy_thr": float(os.environ.get("F_BUY_THR","0.7") or 0.7),
 }
 
-keyman={
+keyman = {
   "enable": tf(os.environ.get("K_ENABLE","true")),
   "threshold": float(os.environ.get("K_THR","0.7") or 0.7),
   "boost": float(os.environ.get("K_BOOST","0.15") or 0.15),
   "aggr": float(os.environ.get("K_AGGR","0.0") or 0.0),
 }
 
-pass2=Path(OUTDIR)/"pass2"
+pass2 = Path(OUTDIR) / "pass2"
 pass2.mkdir(parents=True, exist_ok=True)
-csv_path=pass2/"per_race_results.csv"
+csv_path = pass2 / "per_race_results.csv"
 
 races=bets=stake=payout=hits=0
 if csv_path.exists():
-  with csv_path.open(newline='', encoding='utf-8') as f:
-    for r in csv.DictReader(f):
-      races+=1
-      bets+=int(r.get("bets") or 0)
-      stake+=float(r.get("stake") or 0)
-      payout+=float(r.get("payout") or 0)
-      hits+=int(r.get("hit") or 0)
+    with csv_path.open(newline='', encoding='utf-8') as f:
+        rd = csv.DictReader(f)
+        for r in rd:
+            races += 1
+            b = int(r.get("bets") or 0); bets += b
+            s = float(r.get("stake") or 0); stake += s
+            p = float(r.get("payout") or 0); payout += p
+            h = int(r.get("hit") or 0); hits += h
 
-hit_rate=(hits/races) if races else 0.0
-roi=((payout-stake)/stake) if stake>0 else 0.0
+hit_rate = (hits / races) if races else 0.0
+roi = ((payout-stake)/stake) if stake>0 else 0.0
 
-overall={
+overall = {
   "date": DATE, "mode": MODE, "pid": PID,
   "races": int(races), "bets_total": int(bets), "unit": int(UNIT),
   "stake_total": int(stake), "hits": int(hits), "hit_rate": float(hit_rate),
@@ -244,8 +241,7 @@ overall={
     "filters": filters, "keyman": keyman
   }
 }
-out_path=pass2/"overall.json"
-out_path.write_text(json.dumps(overall, ensure_ascii=False, indent=2), encoding="utf-8")
+(out_path := pass2/"overall.json").write_text(json.dumps(overall, ensure_ascii=False, indent=2), encoding="utf-8")
 print(f"[overall] wrote {out_path}")
 PY
 
