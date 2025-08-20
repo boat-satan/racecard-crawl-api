@@ -5,67 +5,73 @@
   "buylist": [
     {
       "ticket": "2-4-3",
-      "score": 0.1166,
+      "score": 0.1206,
       "odds": null,
       "ev": null
     },
     {
       "ticket": "2-4-1",
-      "score": 0.1112,
+      "score": 0.1162,
       "odds": null,
       "ev": null
     },
     {
       "ticket": "4-2-3",
-      "score": 0.098,
+      "score": 0.1016,
       "odds": null,
       "ev": null
     },
     {
       "ticket": "4-2-1",
-      "score": 0.0884,
+      "score": 0.0932,
       "odds": null,
       "ev": null
     },
     {
       "ticket": "2-1-4",
-      "score": 0.0648,
+      "score": 0.0662,
       "odds": null,
       "ev": null
     },
     {
       "ticket": "2-4-5",
-      "score": 0.0646,
+      "score": 0.06,
       "odds": null,
       "ev": null
     },
     {
       "ticket": "2-3-4",
-      "score": 0.0566,
+      "score": 0.057,
       "odds": null,
       "ev": null
     },
     {
       "ticket": "4-2-5",
-      "score": 0.0462,
+      "score": 0.0408,
       "odds": null,
       "ev": null
     },
     {
       "ticket": "4-3-2",
-      "score": 0.035,
+      "score": 0.0364,
       "odds": null,
       "ev": null
     },
     {
       "ticket": "4-1-2",
-      "score": 0.033,
+      "score": 0.0336,
       "odds": null,
       "ev": null
     },
     {
       "ticket": "1-2-4",
-      "score": 0.0262,
+      "score": 0.0276,
+      "odds": null,
+      "ev": null
+    },
+    {
+      "ticket": "3-2-4",
+      "score": 0.0232,
       "odds": null,
       "ev": null
     },
@@ -76,38 +82,32 @@
       "ev": null
     },
     {
-      "ticket": "3-2-4",
-      "score": 0.0224,
+      "ticket": "3-4-2",
+      "score": 0.0198,
       "odds": null,
       "ev": null
     },
     {
       "ticket": "2-5-4",
-      "score": 0.0202,
-      "odds": null,
-      "ev": null
-    },
-    {
-      "ticket": "3-4-2",
-      "score": 0.0194,
+      "score": 0.0176,
       "odds": null,
       "ev": null
     },
     {
       "ticket": "2-3-1",
-      "score": 0.0138,
+      "score": 0.0146,
+      "odds": null,
+      "ev": null
+    },
+    {
+      "ticket": "2-1-3",
+      "score": 0.012,
       "odds": null,
       "ev": null
     },
     {
       "ticket": "4-5-2",
-      "score": 0.0124,
-      "odds": null,
-      "ev": null
-    },
-    {
-      "ticket": "2-1-5",
-      "score": 0.0108,
+      "score": 0.0104,
       "odds": null,
       "ev": null
     }
@@ -120,7 +120,7 @@
     "consistency": 0.3
   },
   "keyman": {
-    "threshold": 1.0,
+    "threshold": 0.7,
     "boost": 0.15,
     "aggr": 0.0
   },
