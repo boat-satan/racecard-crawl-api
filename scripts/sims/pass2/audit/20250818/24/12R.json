@@ -9,16 +9,14 @@
     "consistency": 0.3
   },
   "keyman": {
-    "threshold": 0.7,
+    "threshold": 1.0,
     "boost": 0.15,
     "aggr": 0.0
   },
   "boost_map": {
-    "4": 0.15,
-    "6": 0.15
+    "4": 0.15
   },
   "aggr_map": {
-    "4": 0.0,
-    "6": 0.0
+    "4": 0.0
   }
 }
