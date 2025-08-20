@@ -10,7 +10,7 @@ on:
       TOPN:   { description: "三連単 TOPN", required: true, default: "18", type: string }
       UNIT:   { description: "1点あたり(円)", required: true, default: "100", type: string }
       FILTERS: { description: "例: require_odds=true,min_ev=1.2,odds_bands=01-09,10-19", required: false, default: "", type: string }
-      KEYMAN:  { description: "例: enable=true,thr=0.7,boost=0.15,aggr=0.0,buy_in_top3=false,buy_thr=0.7", required: false, default: "enable=true,thr=0.7,boost=0.15,aggr=0.0,buy_in_top3=false,buy_thr=0.7", type: string }
+      KEYMAN:  { description: "例: enable=true,thr=0.7,boost=0.15,aggr=0.25,buy_in_top3=false,buy_thr=0.7", required: false, default: "enable=true,thr=0.7,boost=0.15,aggr=0.25,buy_in_top3=false,buy_thr=0.7", type: string }
       OUTDIR:  { description: "出力ディレクトリ", required: false, default: "scripts/sims", type: string }
 
 permissions:
@@ -68,11 +68,11 @@ jobs:
           echo "F_ONLY_FIRST1=false"    >> "$GITHUB_OUTPUT"
           echo "F_BUY_IN_TOP3=false"    >> "$GITHUB_OUTPUT"
           echo "F_BUY_THR=0.7"          >> "$GITHUB_OUTPUT"
-          # keyman defaults
+          # keyman defaults（スクリプト既定に合わせる）
           echo "K_ENABLE=true"   >> "$GITHUB_OUTPUT"
           echo "K_THR=0.7"       >> "$GITHUB_OUTPUT"
           echo "K_BOOST=0.15"    >> "$GITHUB_OUTPUT"
-          echo "K_AGGR=0.0"      >> "$GITHUB_OUTPUT"
+          echo "K_AGGR=0.25"     >> "$GITHUB_OUTPUT"
           [ -n "${FILTERS:-}" ] && parse_kvlist "$FILTERS" "F_"
           [ -n "${KEYMAN:-}" ]  && parse_kvlist "$KEYMAN"  "K_"
 
@@ -85,17 +85,14 @@ jobs:
           PID_TRIM="$(echo "${PID_IN:-}" | tr '[:space:]' ' ' | xargs)"
           if [ -z "$PID_TRIM" ] || [ "${PID_TRIM,,}" = "all" ]; then
             ALL=""
-            for i in $(seq -w 01 24); do
-              ALL="${ALL}${i},"
-            done
+            for i in $(seq -w 01 24); do ALL="${ALL}${i},"; done
             PID_EXP="${ALL%,}"
           else
             PID_NORM="$(echo "$PID_TRIM" | tr '、，;|' ',')"
             OUT=""
             IFS=',' read -r -a arr <<< "$PID_NORM"
             for p in "${arr[@]}"; do
-              p="$(echo "$p" | xargs)"
-              [ -z "$p" ] && continue
+              p="$(echo "$p" | xargs)"; [ -z "$p" ] && continue
               printf -v two "%02d" "$p"
               OUT="${OUT}${two},"
             done
@@ -135,8 +132,7 @@ jobs:
           echo "[tenkai] $DATE / $PID_EXP"
           IFS=',' read -r -a PIDS <<< "$PID_EXP"
           for P in "${PIDS[@]}"; do
-            P="$(echo "$P" | xargs)"
-            [ -z "$P" ] && continue
+            P="$(echo "$P" | xargs)"; [ -z "$P" ] && continue
             echo "  -> pid=$P"
             python TENKAI/tenkai_predict_integrated.py --date "$DATE" --pid "$P"
           done
@@ -172,6 +168,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "[pass2] MODE=$MODE DATE=$DATE PID=$PID"
+          # KEYMAN 無効指定時は実質無効化（Pass2実行値に反映）
           if [[ "${K_ENABLE,,}" == "false" ]]; then
             K_THR=9.9; K_BOOST=0; K_AGGR=0
           fi
@@ -195,16 +192,20 @@ jobs:
             eval python scripts/sims/sims_integrated.py $ARGS_COMMON --odds-base public/odds/v1 $ARGS_FILTER
           fi
 
-      # 4) eval のときだけ集計して overall.json を常に上書き（オプションも保存）
-      - name: Aggregate & write overall.json (eval only, overwrite)
-        if: ${{ inputs.MODE == 'eval' }}
+      - name: Debug parsed options
+        run: |
+          echo "[DEBUG] KEYMAN -> enable=${{ steps.parse.outputs.K_ENABLE }} thr=${{ steps.parse.outputs.K_THR }} boost=${{ steps.parse.outputs.K_BOOST }} aggr=${{ steps.parse.outputs.K_AGGR }}"
+          echo "[DEBUG] FILTERS -> require_odds=${{ steps.parse.outputs.F_REQUIRE_ODDS }} min_ev=${{ steps.parse.outputs.F_MIN_EV }} bands='${{ steps.parse.outputs.F_ODDS_BANDS }}'"
+
+      # 4) 集計: overall.json（常に上書き）を作成
+      - name: Aggregate & write overall.json (overwrite)
         env:
-          DATE:  ${{ inputs.DATE }}
-          MODE:  ${{ inputs.MODE }}
-          UNIT:  ${{ inputs.UNIT }}
-          SIMS:  ${{ inputs.SIMS }}
-          TOPN:  ${{ inputs.TOPN }}
-          PID:   ${{ steps.pidnorm.outputs.PID_EXP }}
+          DATE:   ${{ inputs.DATE }}
+          PID:    ${{ steps.pidnorm.outputs.PID_EXP }}
+          MODE:   ${{ inputs.MODE }}
+          SIMS:   ${{ inputs.SIMS }}
+          TOPN:   ${{ inputs.TOPN }}
+          UNIT:   ${{ inputs.UNIT }}
           OUTDIR: ${{ inputs.OUTDIR }}
           # filters
           F_REQUIRE_ODDS:   ${{ steps.parse.outputs.F_REQUIRE_ODDS }}
@@ -223,61 +224,128 @@ jobs:
           K_AGGR:   ${{ steps.parse.outputs.K_AGGR }}
         run: |
           set -euo pipefail
-          CSV="$OUTDIR/pass2/per_race_results.csv"
-          [ -f "$CSV" ] || { echo "per_race_results.csv not found: $CSV"; exit 1; }
+          python - <<'PY'
+import os, json, math, glob
+from collections import defaultdict
 
-          RACES=$(awk 'END{print NR-1}' "$CSV")
-          BETS=$(awk -F, 'NR>1{sum+=$4}END{print sum+0}' "$CSV")
-          STAKE=$(awk -v u="$UNIT" 'BEGIN{FS=","} NR>1{sum+=u*$4} END{print sum+0}' "$CSV")
-          PAYOUT=$(awk -F, 'NR>1{sum+=$6}END{print sum+0}' "$CSV")
-          HITS=$(awk -F, 'NR>1{sum+=$5}END{print sum+0}' "$CSV")
-          HIT_RATE=$(awk -v h="$HITS" -v r="$RACES" 'BEGIN{if(r==0)print 0; else printf "%.12f", h/r}')
-          ROI=$(awk -v p="$PAYOUT" -v s="$STAKE" 'BEGIN{if(s==0)print 0; else printf "%.12f", (p-s)/s}')
+DATE   = os.environ["DATE"]
+PID    = os.environ["PID"]
+MODE   = os.environ["MODE"]
+SIMS   = int(os.environ["SIMS"])
+TOPN   = int(os.environ["TOPN"])
+UNIT   = int(os.environ["UNIT"])
+OUTDIR = os.environ["OUTDIR"]
 
-          # bool 正規化
-          tf(){ v="${1:-false}"; v="$(echo "$v" | tr '[:upper:]' '[:lower:]')"; [ "$v" = "true" ] && echo true || echo false; }
-          REQ_ODDS=$(tf "$F_REQUIRE_ODDS")
-          EXC1=$(tf "$F_EXCLUDE_FIRST1")
-          ONLY1=$(tf "$F_ONLY_FIRST1")
-          BUY3=$(tf "$F_BUY_IN_TOP3")
-          KM_EN=$(tf "$K_ENABLE")
+# filters
+F = dict(
+  require_odds = (os.environ.get("F_REQUIRE_ODDS","false").lower()=="true"),
+  min_ev       = float(os.environ.get("F_MIN_EV") or 0),
+  odds_bands   = os.environ.get("F_ODDS_BANDS",""),
+  odds_min     = float(os.environ.get("F_ODDS_MIN") or 0),
+  odds_max     = float(os.environ.get("F_ODDS_MAX") or 0),
+  exclude_first1 = (os.environ.get("F_EXCLUDE_FIRST1","false").lower()=="true"),
+  only_first1    = (os.environ.get("F_ONLY_FIRST1","false").lower()=="true"),
+  buy_in_top3    = (os.environ.get("F_BUY_IN_TOP3","false").lower()=="true"),
+  buy_thr        = float(os.environ.get("F_BUY_THR") or 0.7),
+)
 
-          mkdir -p "$OUTDIR/pass2"
-          jq -n \
-            --arg date "$DATE" --arg mode "$MODE" --arg pid "$PID" \
-            --argjson unit $UNIT --argjson sims $SIMS --argjson topn $TOPN \
-            --argjson races $RACES --argjson bets $BETS \
-            --argjson stake $STAKE --argjson hits $HITS \
-            --argjson hit_rate $HIT_RATE --argjson payout $PAYOUT --argjson roi $ROI \
-            --argjson f_require_odds $REQ_ODDS --arg f_odds_bands "${F_ODDS_BANDS:-}" \
-            --argjson f_min_ev ${F_MIN_EV:-0} --argjson f_odds_min ${F_ODDS_MIN:-0} --argjson f_odds_max ${F_ODDS_MAX:-0} \
-            --argjson f_exclude_first1 $EXC1 --argjson f_only_first1 $ONLY1 \
-            --argjson f_buy_in_top3 $BUY3 --argjson f_buy_thr ${F_BUY_THR:-0} \
-            --argjson k_enable $KM_EN --argjson k_thr ${K_THR:-0} --argjson k_boost ${K_BOOST:-0} --argjson k_aggr ${K_AGGR:-0} \
-            '{
-              date: $date, mode: $mode, pid: $pid,
-              races: $races, bets_total: $bets, unit: $unit,
-              stake_total: $stake, hits: $hits, hit_rate: $hit_rate,
-              payout_total: $payout, roi: $roi,
-              options: {
-                sims: $sims, topn: $topn,
-                filters: {
-                  require_odds: $f_require_odds,
-                  min_ev: $f_min_ev,
-                  odds_bands: $f_odds_bands,
-                  odds_min: $f_odds_min, odds_max: $f_odds_max,
-                  exclude_first1: $f_exclude_first1,
-                  only_first1: $f_only_first1,
-                  buy_in_top3: $f_buy_in_top3,
-                  buy_thr: $f_buy_thr
-                },
-                keyman: {
-                  enable: $k_enable, threshold: $k_thr,
-                  boost: $k_boost, aggr: $k_aggr
-                }
-              }
-            }' > "$OUTDIR/pass2/overall.json"
-          echo "[overall] wrote $OUTDIR/pass2/overall.json"
+# keyman (Pass2 と同じ無効化ロジックを反映)
+K_ENABLE = (os.environ.get("K_ENABLE","true").lower()=="true")
+K_THR    = float(os.environ.get("K_THR") or 0.7)
+K_BOOST  = float(os.environ.get("K_BOOST") or 0.15)
+K_AGGR   = float(os.environ.get("K_AGGR") or 0.25)
+if not K_ENABLE:
+  K_THR, K_BOOST, K_AGGR = 9.9, 0.0, 0.0
+
+pred_dir = os.path.join(OUTDIR, "pass2", "predict")
+overall_path = os.path.join(OUTDIR, "pass2", "overall.json")
+
+def _norm_race(r):
+  r=(r or "").strip().upper()
+  return r if (not r or r.endswith("R")) else (r+"R")
+
+def _find_result(date,pid,race):
+  # public/results/v1/<date>/<pid>/<race>.json or summary.json
+  base = "public"
+  root_v1 = os.path.join(base,"results","v1")
+  root = root_v1 if os.path.isdir(root_v1) else os.path.join(base,"results")
+  dirp = os.path.join(root,date,pid)
+  cand = os.path.join(dirp, f"{_norm_race(race)}.json")
+  if os.path.isfile(cand): 
+    return json.load(open(cand,encoding="utf-8"))
+  for f in os.listdir(dirp):
+    if not f.lower().endswith(".json"): continue
+    data = json.load(open(os.path.join(dirp,f),encoding="utf-8"))
+    cont = data.get("races", data) if isinstance(data,dict) else {}
+    rk = _norm_race(race)
+    if rk in cont: return cont[rk]
+  return {}
+
+def _actual_trifecta_and_amount(res_json):
+  trif=(res_json or {}).get("payouts",{}).get("trifecta")
+  combo=None; amt=0
+  if isinstance(trif,dict):
+    combo=trif.get("combo"); amt=int(trif.get("amount") or 0)
+  if not combo and isinstance(res_json,dict):
+    order=res_json.get("order")
+    if isinstance(order,list) and len(order)>=3:
+      def lane(x): return str(x.get("lane") or x.get("course") or x.get("F") or x.get("number"))
+      try:
+        f,s,t=lane(order[0]),lane(order[1]),lane(order[2])
+        if all([f,s,t]): combo=f"{f}-{s}-{t}"
+      except: pass
+  return combo, amt
+
+files = sorted(glob.glob(os.path.join(pred_dir, "pred_*_*_*.json")))
+races=len(files); bets_total=0; stake_total=0; hits=0; payout_total=0
+
+for fp in files:
+  d = json.load(open(fp,encoding="utf-8"))
+  buylist = d.get("buylist",[])
+  bets = len(buylist)
+  bets_total += bets
+  stake_total += bets * UNIT
+  if MODE == "eval":
+    date, pid, race = d.get("date",DATE), d.get("pid",""), d.get("race","")
+    res = _find_result(str(date), str(pid), str(race))
+    hit_combo, pay = _actual_trifecta_and_amount(res)
+    if hit_combo and any(hit_combo == it["ticket"] for it in buylist):
+      hits += 1
+      payout_total += int(pay)
+
+roi = 0.0
+if MODE == "eval":
+  roi = (payout_total - stake_total)/stake_total if stake_total>0 else 0.0
+
+overall = {
+  "date": DATE,
+  "mode": MODE,
+  "races": races,
+  "bets_total": bets_total,
+  "unit": UNIT,
+  "stake_total": stake_total,
+  "hits": hits,
+  "hit_rate": (hits/races if races>0 else 0.0),
+  "payout_total": payout_total,
+  "roi": roi,
+  "options": {
+    "sims": SIMS,
+    "topn": TOPN,
+    "filters": F,
+    "keyman": {
+      "enable": K_ENABLE,
+      "threshold": K_THR,
+      "boost": K_BOOST,
+      "aggr": K_AGGR
+    }
+  }
+}
+os.makedirs(os.path.dirname(overall_path), exist_ok=True)
+with open(overall_path, "w", encoding="utf-8") as f:  # ← 常に上書き
+  json.dump(overall, f, ensure_ascii=False, indent=2)
+
+print(f"[overall] wrote {overall_path}")
+PY
 
       - name: Commit results into repo
         if: always()
