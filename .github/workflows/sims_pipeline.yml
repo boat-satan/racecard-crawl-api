@@ -99,7 +99,7 @@ jobs:
       PID:   ${{ needs.normalize-parse.outputs.PID_EXP }}
       SIMS:  ${{ inputs.SIMS }}
       TOPN:  ${{ inputs.TOPN }}
-      OUTDIR:${{ inputs.OUTDIR }}
+      OUTDIR: ${{ inputs.OUTDIR }}
 
   pass2:
     needs: [normalize-parse, pass1]
@@ -118,7 +118,7 @@ jobs:
       SIMS:  ${{ inputs.SIMS }}
       TOPN:  ${{ inputs.TOPN }}
       UNIT:  ${{ inputs.UNIT }}
-      OUTDIR:${{ inputs.OUTDIR }}
+      OUTDIR: ${{ inputs.OUTDIR }}
       # filters
       F_REQUIRE_ODDS:   ${{ needs.normalize-parse.outputs.F_REQUIRE_ODDS }}
       F_MIN_EV:         ${{ needs.normalize-parse.outputs.F_MIN_EV }}
