@@ -88,7 +88,6 @@ jobs:
               fi
             done
           }
-          # filter defaults
           {
             echo "F_REQUIRE_ODDS=false"
             echo "F_MIN_EV=0"
@@ -100,26 +99,23 @@ jobs:
             echo "F_BUY_IN_TOP3=false"
             echo "F_BUY_THR=0.7"
           } >> "$GITHUB_OUTPUT"
-          # keyman defaults
           {
             echo "K_ENABLE=true"
             echo "K_THR=0.7"
             echo "K_BOOST=0.15"
             echo "K_AGGR=0.0"
           } >> "$GITHUB_OUTPUT"
-
           [ -n "${FILTERS:-}" ] && parse_kvlist "$FILTERS" "F_"
           [ -n "${KEYMAN:-}" ]  && parse_kvlist "$KEYMAN"  "K_"
 
       - name: Run Pass2 (SimS integrated with ML)
         env:
           DATE:  ${{ inputs.DATE }}
-          PID:   ${{ inputs.PID }}              # ここは正規化済みを想定
+          PID:   ${{ inputs.PID }}
           MODE:  ${{ inputs.MODE }}
           SIMS:  ${{ inputs.SIMS }}
           TOPN:  ${{ inputs.TOPN }}
           OUTDIR: ${{ inputs.OUTDIR }}
-          # parsed filters
           F_REQUIRE_ODDS:   ${{ steps.parse.outputs.F_REQUIRE_ODDS }}
           F_MIN_EV:         ${{ steps.parse.outputs.F_MIN_EV }}
           F_ODDS_BANDS:     ${{ steps.parse.outputs.F_ODDS_BANDS }}
@@ -129,7 +125,6 @@ jobs:
           F_ONLY_FIRST1:    ${{ steps.parse.outputs.F_ONLY_FIRST1 }}
           F_BUY_IN_TOP3:    ${{ steps.parse.outputs.F_BUY_IN_TOP3 }}
           F_BUY_THR:        ${{ steps.parse.outputs.F_BUY_THR }}
-          # parsed keyman
           K_ENABLE: ${{ steps.parse.outputs.K_ENABLE }}
           K_THR:    ${{ steps.parse.outputs.K_THR }}
           K_BOOST:  ${{ steps.parse.outputs.K_BOOST }}
@@ -140,17 +135,14 @@ jobs:
           if [[ "${K_ENABLE,,}" == "false" ]]; then
             K_THR=9.9; K_BOOST=0; K_AGGR=0
           fi
-
           ARGS_COMMON="--base public --dates $DATE --pids $PID \
             --sims $SIMS --topn $TOPN \
             --keyman-threshold $K_THR --keyman-boost $K_BOOST --keyman-aggr $K_AGGR \
             --ml-root TENKAI/predictions/v1 \
             --outdir $OUTDIR"
-
           [[ "${F_EXCLUDE_FIRST1,,}" == "true" ]] && ARGS_COMMON="$ARGS_COMMON --exclude-first1"
           [[ "${F_ONLY_FIRST1,,}"    == "true" ]] && ARGS_COMMON="$ARGS_COMMON --only-first1"
           [[ "${F_BUY_IN_TOP3,,}"    == "true" ]] && ARGS_COMMON="$ARGS_COMMON --buy-if-keyman-in-top3 --buy-keyman-threshold $F_BUY_THR"
-
           if [[ "$MODE" == "predict" ]]; then
             python scripts/sims/sims_integrated.py $ARGS_COMMON --predict-only
           else
@@ -172,7 +164,6 @@ jobs:
           TOPN:  ${{ inputs.TOPN }}
           PID:   ${{ inputs.PID }}
           OUTDIR: ${{ inputs.OUTDIR }}
-          # filters
           F_REQUIRE_ODDS:   ${{ steps.parse.outputs.F_REQUIRE_ODDS }}
           F_MIN_EV:         ${{ steps.parse.outputs.F_MIN_EV }}
           F_ODDS_BANDS:     ${{ steps.parse.outputs.F_ODDS_BANDS }}
@@ -182,7 +173,6 @@ jobs:
           F_ONLY_FIRST1:    ${{ steps.parse.outputs.F_ONLY_FIRST1 }}
           F_BUY_IN_TOP3:    ${{ steps.parse.outputs.F_BUY_IN_TOP3 }}
           F_BUY_THR:        ${{ steps.parse.outputs.F_BUY_THR }}
-          # keyman
           K_ENABLE: ${{ steps.parse.outputs.K_ENABLE }}
           K_THR:    ${{ steps.parse.outputs.K_THR }}
           K_BOOST:  ${{ steps.parse.outputs.K_BOOST }}
@@ -190,68 +180,30 @@ jobs:
         run: |
           set -euo pipefail
           python - <<'PY'
-import os, json, csv, math
+import os, json, csv
 from pathlib import Path
-
-OUTDIR  = os.environ["OUTDIR"]
-DATE    = os.environ["DATE"]
-MODE    = os.environ["MODE"]
-UNIT    = float(os.environ["UNIT"])
-SIMS    = int(os.environ["SIMS"])
-TOPN    = int(os.environ["TOPN"])
-PID     = os.environ["PID"]
-
-def tf(x:str)->bool:
-    return str(x).strip().lower() == "true"
-
-filters = {
-  "require_odds": tf(os.environ.get("F_REQUIRE_ODDS","false")),
-  "min_ev": float(os.environ.get("F_MIN_EV","0") or 0),
-  "odds_bands": os.environ.get("F_ODDS_BANDS","") or "",
-  "odds_min": float(os.environ.get("F_ODDS_MIN","0") or 0),
-  "odds_max": float(os.environ.get("F_ODDS_MAX","0") or 0),
-  "exclude_first1": tf(os.environ.get("F_EXCLUDE_FIRST1","false")),
-  "only_first1": tf(os.environ.get("F_ONLY_FIRST1","false")),
-  "buy_in_top3": tf(os.environ.get("F_BUY_IN_TOP3","false")),
-  "buy_thr": float(os.environ.get("F_BUY_THR","0.7") or 0.7),
-}
-
-keyman = {
-  "enable": tf(os.environ.get("K_ENABLE","true")),
-  "threshold": float(os.environ.get("K_THR","0.7") or 0.7),
-  "boost": float(os.environ.get("K_BOOST","0.15") or 0.15),
-  "aggr": float(os.environ.get("K_AGGR","0.0") or 0.0),
-}
-
-pass2 = Path(OUTDIR) / "pass2"
-pass2.mkdir(parents=True, exist_ok=True)
-csv_path = pass2 / "per_race_results.csv"
-
+OUTDIR=os.environ["OUTDIR"]; DATE=os.environ["DATE"]; MODE=os.environ["MODE"]
+UNIT=float(os.environ["UNIT"]); SIMS=int(os.environ["SIMS"]); TOPN=int(os.environ["TOPN"]); PID=os.environ["PID"]
+def tf(x): return str(x).strip().lower()=="true"
+filters={"require_odds":tf(os.environ.get("F_REQUIRE_ODDS","false")),"min_ev":float(os.environ.get("F_MIN_EV","0") or 0),
+"odds_bands":os.environ.get("F_ODDS_BANDS","") or "","odds_min":float(os.environ.get("F_ODDS_MIN","0") or 0),
+"odds_max":float(os.environ.get("F_ODDS_MAX","0") or 0),"exclude_first1":tf(os.environ.get("F_EXCLUDE_FIRST1","false")),
+"only_first1":tf(os.environ.get("F_ONLY_FIRST1","false")),"buy_in_top3":tf(os.environ.get("F_BUY_IN_TOP3","false")),
+"buy_thr":float(os.environ.get("F_BUY_THR","0.7") or 0.7)}
+keyman={"enable":tf(os.environ.get("K_ENABLE","true")),"threshold":float(os.environ.get("K_THR","0.7") or 0.7),
+"boost":float(os.environ.get("K_BOOST","0.15") or 0.15),"aggr":float(os.environ.get("K_AGGR","0.0") or 0.0)}
+pass2=Path(OUTDIR)/"pass2"; pass2.mkdir(parents=True, exist_ok=True); csv_path=pass2/"per_race_results.csv"
 races=bets=stake=payout=hits=0
 if csv_path.exists():
-    with csv_path.open(newline='', encoding='utf-8') as f:
-        rd = csv.DictReader(f)
-        for r in rd:
-            races += 1
-            b = int(r.get("bets") or 0); bets += b
-            s = float(r.get("stake") or 0); stake += s
-            p = float(r.get("payout") or 0); payout += p
-            h = int(r.get("hit") or 0); hits += h
-
-hit_rate = (hits / races) if races else 0.0
-roi = ((payout-stake)/stake) if stake>0 else 0.0
-
-overall = {
-  "date": DATE, "mode": MODE, "pid": PID,
-  "races": int(races), "bets_total": int(bets), "unit": int(UNIT),
-  "stake_total": int(stake), "hits": int(hits), "hit_rate": float(hit_rate),
-  "payout_total": int(payout), "roi": float(roi),
-  "options": {
-    "sims": int(SIMS), "topn": int(TOPN),
-    "filters": filters, "keyman": keyman
-  }
-}
-(out_path := pass2/"overall.json").write_text(json.dumps(overall, ensure_ascii=False, indent=2), encoding="utf-8")
+  with csv_path.open(newline='', encoding='utf-8') as f:
+    for r in csv.DictReader(f):
+      races+=1; b=int(r.get("bets") or 0); bets+=b; s=float(r.get("stake") or 0); stake+=s
+      p=float(r.get("payout") or 0); payout+=p; h=int(r.get("hit") or 0); hits+=h
+hit_rate=(hits/races) if races else 0.0; roi=((payout-stake)/stake) if stake>0 else 0.0
+overall={"date":DATE,"mode":MODE,"pid":PID,"races":int(races),"bets_total":int(bets),"unit":int(UNIT),
+"stake_total":int(stake),"hits":int(hits),"hit_rate":float(hit_rate),"payout_total":int(payout),"roi":float(roi),
+"options":{"sims":int(SIMS),"topn":int(TOPN),"filters":filters,"keyman":keyman}}
+(out_path:=pass2/"overall.json").write_text(json.dumps(overall, ensure_ascii=False, indent=2), encoding="utf-8")
 print(f"[overall] wrote {out_path}")
 PY
 
@@ -262,9 +214,7 @@ PY
           git config user.name  github-actions
           git config user.email github-actions@github.com
           git add ${{ inputs.OUTDIR }}/pass2 || true
-          git commit -m "wf_pass3: write overall.json for ${{
-            inputs.DATE
-          }} PID=${{ inputs.PID }}" || echo "nothing to commit"
+          git commit -m "wf_pass3: write overall.json for ${{ inputs.DATE }} PID=${{ inputs.PID }}" || echo "nothing to commit"
           git push || true
 
       - name: Upload artifacts
