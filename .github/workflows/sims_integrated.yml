@@ -37,6 +37,8 @@ jobs:
           set -e
           python -m pip install --upgrade pip
           pip install numpy pandas joblib scikit-learn
+          sudo apt-get update -y
+          sudo apt-get install -y jq
 
       - name: Parse FILTERS & KEYMAN
         id: parse
@@ -58,7 +60,6 @@ jobs:
               fi
             done
           }
-          # filter defaults
           echo "F_REQUIRE_ODDS=false" >> "$GITHUB_OUTPUT"
           echo "F_MIN_EV=0"          >> "$GITHUB_OUTPUT"
           echo "F_ODDS_BANDS="       >> "$GITHUB_OUTPUT"
@@ -68,7 +69,6 @@ jobs:
           echo "F_ONLY_FIRST1=false"    >> "$GITHUB_OUTPUT"
           echo "F_BUY_IN_TOP3=false"    >> "$GITHUB_OUTPUT"
           echo "F_BUY_THR=0.7"          >> "$GITHUB_OUTPUT"
-          # keyman defaults
           echo "K_ENABLE=true"   >> "$GITHUB_OUTPUT"
           echo "K_THR=0.7"       >> "$GITHUB_OUTPUT"
           echo "K_BOOST=0.15"    >> "$GITHUB_OUTPUT"
@@ -85,26 +85,22 @@ jobs:
           PID_TRIM="$(echo "${PID_IN:-}" | tr '[:space:]' ' ' | xargs)"
           if [ -z "$PID_TRIM" ] || [ "${PID_TRIM,,}" = "all" ]; then
             ALL=""
-            for i in $(seq -w 01 24); do
-              ALL="${ALL}${i},"
-            done
+            for i in $(seq -w 01 24); do ALL="${ALL}${i},"; done
             PID_EXP="${ALL%,}"
           else
             PID_NORM="$(echo "$PID_TRIM" | tr '、，;|' ',')"
             OUT=""
             IFS=',' read -r -a arr <<< "$PID_NORM"
             for p in "${arr[@]}"; do
-              p="$(echo "$p" | xargs)"
-              [ -z "$p" ] && continue
-              printf -v two "%02d" "$p"
-              OUT="${OUT}${two},"
+              p="$(echo "$p" | xargs)"; [ -z "$p" ] && continue
+              printf -v two "%02d" "$p"; OUT="${OUT}${two},"
             done
             PID_EXP="${OUT%,}"
           fi
           echo "PID_EXP=$PID_EXP" | tee -a "$GITHUB_OUTPUT"
           echo "[pidnorm] => $PID_EXP"
 
-      # 1) Pass1: キーマン抽出（predict-only）
+      # 1) Pass1
       - name: Run Pass1 (keyman only)
         env:
           DATE:  ${{ inputs.DATE }}
@@ -124,7 +120,7 @@ jobs:
             --predict-only \
             --outdir "$OUTDIR"
 
-      # 2) ML推論（TENKAI）— PIDごとに実行
+      # 2) TENKAI (per PID)
       - name: Run TENKAI prediction
         env:
           DATE: ${{ inputs.DATE }}
@@ -135,8 +131,7 @@ jobs:
           echo "[tenkai] $DATE / $PID_EXP"
           IFS=',' read -r -a PIDS <<< "$PID_EXP"
           for P in "${PIDS[@]}"; do
-            P="$(echo "$P" | xargs)"
-            [ -z "$P" ] && continue
+            P="$(echo "$P" | xargs)"; [ -z "$P" ] && continue
             echo "  -> pid=$P"
             python TENKAI/tenkai_predict_integrated.py --date "$DATE" --pid "$P"
           done
@@ -145,7 +140,7 @@ jobs:
         run: |
           find TENKAI/predictions/v1/${{ inputs.DATE }} -maxdepth 4 -type f -name '*.csv' | sort || true
 
-      # 3) Pass2: MLを読み込んだ統合SimS
+      # 3) Pass2
       - name: Run Pass2 (SimS integrated with ML)
         env:
           DATE:  ${{ inputs.DATE }}
@@ -154,7 +149,6 @@ jobs:
           SIMS:  ${{ inputs.SIMS }}
           TOPN:  ${{ inputs.TOPN }}
           OUTDIR: ${{ inputs.OUTDIR }}
-          # parsed filters
           F_REQUIRE_ODDS:   ${{ steps.parse.outputs.F_REQUIRE_ODDS }}
           F_MIN_EV:         ${{ steps.parse.outputs.F_MIN_EV }}
           F_ODDS_BANDS:     ${{ steps.parse.outputs.F_ODDS_BANDS }}
@@ -164,7 +158,6 @@ jobs:
           F_ONLY_FIRST1:    ${{ steps.parse.outputs.F_ONLY_FIRST1 }}
           F_BUY_IN_TOP3:    ${{ steps.parse.outputs.F_BUY_IN_TOP3 }}
           F_BUY_THR:        ${{ steps.parse.outputs.F_BUY_THR }}
-          # parsed keyman
           K_ENABLE: ${{ steps.parse.outputs.K_ENABLE }}
           K_THR:    ${{ steps.parse.outputs.K_THR }}
           K_BOOST:  ${{ steps.parse.outputs.K_BOOST }}
@@ -195,9 +188,8 @@ jobs:
             eval python scripts/sims/sims_integrated.py $ARGS_COMMON --odds-base public/odds/v1 $ARGS_FILTER
           fi
 
-      # 4) eval のときだけ集計して overall.json を常に上書き（オプションも保存）
-      - name: Aggregate & write overall.json (eval only, overwrite)
-        if: ${{ inputs.MODE == 'eval' }}
+      # 4) 集計：常に実行し、overall.json を毎回上書き（CSVが無い場合はゼロ埋め）
+      - name: Aggregate & write overall.json (overwrite always)
         env:
           DATE:  ${{ inputs.DATE }}
           MODE:  ${{ inputs.MODE }}
@@ -224,17 +216,27 @@ jobs:
         run: |
           set -euo pipefail
           CSV="$OUTDIR/pass2/per_race_results.csv"
-          [ -f "$CSV" ] || { echo "per_race_results.csv not found: $CSV"; exit 1; }
+          if [ -f "$CSV" ]; then
+            RACES=$(awk 'END{print NR-1}' "$CSV")
+            BETS=$(awk -F, 'NR>1{sum+=$4}END{print sum+0}' "$CSV")
+            STAKE=$(awk -v u="$UNIT" 'BEGIN{FS=","} NR>1{sum+=u*$4} END{print sum+0}' "$CSV")
+            PAYOUT=$(awk -F, 'NR>1{sum+=$6}END{print sum+0}' "$CSV")
+            HITS=$(awk -F, 'NR>1{sum+=$5}END{print sum+0}' "$CSV")
+          else
+            echo "[overall] per_race_results.csv not found -> write zero summary"
+            RACES=0; BETS=0; STAKE=0; PAYOUT=0; HITS=0
+          fi
+          if [ "$RACES" -gt 0 ]; then
+            HIT_RATE=$(awk -v h="$HITS" -v r="$RACES" 'BEGIN{printf "%.12f", (r==0?0:h/r)}')
+          else
+            HIT_RATE=0
+          fi
+          if [ "$STAKE" -gt 0 ]; then
+            ROI=$(awk -v p="$PAYOUT" -v s="$STAKE" 'BEGIN{printf "%.12f", (s==0?0:(p-s)/s)}')
+          else
+            ROI=0
+          fi
 
-          RACES=$(awk 'END{print NR-1}' "$CSV")
-          BETS=$(awk -F, 'NR>1{sum+=$4}END{print sum+0}' "$CSV")
-          STAKE=$(awk -v u="$UNIT" 'BEGIN{FS=","} NR>1{sum+=u*$4} END{print sum+0}' "$CSV")
-          PAYOUT=$(awk -F, 'NR>1{sum+=$6}END{print sum+0}' "$CSV")
-          HITS=$(awk -F, 'NR>1{sum+=$5}END{print sum+0}' "$CSV")
-          HIT_RATE=$(awk -v h="$HITS" -v r="$RACES" 'BEGIN{if(r==0)print 0; else printf "%.12f", h/r}')
-          ROI=$(awk -v p="$PAYOUT" -v s="$STAKE" 'BEGIN{if(s==0)print 0; else printf "%.12f", (p-s)/s}')
-
-          # bool 正規化
           tf(){ v="${1:-false}"; v="$(echo "$v" | tr '[:upper:]' '[:lower:]')"; [ "$v" = "true" ] && echo true || echo false; }
           REQ_ODDS=$(tf "$F_REQUIRE_ODDS")
           EXC1=$(tf "$F_EXCLUDE_FIRST1")
@@ -286,7 +288,7 @@ jobs:
           git config user.name  github-actions
           git config user.email github-actions@github.com
           git add ${{ inputs.OUTDIR }}/pass1 ${{ inputs.OUTDIR }}/pass2 TENKAI/predictions/v1/${{ inputs.DATE }} || true
-          git commit -m "sims_integrated: ${{ inputs.MODE }} DATE=${{ inputs.DATE }} PID=${{ inputs.PID }}" || echo "nothing to commit"
+          git commit -m "sims_integrated: ${{ inputs.MODE }} DATE=${{ inputs.DATE }} PID=${{ inputs.PID }} (overall overwrite)" || echo "nothing to commit"
           git push || true
 
       - name: Upload artifacts
