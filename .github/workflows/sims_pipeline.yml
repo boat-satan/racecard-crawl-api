@@ -7,56 +7,55 @@ on:
         description: "対象日付 (YYYYMMDD)"
         required: true
         type: string
-      PID:
-        description: "場コード（01〜24）"
-        required: true
-        type: string
-      MODE:
-        description: "モード（predict / eval）"
-        required: true
-        default: "predict"
-        type: string
-      SIMS:
-        description: "試行回数"
+      PIDS:
+        description: "場コード（例: 01,02。空欄=全場）"
         required: false
-        default: "600"
         type: string
-      TOPN:
-        description: "三連単 TopN"
-        required: false
-        default: "18"
-        type: string
-      UNIT:
-        description: "1点あたりの購入金額（円）"
-        required: false
-        default: "100"
-        type: string
-      FILTERS:
-        description: "カンマ区切りの絞り込み（例: require_odds=true,min_ev=1.2）"
-        required: false
         default: ""
-        type: string
-      KEYMAN:
-        description: "キーマン指定（例: enable=true,thr=0.7,boost=0.15,aggr=0.0）"
+      RACES:
+        description: "レース番号（例: 1R,2R。空欄=全レース）"
         required: false
-        default: "enable=true,thr=0.7,boost=0.15,aggr=0.0,buy_in_top3=false,buy_thr=0.7"
         type: string
-      OUTDIR:
-        description: "出力ディレクトリ"
+        default: ""
+      SIMS:
+        description: "シミュレーション回数"
         required: false
-        default: "scripts/sims"
         type: string
+        default: "1200"
+      TOPN:
+        description: "上位N件"
+        required: false
+        type: string
+        default: "18"
+      LIMIT:
+        description: "最大レース件数（0=全件）"
+        required: false
+        type: string
+        default: "0"
+      F_REQUIRE_ODDS:
+        description: "オッズ必須か？（true/false）"
+        required: false
+        type: string
+        default: "false"
+      F_MIN_EV:
+        description: "最小EVフィルター値（0=フィルタ無効）"
+        required: false
+        type: string
+        default: "0"
+
+permissions:
+  contents: write
 
 jobs:
-  pass3:
-    uses: ./.github/workflows/wf_pass3_sims_integrated.yml
+  run-pass3-pipeline:
+    uses: boat-satan/racecard-crawl-api/.github/workflows/wf_pass3_sims_integrated.yml@main
     with:
       DATE: ${{ inputs.DATE }}
-      PID: ${{ inputs.PID }}
-      MODE: ${{ inputs.MODE }}
+      PIDS: ${{ inputs.PIDS }}
+      RACES: ${{ inputs.RACES }}
       SIMS: ${{ inputs.SIMS }}
       TOPN: ${{ inputs.TOPN }}
-      UNIT: ${{ inputs.UNIT }}
-      OUTDIR: ${{ inputs.OUTDIR }}
-      FILTERS: ${{ inputs.FILTERS }}
-      KEYMAN: ${{ inputs.KEYMAN }}
+      LIMIT: ${{ inputs.LIMIT }}
+      F_REQUIRE_ODDS: ${{ inputs.F_REQUIRE_ODDS }}
+      F_MIN_EV: ${{ inputs.F_MIN_EV }}
+    secrets: inherit
