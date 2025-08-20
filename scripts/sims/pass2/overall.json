@@ -20,15 +20,15 @@
       "odds_min": 0,
       "odds_max": 0,
       "exclude_first1": false,
-      "only_first1": false
+      "only_first1": false,
+      "buy_in_top3": false,
+      "buy_thr": 0.7
     },
     "keyman": {
       "enable": true,
       "threshold": 0.7,
       "boost": 0.15,
-      "aggr": 0.0,
-      "buy_in_top3": false,
-      "buy_thr": 0.7
+      "aggr": 0.0
     }
   }
 }
