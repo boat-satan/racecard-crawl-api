@@ -1,6 +1,43 @@
 name: wf_pass3_sims_integrated
 
 on:
+  workflow_dispatch:
+    inputs:
+      DATE:
+        required: true
+        type: string
+      PID:
+        required: true
+        type: string
+      MODE:
+        required: true
+        type: string
+        default: "predict"
+      SIMS:
+        required: true
+        type: string
+        default: "600"
+      TOPN:
+        required: true
+        type: string
+        default: "18"
+      UNIT:
+        required: true
+        type: string
+        default: "100"
+      FILTERS:
+        required: false
+        type: string
+        default: ""
+      KEYMAN:
+        required: false
+        type: string
+        default: "enable=true,thr=0.7,boost=0.15,aggr=0.0,buy_in_top3=false,buy_thr=0.7"
+      OUTDIR:
+        required: true
+        type: string
+        default: "scripts/sims"
+
   workflow_call:
     inputs:
       DATE:
