@@ -1,80 +1,65 @@
 # scripts/sims/aggregate_overall.py
-
 import json
 import os
-import glob
+import sys
+from datetime import datetime
 
-def load_json(path):
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-def main(outdir, date, mode, unit, sims, topn, pid):
-    base_dir = os.path.join(outdir, "pass2", date)
-    pids = pid.split(",")
-    
-    total_bet = 0
-    total_return = 0
-    hit_count = 0
-    total_races = 0
-
-    for pid in pids:
-        race_dir = os.path.join(base_dir, pid)
-        if not os.path.isdir(race_dir):
-            continue
-
-        files = sorted(glob.glob(os.path.join(race_dir, "result_*.json")))
-        for file in files:
-            result = load_json(file)
-            total_races += 1
-            total_bet += result.get("bet", 0)
-            total_return += result.get("return", 0)
-            if result.get("hit", False):
-                hit_count += 1
-
-    roi = round(total_return / total_bet, 4) if total_bet else 0
-    hit_rate = round(hit_count / total_races, 4) if total_races else 0
-
-    overall_data = {
-        "total_races": total_races,
-        "hit_count": hit_count,
-        "total_bet": total_bet,
-        "total_return": total_return,
-        "roi": roi,
-        "hit_rate": hit_rate,
-        "params": {
-            "SIMS": sims,
-            "TOPN": topn,
-            "UNIT": unit,
-            "MODE": mode,
-            "KEYMAN": {
-                "enable": os.environ.get("K_ENABLE", ""),
-                "thr": os.environ.get("K_THR", ""),
-                "boost": os.environ.get("K_BOOST", ""),
-                "aggr": os.environ.get("K_AGGR", ""),
-                "buy_in_top3": os.environ.get("F_BUY_IN_TOP3", ""),
-                "buy_thr": os.environ.get("F_BUY_THR", ""),
-            },
-            "FILTERS": {
-                "require_odds": os.environ.get("F_REQUIRE_ODDS", ""),
-                "min_ev": os.environ.get("F_MIN_EV", ""),
-                "odds_bands": os.environ.get("F_ODDS_BANDS", ""),
-                "odds_min": os.environ.get("F_ODDS_MIN", ""),
-                "odds_max": os.environ.get("F_ODDS_MAX", ""),
-                "exclude_first1": os.environ.get("F_EXCLUDE_FIRST1", ""),
-                "only_first1": os.environ.get("F_ONLY_FIRST1", "")
-            }
-        }
-    }
-
-    overall_path = os.path.join(base_dir, "overall.json")
-    with open(overall_path, "w", encoding="utf-8") as f:
-        json.dump(overall_data, f, ensure_ascii=False, indent=2)
-
-    print(f"✅ Wrote overall.json to {overall_path}")
-
-if __name__ == "__main__":
-    import sys
-    if len(sys.argv) != 7:
+def main():
+    if len(sys.argv) != 8:
         print("Usage: aggregate_overall.py <outdir> <date> <mode> <unit> <sims> <topn> <pid>")
         sys.exit(1)
-    main(*sys.argv[1:])
+
+    outdir, date, mode, unit, sims, topn, pid = sys.argv[1:]
+    pass2_dir = os.path.join(outdir, "pass2")
+
+    if not os.path.isdir(pass2_dir):
+        print(f"[ERROR] Directory not found: {pass2_dir}")
+        sys.exit(1)
+
+    # 初期の統計構造（最低限）
+    result = {
+        "meta": {
+            "date": date,
+            "mode": mode,
+            "unit": int(unit),
+            "sims": int(sims),
+            "topn": int(topn),
+            "pid": pid.split(","),
+            "generated_at": datetime.now().isoformat(),
+        },
+        "totals": {},
+        "keyman": {},
+        "filters": {}
+    }
+
+    # KEYMANパラメータ
+    result["keyman"] = {
+        "enable": os.getenv("K_ENABLE", "true").lower() == "true",
+        "threshold": float(os.getenv("K_THR", "0.7")),
+        "boost": float(os.getenv("K_BOOST", "0.15")),
+        "aggr": float(os.getenv("K_AGGR", "0.0")),
+    }
+
+    # FILTERパラメータ
+    result["filters"] = {
+        "require_odds": os.getenv("F_REQUIRE_ODDS", "false").lower() == "true",
+        "min_ev": float(os.getenv("F_MIN_EV", "0")),
+        "odds_bands": os.getenv("F_ODDS_BANDS", ""),
+        "odds_min": float(os.getenv("F_ODDS_MIN", "0")),
+        "odds_max": float(os.getenv("F_ODDS_MAX", "0")),
+        "exclude_first1": os.getenv("F_EXCLUDE_FIRST1", "false").lower() == "true",
+        "only_first1": os.getenv("F_ONLY_FIRST1", "false").lower() == "true",
+        "buy_in_top3": os.getenv("F_BUY_IN_TOP3", "false").lower() == "true",
+        "buy_thr": float(os.getenv("F_BUY_THR", "0.7")),
+    }
+
+    # TODO: 成果物（回収率など）の収集は別途対応（必要に応じて）
+
+    output_path = os.path.join(pass2_dir, "overall.json")
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False, indent=2)
+
+    print(f"[OK] Wrote overall.json to: {output_path}")
+
+if __name__ == "__main__":
+    main()
