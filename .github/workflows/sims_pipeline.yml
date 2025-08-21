@@ -8,15 +8,15 @@ on:
         required: false
         default: ""
       pids:
-        description: "場コード（カンマ区切り / 例: 01,04,24）"
+        description: "場コード（例: 01,04,24）※カンマ区切り可"
         required: false
         default: ""
       races:
-        description: "レース（カンマ区切り / 例: 1R,2R）"
+        description: "レース（例: 1R,2R）※カンマ区切り可"
         required: false
         default: ""
       sims:
-        description: "試行回数（predict）"
+        description: "試行回数（例: 600）"
         required: false
         default: "600"
       topn:
@@ -39,22 +39,25 @@ on:
 jobs:
   pass3:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        pid: ${{ fromJson(inputs.pids != '' && '[' + inputs.pids + ']' || '["01"]') }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Call pass3 (SimS integrated)
-        uses: ./.github/workflows/wf_pass3_sims_integrated.yml
-        with:
-          DATE: ${{ inputs.date }}
-          PID: ${{ matrix.pid }}
-          MODE: predict
-          SIMS: ${{ inputs.sims }}
-          TOPN: ${{ inputs.topn }}
-          UNIT: ${{ inputs.unit }}
-          FILTERS: ${{ inputs.filters }}
-          KEYMAN: ${{ inputs.keyman }}
-          OUTDIR: scripts/sims
+      - name: Run pass3 for all PIDs
+        run: |
+          IFS=',' read -ra PID_ARR <<< "${{ inputs.pids }}"
+          for PID in "${PID_ARR[@]:-01}"; do
+            echo "Running for PID=$PID"
+            gh workflow run wf_pass3_sims_integrated.yml \
+              -f DATE="${{ inputs.date }}" \
+              -f PID="$PID" \
+              -f MODE="predict" \
+              -f SIMS="${{ inputs.sims }}" \
+              -f TOPN="${{ inputs.topn }}" \
+              -f UNIT="${{ inputs.unit }}" \
+              -f FILTERS="${{ inputs.filters }}" \
+              -f KEYMAN="${{ inputs.keyman }}" \
+              -f OUTDIR="scripts/sims"
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
