@@ -15,6 +15,10 @@ on:
         description: "レース（例: 1R,2R）※カンマ区切り可"
         required: false
         default: ""
+      mode:
+        description: "predict or eval"
+        required: true
+        default: "predict"
       sims:
         description: "試行回数（例: 600）"
         required: false
@@ -46,12 +50,15 @@ jobs:
       - name: Run pass3 for all PIDs
         run: |
           IFS=',' read -ra PID_ARR <<< "${{ inputs.pids }}"
-          for PID in "${PID_ARR[@]:-01}"; do
-            echo "Running for PID=$PID"
+          if [ -z "${PID_ARR[*]}" ]; then
+            PID_ARR=("01")  # デフォルト値
+          fi
+          for PID in "${PID_ARR[@]}"; do
+            echo "Launching wf_pass3_sims_integrated for PID=$PID"
             gh workflow run wf_pass3_sims_integrated.yml \
               -f DATE="${{ inputs.date }}" \
               -f PID="$PID" \
-              -f MODE="predict" \
+              -f MODE="${{ inputs.mode }}" \
               -f SIMS="${{ inputs.sims }}" \
               -f TOPN="${{ inputs.topn }}" \
               -f UNIT="${{ inputs.unit }}" \
