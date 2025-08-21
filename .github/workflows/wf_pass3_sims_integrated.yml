@@ -78,7 +78,6 @@ jobs:
               fi
             done
           }
-
           {
             echo "F_REQUIRE_ODDS=false"
             echo "F_MIN_EV=0"
@@ -90,14 +89,12 @@ jobs:
             echo "F_BUY_IN_TOP3=false"
             echo "F_BUY_THR=0.7"
           } >> "$GITHUB_OUTPUT"
-
           {
             echo "K_ENABLE=true"
             echo "K_THR=0.7"
             echo "K_BOOST=0.15"
             echo "K_AGGR=0.0"
           } >> "$GITHUB_OUTPUT"
-
           [ -n "${FILTERS:-}" ] && parse_kvlist "$FILTERS" "F_"
           [ -n "${KEYMAN:-}" ] && parse_kvlist "$KEYMAN" "K_"
 
@@ -162,10 +159,12 @@ jobs:
       - name: Commit results
         if: always()
         run: |
+          set -e
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add ${{ inputs.OUTDIR }}/pass2 || true
           git commit -m "wf_pass3: write overall.json for ${{ inputs.DATE }} PID=${{ inputs.PID }}" || echo "nothing to commit"
+          git pull --rebase
           git push || true
 
       - name: Upload artifacts
