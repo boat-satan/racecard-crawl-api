@@ -1,171 +1,60 @@
-name: sims_pipeline
+name: SimS Pipeline
 
 on:
   workflow_dispatch:
     inputs:
-      DATE:
-        description: "YYYYMMDD"
-        required: true
-        type: string
-      PID:
-        description: "01..24, all/空=全場"
+      date:
+        description: "YYYYMMDD（空=JSTの今日）"
         required: false
-        default: "all"
-        type: string
-      MODE:
-        description: "predict or eval"
-        required: true
-        type: choice
-        options: [predict, eval]
-        default: predict
-      SIMS:
-        description: "試行回数/レース"
-        required: true
+        default: ""
+      pids:
+        description: "場コード（カンマ区切り / 例: 01,04,24）"
+        required: false
+        default: ""
+      races:
+        description: "レース（カンマ区切り / 例: 1R,2R）"
+        required: false
+        default: ""
+      sims:
+        description: "試行回数（predict）"
+        required: false
         default: "600"
-        type: string
-      TOPN:
-        description: "三連単 TOPN"
-        required: true
-        default: "18"
-        type: string
-      UNIT:
-        description: "1点あたり(円)"
-        required: true
-        default: "100"
-        type: string
-      OUTDIR:
-        description: "出力ディレクトリ"
-        required: true
-        default: "scripts/sims"
-        type: string
-      KEYMAN:
-        description: "例: enable=true,thr=0.7,boost=0.15,aggr=0.0,buy_in_top3=false,buy_thr=0.7"
+      topn:
+        description: "上位N（三連単）"
         required: false
-        default: "enable=true,thr=0.7,boost=0.15,aggr=0.0,buy_in_top3=false,buy_thr=0.7"
-        type: string
-      FILTERS:
+        default: "18"
+      unit:
+        description: "1点あたり（円）"
+        required: false
+        default: "100"
+      filters:
         description: "例: require_odds=true,min_ev=1.2,odds_bands=01-09,10-19"
         required: false
         default: ""
-        type: string
-
-permissions:
-  contents: write
+      keyman:
+        description: "例: enable=true,thr=0.7,boost=0.15,aggr=0.0,buy_in_top3=false,buy_thr=0.7"
+        required: false
+        default: "enable=true,thr=0.7,boost=0.15,aggr=0.0,buy_in_top3=false,buy_thr=0.7"
 
 jobs:
-  normalize-parse:
-    runs-on: ubuntu-latest
-    outputs:
-      PID_EXP: ${{ steps.pidnorm.outputs.PID_EXP }}
-      F_REQUIRE_ODDS:   ${{ steps.parse.outputs.F_REQUIRE_ODDS }}
-      F_MIN_EV:         ${{ steps.parse.outputs.F_MIN_EV }}
-      F_ODDS_BANDS:     ${{ steps.parse.outputs.F_ODDS_BANDS }}
-      F_ODDS_MIN:       ${{ steps.parse.outputs.F_ODDS_MIN }}
-      F_ODDS_MAX:       ${{ steps.parse.outputs.F_ODDS_MAX }}
-      F_EXCLUDE_FIRST1: ${{ steps.parse.outputs.F_EXCLUDE_FIRST1 }}
-      F_ONLY_FIRST1:    ${{ steps.parse.outputs.F_ONLY_FIRST1 }}
-      F_BUY_IN_TOP3:    ${{ steps.parse.outputs.F_BUY_IN_TOP3 }}
-      F_BUY_THR:        ${{ steps.parse.outputs.F_BUY_THR }}
-      K_ENABLE:         ${{ steps.parse.outputs.K_ENABLE }}
-      K_THR:            ${{ steps.parse.outputs.K_THR }}
-      K_BOOST:          ${{ steps.parse.outputs.K_BOOST }}
-      K_AGGR:           ${{ steps.parse.outputs.K_AGGR }}
-
-    steps:
-      - name: PID normalize
-        id: pidnorm
-        run: |
-          PID_IN="${{ inputs.PID }}"
-          PID_TRIM="$(echo "${PID_IN:-}" | tr '[:space:]' ' ' | xargs)"
-          if [ -z "$PID_TRIM" ] || [ "${PID_TRIM,,}" = "all" ]; then
-            ALL=""; for i in $(seq -w 01 24); do ALL="${ALL}${i},"; done
-            PID_EXP="${ALL%,}"
-          else
-            PID_NORM="$(echo "$PID_TRIM" | tr '、，;|' ',')"
-            OUT=""; IFS=',' read -r -a arr <<< "$PID_NORM"
-            for p in "${arr[@]}"; do
-              p="$(echo "$p" | xargs)"; [ -z "$p" ] && continue
-              printf -v two "%02d" "$p"; OUT="${OUT}${two},"
-            done
-            PID_EXP="${OUT%,}"
-          fi
-          echo "PID_EXP=$PID_EXP" >> "$GITHUB_OUTPUT"
-
-      - name: Parse FILTERS & KEYMAN
-        id: parse
-        env:
-          FILTERS: ${{ inputs.FILTERS }}
-          KEYMAN:  ${{ inputs.KEYMAN }}
-        run: |
-          parse_kvlist () {
-            local s="$1"; local prefix="$2"
-            IFS=',' read -r -a pairs <<< "$s"
-            for kv in "${pairs[@]}"; do
-              kv="$(echo "$kv" | xargs)"
-              [ -z "$kv" ] && continue
-              if [[ "$kv" == *"="* ]]; then
-                k="$(echo "${kv%%=*}" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9_' '_' | xargs)"
-                v="$(echo "${kv#*=}" | xargs)"
-                echo "$prefix$k=$v" >> "$GITHUB_OUTPUT"
-              fi
-            done
-          }
-
-          echo "F_REQUIRE_ODDS=false" >> "$GITHUB_OUTPUT"
-          echo "F_MIN_EV=0" >> "$GITHUB_OUTPUT"
-          echo "F_ODDS_BANDS=" >> "$GITHUB_OUTPUT"
-          echo "F_ODDS_MIN=0" >> "$GITHUB_OUTPUT"
-          echo "F_ODDS_MAX=0" >> "$GITHUB_OUTPUT"
-          echo "F_EXCLUDE_FIRST1=false" >> "$GITHUB_OUTPUT"
-          echo "F_ONLY_FIRST1=false" >> "$GITHUB_OUTPUT"
-          echo "F_BUY_IN_TOP3=false" >> "$GITHUB_OUTPUT"
-          echo "F_BUY_THR=0.7" >> "$GITHUB_OUTPUT"
-          echo "K_ENABLE=true" >> "$GITHUB_OUTPUT"
-          echo "K_THR=0.7" >> "$GITHUB_OUTPUT"
-          echo "K_BOOST=0.15" >> "$GITHUB_OUTPUT"
-          echo "K_AGGR=0.0" >> "$GITHUB_OUTPUT"
-
-          [ -n "${FILTERS:-}" ] && parse_kvlist "$FILTERS" "F_"
-          [ -n "${KEYMAN:-}" ] && parse_kvlist "$KEYMAN" "K_"
-
-  pass1:
-    needs: [normalize-parse]
-    uses: ./.github/workflows/wf_pass1_keyman.yml
-    with:
-      DATE:   ${{ inputs.DATE }}
-      PID:    ${{ needs.normalize-parse.outputs.PID_EXP }}
-      SIMS:   ${{ inputs.SIMS }}
-      TOPN:   ${{ inputs.TOPN }}
-      OUTDIR: ${{ inputs.OUTDIR }}
-
-  pass2:
-    needs: [normalize-parse, pass1]
-    uses: ./.github/workflows/wf_pass2_tenkai.yml
-    with:
-      DATE: ${{ inputs.DATE }}
-      PID:  ${{ needs.normalize-parse.outputs.PID_EXP }}
-
   pass3:
-    needs: [normalize-parse, pass2]
-    uses: ./.github/workflows/wf_pass3_sims_integrated.yml
-    with:
-      DATE:  ${{ inputs.DATE }}
-      PID:   ${{ needs.normalize-parse.outputs.PID_EXP }}
-      MODE:  ${{ inputs.MODE }}
-      SIMS:  ${{ inputs.SIMS }}
-      TOPN:  ${{ inputs.TOPN }}
-      UNIT:  ${{ inputs.UNIT }}
-      OUTDIR: ${{ inputs.OUTDIR }}
-      F_REQUIRE_ODDS:   ${{ needs.normalize-parse.outputs.F_REQUIRE_ODDS }}
-      F_MIN_EV:         ${{ needs.normalize-parse.outputs.F_MIN_EV }}
-      F_ODDS_BANDS:     ${{ needs.normalize-parse.outputs.F_ODDS_BANDS }}
-      F_ODDS_MIN:       ${{ needs.normalize-parse.outputs.F_ODDS_MIN }}
-      F_ODDS_MAX:       ${{ needs.normalize-parse.outputs.F_ODDS_MAX }}
-      F_EXCLUDE_FIRST1: ${{ needs.normalize-parse.outputs.F_EXCLUDE_FIRST1 }}
-      F_ONLY_FIRST1:    ${{ needs.normalize-parse.outputs.F_ONLY_FIRST1 }}
-      F_BUY_IN_TOP3:    ${{ needs.normalize-parse.outputs.F_BUY_IN_TOP3 }}
-      F_BUY_THR:        ${{ needs.normalize-parse.outputs.F_BUY_THR }}
-      K_ENABLE: ${{ needs.normalize-parse.outputs.K_ENABLE }}
-      K_THR:    ${{ needs.normalize-parse.outputs.K_THR }}
-      K_BOOST:  ${{ needs.normalize-parse.outputs.K_BOOST }}
-      K_AGGR:   ${{ needs.normalize-parse.outputs.K_AGGR }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        pid: ${{ fromJson(inputs.pids != '' && '[' + inputs.pids + ']' || '["01"]') }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Call pass3 (SimS integrated)
+        uses: ./.github/workflows/wf_pass3_sims_integrated.yml
+        with:
+          DATE: ${{ inputs.date }}
+          PID: ${{ matrix.pid }}
+          MODE: predict
+          SIMS: ${{ inputs.sims }}
+          TOPN: ${{ inputs.topn }}
+          UNIT: ${{ inputs.unit }}
+          FILTERS: ${{ inputs.filters }}
+          KEYMAN: ${{ inputs.keyman }}
+          OUTDIR: scripts/sims
