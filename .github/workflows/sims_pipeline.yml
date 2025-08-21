@@ -1,70 +1,60 @@
-name: SimS Pipeline
+name: SimS Unified Pipeline
 
 on:
   workflow_dispatch:
     inputs:
       date:
-        description: "YYYYMMDD（空=JSTの今日）"
-        required: false
-        default: ""
-      pids:
-        description: "場コード（例: 01,04,24）※カンマ区切り可"
-        required: false
-        default: ""
-      races:
-        description: "レース（例: 1R,2R）※カンマ区切り可"
-        required: false
-        default: ""
-      mode:
-        description: "predict or eval"
+        description: '予測日 (例: 20250820)'
         required: true
-        default: "predict"
+      pids:
+        description: '場コード (例: 01,04)'
+        required: false
+        default: ''
+      races:
+        description: 'レース番号 (例: 1R,2R)'
+        required: false
+        default: ''
       sims:
-        description: "試行回数（例: 600）"
+        description: '試行回数'
         required: false
-        default: "600"
+        default: '1200'
       topn:
-        description: "上位N（三連単）"
+        description: '上位N件出力'
         required: false
-        default: "18"
-      unit:
-        description: "1点あたり（円）"
+        default: '18'
+      limit:
+        description: '先頭からNレースだけ処理 (0=全件)'
         required: false
-        default: "100"
-      filters:
-        description: "例: require_odds=true,min_ev=1.2,odds_bands=01-09,10-19"
-        required: false
-        default: ""
-      keyman:
-        description: "例: enable=true,thr=0.7,boost=0.15,aggr=0.0,buy_in_top3=false,buy_thr=0.7"
-        required: false
-        default: "enable=true,thr=0.7,boost=0.15,aggr=0.0,buy_in_top3=false,buy_thr=0.7"
+        default: '0'
 
 jobs:
   pass3:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
       - name: Run pass3 for all PIDs
         run: |
-          IFS=',' read -ra PID_ARR <<< "${{ inputs.pids }}"
-          if [ -z "${PID_ARR[*]}" ]; then
-            PID_ARR=("01")  # デフォルト値
-          fi
+          IFS=',' read -ra PID_ARR <<< "${{ github.event.inputs.pids }}"
           for PID in "${PID_ARR[@]}"; do
             echo "Launching wf_pass3_sims_integrated for PID=$PID"
-            gh workflow run wf_pass3_sims_integrated.yml \
-              -f DATE="${{ inputs.date }}" \
-              -f PID="$PID" \
-              -f MODE="${{ inputs.mode }}" \
-              -f SIMS="${{ inputs.sims }}" \
-              -f TOPN="${{ inputs.topn }}" \
-              -f UNIT="${{ inputs.unit }}" \
-              -f FILTERS="${{ inputs.filters }}" \
-              -f KEYMAN="${{ inputs.keyman }}" \
-              -f OUTDIR="scripts/sims"
+            curl -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${{ secrets.GH_PAT }}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              https://api.github.com/repos/${{ github.repository }}/actions/workflows/wf_pass3_sims_integrated.yml/dispatches \
+              -d "$(jq -n \
+                --arg ref "${{ github.ref }}" \
+                --arg date "${{ github.event.inputs.date }}" \
+                --arg mode "predict" \
+                --arg unit "default" \
+                --arg sims "${{ github.event.inputs.sims }}" \
+                --arg topn "${{ github.event.inputs.topn }}" \
+                --arg pids "$PID" \
+                --arg races "${{ github.event.inputs.races }}" \
+                --arg limit "${{ github.event.inputs.limit }}" \
+                '{ref: $ref, inputs: {date: $date, mode: $mode, unit: $unit, sims: $sims, topn: $topn, pids: $pids, races: $races, limit: $limit}}')"
           done
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_PAT: ${{ secrets.GH_PAT }}
