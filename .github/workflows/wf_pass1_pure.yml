@@ -1,0 +1,69 @@
+name: wf_pass1_pure
+
+on:
+  workflow_dispatch:
+    inputs:
+      DATE:    { description: "YYYYMMDD", required: true, type: string }
+      PID:     { description: "場ID(例: 02)", required: true, type: string }
+      MODE:    { description: "predict or eval", required: true, type: choice, options: ["predict","eval"], default: "predict" }
+      SIMS:    { description: "trials per race", required: true, type: string, default: "600" }
+      TOPN:    { description: "top N trifecta", required: true, type: string, default: "18" }
+      UNIT:    { description: "unit stake", required: true, type: string, default: "100" }
+      OUTDIR:  { description: "output root", required: true, type: string, default: "SimS_pure" }
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pandas
+
+      - name: Run sims_pure
+        env:
+          DATE:   ${{ inputs.DATE }}
+          PID:    ${{ inputs.PID }}
+          MODE:   ${{ inputs.MODE }}
+          SIMS:   ${{ inputs.SIMS }}
+          TOPN:   ${{ inputs.TOPN }}
+          UNIT:   ${{ inputs.UNIT }}
+          OUTDIR: ${{ inputs.OUTDIR }}
+        run: |
+          set -euo pipefail
+          ARGS="--base public --dates $DATE --pids $PID --sims $SIMS --topn $TOPN --unit $UNIT --outdir $OUTDIR"
+          if [ "$MODE" = "predict" ]; then
+            python sims_pure.py $ARGS --predict-only
+          else
+            python sims_pure.py $ARGS
+          fi
+
+      - name: Commit results
+        if: always()
+        run: |
+          set -e
+          git config user.name  "github-actions"
+          git config user.email "github-actions@github.com"
+          git add ${{ inputs.OUTDIR }}/pass1 || true
+          git commit -m "wf_pass1_pure: ${{ inputs.MODE }} for ${{
+            inputs.DATE }} PID=${{ inputs.PID }}" || echo "nothing to commit"
+          git pull --rebase || true
+          git push || true
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sims_pure_${{ inputs.MODE }}_${{ inputs.DATE }}_${{ inputs.PID }}
+          path: ${{ inputs.OUTDIR }}/pass1/**
