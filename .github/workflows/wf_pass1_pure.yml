@@ -3,13 +3,16 @@ name: wf_pass1_pure
 on:
   workflow_dispatch:
     inputs:
-      DATE:    { description: "YYYYMMDD (カンマ区切り複数可)", required: true, type: string }
-      PID:     { description: "場ID (例: 02, または ALL)", required: true, type: string }
-      MODE:    { description: "predict or eval", required: true, type: choice, options: ["predict","eval"], default: "predict" }
-      SIMS:    { description: "trials per race", required: true, type: string, default: "600" }
-      TOPN:    { description: "top N trifecta", required: true, type: string, default: "18" }
-      UNIT:    { description: "unit stake", required: true, type: string, default: "100" }
-      OUTDIR:  { description: "output root", required: true, type: string, default: "SimS_pure" }
+      DATE:        { description: "YYYYMMDD (カンマ区切り複数可)", required: true, type: string }
+      PID:         { description: "場ID (例: 02, または ALL)", required: true, type: string }
+      MODE:        { description: "predict or eval", required: true, type: choice, options: ["predict","eval"], default: "predict" }
+      SIMS:        { description: "trials per race", required: true, type: string, default: "600" }
+      TOPN:        { description: "top N trifecta", required: true, type: string, default: "18" }
+      UNIT:        { description: "unit stake", required: true, type: string, default: "100" }
+      OUTDIR:      { description: "output root", required: true, type: string, default: "SimS_pure" }
+      STAKING:     { description: "flat or kelly", required: true, type: choice, options: ["flat","kelly"], default: "flat" }
+      BANKROLL:    { description: "初期残高 (eval時のみ使用)", required: true, type: string, default: "0" }
+      KELLY_FRAC:  { description: "分数ケリー (例 0.25)", required: true, type: string, default: "0.25" }
 
 permissions:
   contents: write
@@ -34,16 +37,20 @@ jobs:
 
       - name: Run sims_pure
         env:
-          DATE:   ${{ inputs.DATE }}
-          PID:    ${{ inputs.PID }}
-          MODE:   ${{ inputs.MODE }}
-          SIMS:   ${{ inputs.SIMS }}
-          TOPN:   ${{ inputs.TOPN }}
-          UNIT:   ${{ inputs.UNIT }}
-          OUTDIR: ${{ inputs.OUTDIR }}
+          DATE:       ${{ inputs.DATE }}
+          PID:        ${{ inputs.PID }}
+          MODE:       ${{ inputs.MODE }}
+          SIMS:       ${{ inputs.SIMS }}
+          TOPN:       ${{ inputs.TOPN }}
+          UNIT:       ${{ inputs.UNIT }}
+          OUTDIR:     ${{ inputs.OUTDIR }}
+          STAKING:    ${{ inputs.STAKING }}
+          BANKROLL:   ${{ inputs.BANKROLL }}
+          KELLY_FRAC: ${{ inputs.KELLY_FRAC }}
         run: |
           set -euo pipefail
-          ARGS="--base public --dates $DATE --sims $SIMS --topn $TOPN --unit $UNIT --outdir $OUTDIR"
+          ARGS="--base public --dates $DATE --sims $SIMS --topn $TOPN --unit $UNIT --outdir $OUTDIR \
+                --staking $STAKING --bankroll $BANKROLL --kelly-frac $KELLY_FRAC"
           # PID が ALL でなければ付与
           if [ "$PID" != "ALL" ]; then
             ARGS="$ARGS --pids $PID"
@@ -61,7 +68,7 @@ jobs:
           git config user.name  "github-actions"
           git config user.email "github-actions@github.com"
           git add "${{ inputs.OUTDIR }}/pass1" || true
-          git commit -m "wf_pass1_pure: ${{ inputs.MODE }} for ${{ inputs.DATE }} PID=${{ inputs.PID }}" || echo "nothing to commit"
+          git commit -m "wf_pass1_pure: ${{ inputs.MODE }} for ${{ inputs.DATE }} PID=${{ inputs.PID }} staking=${{ inputs.STAKING }}" || echo "nothing to commit"
           git pull --rebase || true
           git push || true
 
