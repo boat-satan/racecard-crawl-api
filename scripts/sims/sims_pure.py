@@ -9,6 +9,46 @@ from collections import Counter
 import numpy as np
 import pandas as pd
 
+# ===== 追加: パラメータファイル読込ユーティリティ =====
+try:
+    import tomllib  # py3.11+
+except Exception:
+    tomllib = None
+
+def _load_params_file(path: str) -> dict:
+    if not path:
+        return {}
+    p = os.path.expanduser(path)
+    if not os.path.isfile(p):
+        raise FileNotFoundError(p)
+    ext = os.path.splitext(p)[1].lower()
+    if ext == ".json":
+        return json.load(open(p, "r", encoding="utf-8"))
+    if ext == ".toml":
+        if tomllib is None:
+            raise RuntimeError("tomlはPython3.11+が必要")
+        return tomllib.load(open(p, "rb"))
+    raise ValueError(f"Unsupported: {ext}")
+
+def _parse_set(expr: str) -> dict:
+    out = {}
+    if not expr:
+        return out
+    for kv in [p.strip() for p in expr.split(",") if p.strip()]:
+        if "=" not in kv:
+            continue
+        k, v = kv.split("=", 1); k=k.strip(); v=v.strip()
+        try:
+            out[k] = (v.lower()=="true") if v.lower() in ("true","false") else (float(v) if any(c in v.lower() for c in ".e") else int(v))
+        except:
+            out[k]=v
+    return out
+
+def _apply_over(cls, d: dict):
+    for k,v in d.items():
+        if hasattr(cls,k):
+            setattr(cls,k,v)
+
 # ===== パラメータ =====
 class Params:
     b0=100.0; alpha_R=0.005; alpha_A=-0.010; alpha_Ap=-0.012
@@ -316,9 +356,22 @@ def main():
     ap.add_argument("--odds-base",default="./public/odds/v1")
     ap.add_argument("--min-ev",type=float,default=0.0); ap.add_argument("--require-odds",action="store_true")
     ap.add_argument("--odds-bands",default=""); ap.add_argument("--odds-min",type=float,default=0.0); ap.add_argument("--odds-max",type=float,default=0.0)
+    # ★ 追加: フィット済み/手動上書きの受け口
+    ap.add_argument("--params",default="", help="JSON/TOMLのParams上書きファイル（fit出力active_params.jsonなど）")
+    ap.add_argument("--set",default="", help="一時上書き 例: 'theta=0.03,alpha_A=-0.011'")
     args=ap.parse_args()
 
     if args.exclude_first1 and args.only_first1: raise SystemExit("--exclude-first1 と --only_first1 は同時指定不可")
+
+    # ★ 追加: Params上書き適用
+    try:
+        if args.params:
+            _apply_over(Params, _load_params_file(args.params))
+        over=_parse_set(getattr(args,"set",""))
+        if over:
+            _apply_over(Params, over)
+    except Exception as e:
+        raise SystemExit(f"[params] override failed: {e}")
 
     root_out=os.path.abspath(args.outdir); pass1_dir=os.path.join(root_out,"pass1")
     os.makedirs(pass1_dir, exist_ok=True)
