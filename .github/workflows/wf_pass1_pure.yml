@@ -3,13 +3,40 @@ name: wf_pass1_pure
 on:
   workflow_dispatch:
     inputs:
-      DATE:    { description: "YYYYMMDD", required: true, type: string }
-      PID:     { description: "場ID(例: 02)", required: true, type: string }
-      MODE:    { description: "predict or eval", required: true, type: choice, options: ["predict","eval"], default: "predict" }
-      SIMS:    { description: "trials per race", required: true, type: string, default: "600" }
-      TOPN:    { description: "top N trifecta", required: true, type: string, default: "18" }
-      UNIT:    { description: "unit stake", required: true, type: string, default: "100" }
-      OUTDIR:  { description: "output root", required: true, type: string, default: "SimS_pure" }
+      DATE:
+        description: "YYYYMMDD"
+        required: true
+        type: string
+      PID:
+        description: "場ID(例: 02)"
+        required: true
+        type: string
+      MODE:
+        description: "predict or eval"
+        required: true
+        type: choice
+        options: ["predict", "eval"]
+        default: "predict"
+      SIMS:
+        description: "trials per race"
+        required: true
+        type: string
+        default: "600"
+      TOPN:
+        description: "top N trifecta"
+        required: true
+        type: string
+        default: "18"
+      UNIT:
+        description: "unit stake"
+        required: true
+        type: string
+        default: "100"
+      OUTDIR:
+        description: "output root"
+        required: true
+        type: string
+        default: "SimS_pure"
 
 permissions:
   contents: write
@@ -41,7 +68,7 @@ jobs:
           UNIT:   ${{ inputs.UNIT }}
           OUTDIR: ${{ inputs.OUTDIR }}
         run: |
-          set -euo pipefail
+          set -e
           ARGS="--base public --dates $DATE --pids $PID --sims $SIMS --topn $TOPN --unit $UNIT --outdir $OUTDIR"
           if [ "$MODE" = "predict" ]; then
             python sims_pure.py $ARGS --predict-only
@@ -53,7 +80,7 @@ jobs:
         if: always()
         run: |
           set -e
-          git config user.name  "github-actions"
+          git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add "${{ inputs.OUTDIR }}/pass1" || true
           git commit -m "wf_pass1_pure: ${{ inputs.MODE }} for ${{ inputs.DATE }} PID=${{ inputs.PID }}" || echo "nothing to commit"
