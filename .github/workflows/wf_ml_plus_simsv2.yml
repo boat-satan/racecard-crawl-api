@@ -1,0 +1,156 @@
+name: wf_ml_plus_simsv2
+
+on:
+  workflow_dispatch:
+    inputs:
+      DATES:    { description: "YYYYMMDD をカンマ区切り (例: 20250819,20250820)", required: true,  type: string }
+      PID:      { description: "場ID (例: 02). ALL 可",                            required: true,  type: string, default: "ALL" }
+      MODE:     { description: "predict or eval",                                   required: true,  type: choice, options: ["predict","eval"], default: "predict" }
+      SIMS:     { description: "trials per race",                                   required: true,  type: string, default: "600" }
+      TOPN:     { description: "top N trifecta",                                    required: true,  type: string, default: "18" }
+      UNIT:     { description: "unit stake",                                        required: true,  type: string, default: "100" }
+      OUTDIR:   { description: "simsv2 出力ルート",                                  required: true,  type: string, default: "SimS_v2" }
+      RACE:     { description: "ML 予測時のレース。空/ALL で全R",                    required: false, type: string, default: "" }
+      MODEL_DATE: { description: "ML モデル日 (空=最新)",                            required: false, type: string, default: "" }
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          # ML で使うもの + simsv2 が使うもの
+          pip install numpy pandas scikit-learn joblib scipy lightgbm
+
+      - name: Ensure package dirs
+        run: |
+          mkdir -p TENKAI
+          [ -f TENKAI/__init__.py ] || printf "" > TENKAI/__init__.py
+
+      - name: Parse inputs & discover PIDs
+        id: vars
+        shell: bash
+        run: |
+          set -euo pipefail
+          DATES="${{ inputs.DATES }}"
+          PID_IN="${{ inputs.PID }}"
+          # 正規化（空白除去）
+          DATES_NORM="$(echo "$DATES" | tr -d ' ' )"
+          echo "dates_norm=$DATES_NORM" >> $GITHUB_OUTPUT
+
+          # PID=ALL の場合は、全日付の union を取って PID リストを作成
+          if [ "$PID_IN" = "ALL" ]; then
+            PIDS_SET=""
+            IFS=',' read -r -a DATE_ARR <<< "$DATES_NORM"
+            for D in "${DATE_ARR[@]}"; do
+              BASE="public/integrated/v1/$D"
+              if [ -d "$BASE" ]; then
+                for P in $(ls -1 "$BASE" | grep -E '^[0-9]{2}$' || true); do
+                  PIDS_SET="${PIDS_SET},${P}"
+                done
+              fi
+            done
+            PIDS_SET="$(echo "$PIDS_SET" | sed 's/^,//' )"
+            if [ -z "$PIDS_SET" ]; then
+              echo "見つかった PID がありませんでした (dates=$DATES_NORM)。" >&2
+              exit 1
+            fi
+            echo "pids_csv=$PIDS_SET" >> $GITHUB_OUTPUT
+          else
+            PID_NORM="$(echo "$PID_IN" | tr -d ' ' )"
+            echo "pids_csv=$PID_NORM" >> $GITHUB_OUTPUT
+          fi
+
+          echo "Resolved dates: $DATES_NORM"
+          echo "Resolved pids : $(cat $GITHUB_OUTPUT | grep pids_csv | cut -d= -f2)"
+
+      - name: Run TENKAI ML prediction (per date × pid)
+        shell: bash
+        run: |
+          set -euo pipefail
+          DATES="${{ steps.vars.outputs.dates_norm }}"
+          PIDS_CSV="${{ steps.vars.outputs.pids_csv }}"
+          RACE="${{ inputs.RACE }}"
+          MODEL_DATE="${{ inputs.MODEL_DATE }}"
+
+          RACE_OPT=""
+          if [ -n "${RACE}" ] && [ "${RACE}" != "ALL" ]; then
+            RACE_OPT="--race ${RACE}"
+          fi
+
+          MODEL_OPT=""
+          if [ -n "${MODEL_DATE}" ]; then
+            MODEL_OPT="--model_date ${MODEL_DATE}"
+          fi
+
+          IFS=',' read -r -a DATE_ARR <<< "$DATES"
+          IFS=',' read -r -a PID_ARR  <<< "$PIDS_CSV"
+
+          for D in "${DATE_ARR[@]}"; do
+            for P in "${PID_ARR[@]}"; do
+              # 公開データが無ければスキップ
+              if [ ! -d "public/integrated/v1/${D}/${P}" ]; then
+                echo "[SKIP] no integrated data: ${D}/${P}"
+                continue
+              fi
+              echo ">>> TENKAI predict: date=${D} pid=${P} ${RACE_OPT} ${MODEL_OPT}"
+              PYTHONPATH="." python TENKAI/tenkai_predict_integrated.py --date "${D}" --pid "${P}" ${RACE_OPT} ${MODEL_OPT}
+            done
+          done
+
+      - name: Run simsv2 (predict/eval with ML adjust)
+        shell: bash
+        env:
+          MODE:   ${{ inputs.MODE }}
+          SIMS:   ${{ inputs.SIMS }}
+          TOPN:   ${{ inputs.TOPN }}
+          UNIT:   ${{ inputs.UNIT }}
+          OUTDIR: ${{ inputs.OUTDIR }}
+        run: |
+          set -euo pipefail
+          DATES="${{ steps.vars.outputs.dates_norm }}"
+          PIDS_CSV="${{ steps.vars.outputs.pids_csv }}"
+          ARGS="--base public --dates ${DATES} --pids ${PIDS_CSV} --sims ${SIMS} --topn ${TOPN} --unit ${UNIT} --outdir ${OUTDIR} --ml-root TENKAI/predictions/v1"
+          if [ "$MODE" = "predict" ]; then
+            echo ">>> simsv2 predict"
+            python simsv2.py $ARGS --predict-only
+          else
+            echo ">>> simsv2 eval"
+            python simsv2.py $ARGS
+          fi
+
+      - name: Commit outputs
+        if: always()
+        shell: bash
+        run: |
+          set -e
+          git config user.name  "github-actions"
+          git config user.email "github-actions@github.com"
+          # TENKAI 予測と simsv2 出力をコミット
+          git add -A TENKAI/predictions/v1 || true
+          git add -A "${{ inputs.OUTDIR }}/pass1" || true
+          git diff --cached --quiet || git commit -m "wf_ml_plus_simsv2: ${{ inputs.MODE }} dates=${{ inputs.DATES }} pid=${{ inputs.PID }}"
+          git pull --rebase || true
+          git push || true
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: simsv2_${{ inputs.MODE }}_${{ steps.vars.outputs.dates_norm }}_${{ steps.vars.outputs.pids_csv }}
+          path: |
+            TENKAI/predictions/v1/**/*
+            ${{ inputs.OUTDIR }}/pass1/**/*
+          if-no-files-found: warn
