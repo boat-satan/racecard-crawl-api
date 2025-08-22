@@ -3,11 +3,11 @@ name: sims_fit_and_eval
 on:
   workflow_dispatch:
     inputs:
-      dates:   { description: "YYYYMMDD[,YYYYMMDD...]", required: true, type: string }
-      pids:    { description: "場ID or ALL", required: true, type: string, default: "ALL" }
-      sims:    { description: "trials per race", required: true, type: string, default: "3000" }
-      iters:   { description: "fit iters", required: true, type: string, default: "60" }
-      eval_topn: { description: "eval topN", required: true, type: string, default: "18" }
+      dates:     { description: "YYYYMMDD[,YYYYMMDD...]", required: true,  type: string }
+      pids:      { description: "場ID (例: 02) or ALL",   required: true,  type: string, default: "ALL" }
+      sims:      { description: "trials per race",        required: true,  type: string, default: "3000" }
+      iters:     { description: "fit iters",              required: true,  type: string, default: "60" }
+      eval_topn: { description: "eval topN",              required: true,  type: string, default: "18" }
 
 permissions:
   contents: write
@@ -17,32 +17,59 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
+        with:
+          python-version: "3.11"
+
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install numpy pandas
 
       - name: Fit params to results
+        env:
+          DATES: ${{ inputs.dates }}
+          PIDS:  ${{ inputs.pids }}
+          SIMS:  ${{ inputs.sims }}
+          ITERS: ${{ inputs.iters }}
         run: |
           set -e
+          # PIDS=ALL のときは引数を渡さない
+          PIDS_OPT=""
+          if [ -n "${PIDS}" ] && [ "${PIDS}" != "ALL" ]; then
+            PIDS_OPT="--pids ${PIDS}"
+          fi
+
           PYTHONPATH="scripts/sims" python scripts/sims/sims_fit.py \
-            --dates "${{ inputs.dates }}" \
-            --pids  "${{ inputs.pids }}" \
-            --sims  "${{ inputs.sims }}" \
-            --iters "${{ inputs.iters }}"
+            --dates "${DATES}" \
+            ${PIDS_OPT} \
+            --sims  "${SIMS}" \
+            --iters "${ITERS}"
 
       - name: Eval with fitted params (sims_pure)
+        env:
+          DATES: ${{ inputs.dates }}
+          PIDS:  ${{ inputs.pids }}
+          SIMS:  ${{ inputs.sims }}
+          TOPN:  ${{ inputs.eval_topn }}
         run: |
           set -e
+          PIDS_OPT=""
+          if [ -n "${PIDS}" ] && [ "${PIDS}" != "ALL" ]; then
+            PIDS_OPT="--pids ${PIDS}"
+          fi
+
+          # ★ fit が出力したファイル名に合わせる（fitted_params.json）
+          PARAMS_PATH="scripts/sims/pass1/fit/fitted_params.json"
+
           PYTHONPATH="scripts/sims" python scripts/sims/sims_pure.py \
-            --dates "${{ inputs.dates }}" \
-            --pids  "${{ inputs.pids }}" \
-            --sims  "${{ inputs.sims }}" \
-            --topn  "${{ inputs.eval_topn }}" \
+            --dates "${DATES}" \
+            ${PIDS_OPT} \
+            --sims  "${SIMS}" \
+            --topn  "${TOPN}" \
             --outdir "SimS_pure_fitted" \
-            --params scripts/sims/pass1/fit/active_params.json
+            --params "${PARAMS_PATH}"
 
       - name: Commit outputs
         if: always()
