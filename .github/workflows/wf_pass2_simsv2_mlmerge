@@ -1,0 +1,239 @@
+name: wf_pass2_simsv2_mlmerge
+
+on:
+  workflow_call:
+    inputs:
+      DATE:
+        description: "YYYYMMDD"
+        required: true
+        type: string
+      PID:
+        description: "正規化済み PID（例: 01,02,...,24 or CSV）"
+        required: true
+        type: string
+      MODE:
+        description: "predict or eval"
+        required: true
+        type: choice
+        options: [predict, eval]
+        default: predict
+      SIMS:
+        description: "試行回数/レース"
+        required: true
+        type: string
+        default: "600"
+      TOPN:
+        description: "三連単 TOPN"
+        required: true
+        type: string
+        default: "18"
+      UNIT:
+        description: "1点あたり(円) — eval時の賭け金計算"
+        required: true
+        type: string
+        default: "100"
+      OUTDIR:
+        description: "出力ディレクトリ（SimSのルート）"
+        required: true
+        type: string
+        default: "scripts/sims"
+      FILTERS:
+        description: "例: require_odds=true,min_ev=1.2,odds_bands=01-09,10-19,exclude_first1=false,only_first1=false"
+        required: false
+        type: string
+        default: ""
+      SCRIPT_PATH:
+        description: "simsv2.py のパス"
+        required: false
+        type: string
+        default: "scripts/sims/simsv2.py"
+      ML_ROOT:
+        description: "ML出力ルート（B: 決まり手/単勝CSV）"
+        required: false
+        type: string
+        default: "TENKAI/predictions/v1"
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install numpy pandas joblib scikit-learn
+
+      - name: Parse FILTERS
+        id: parse
+        env:
+          FILTERS: ${{ inputs.FILTERS }}
+        run: |
+          set -euo pipefail
+          parse_kvlist () {
+            local s="$1"; local prefix="$2"
+            IFS=',' read -r -a pairs <<< "$s"
+            for kv in "${pairs[@]}"; do
+              kv="$(echo "$kv" | xargs)"
+              [ -z "$kv" ] && continue
+              if [[ "$kv" == *"="* ]]; then
+                k="$(echo "${kv%%=*}" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9_' '_' | xargs)"
+                v="$(echo "${kv#*=}" | xargs)"
+                echo "$prefix$k=$v" >> "$GITHUB_OUTPUT"
+              fi
+            done
+          }
+          {
+            echo "F_REQUIRE_ODDS=false"
+            echo "F_MIN_EV=0"
+            echo "F_ODDS_BANDS="
+            echo "F_ODDS_MIN=0"
+            echo "F_ODDS_MAX=0"
+            echo "F_EXCLUDE_FIRST1=false"
+            echo "F_ONLY_FIRST1=false"
+          } >> "$GITHUB_OUTPUT"
+          [ -n "${FILTERS:-}" ] && parse_kvlist "$FILTERS" "F_"
+
+      - name: Run simsv2 (ML合成で再シム)
+        env:
+          DATE:   ${{ inputs.DATE }}
+          PID:    ${{ inputs.PID }}
+          MODE:   ${{ inputs.MODE }}
+          SIMS:   ${{ inputs.SIMS }}
+          TOPN:   ${{ inputs.TOPN }}
+          UNIT:   ${{ inputs.UNIT }}
+          OUTDIR: ${{ inputs.OUTDIR }}
+          SCRIPT: ${{ inputs.SCRIPT_PATH }}
+          MLROOT: ${{ inputs.ML_ROOT }}
+          F_REQUIRE_ODDS:   ${{ steps.parse.outputs.F_REQUIRE_ODDS }}
+          F_MIN_EV:         ${{ steps.parse.outputs.F_MIN_EV }}
+          F_ODDS_BANDS:     ${{ steps.parse.outputs.F_ODDS_BANDS }}
+          F_ODDS_MIN:       ${{ steps.parse.outputs.F_ODDS_MIN }}
+          F_ODDS_MAX:       ${{ steps.parse.outputs.F_ODDS_MAX }}
+          F_EXCLUDE_FIRST1: ${{ steps.parse.outputs.F_EXCLUDE_FIRST1 }}
+          F_ONLY_FIRST1:    ${{ steps.parse.outputs.F_ONLY_FIRST1 }}
+        run: |
+          set -euo pipefail
+          echo "[pass2] MODE=$MODE DATE=$DATE PID=$PID"
+
+          ARGS_COMMON="--base public --dates $DATE --pids $PID --sims $SIMS --topn $TOPN --outdir $OUTDIR --ml-root $MLROOT"
+
+          [[ "${F_EXCLUDE_FIRST1,,}" == "true" ]] && ARGS_COMMON="$ARGS_COMMON --exclude-first1"
+          [[ "${F_ONLY_FIRST1,,}"    == "true" ]] && ARGS_COMMON="$ARGS_COMMON --only-first1"
+
+          ARGS_FILTER=""
+          [[ -n "${F_ODDS_BANDS}" ]] && ARGS_FILTER="$ARGS_FILTER --odds-bands \"$F_ODDS_BANDS\""
+          [[ -n "${F_ODDS_MIN}"   && "$F_ODDS_MIN" != "0" ]] && ARGS_FILTER="$ARGS_FILTER --odds-min $F_ODDS_MIN"
+          [[ -n "${F_ODDS_MAX}"   && "$F_ODDS_MAX" != "0" ]] && ARGS_FILTER="$ARGS_FILTER --odds-max $F_ODDS_MAX"
+          [[ "${F_REQUIRE_ODDS,,}" == "true" ]] && ARGS_FILTER="$ARGS_FILTER --require-odds"
+          [[ -n "${F_MIN_EV}" && "$F_MIN_EV" != "0" ]] && ARGS_FILTER="$ARGS_FILTER --min-ev $F_MIN_EV"
+
+          if [[ "$MODE" == "predict" ]]; then
+            # 予測のみ
+            eval python "$SCRIPT" $ARGS_COMMON --predict-only $ARGS_FILTER
+          else
+            # eval（結果 & 収支集計）
+            eval python "$SCRIPT" $ARGS_COMMON $ARGS_FILTER
+          fi
+
+      - name: Fallback aggregate (overall.json を確実に作る)
+        if: always()
+        env:
+          DATE:   ${{ inputs.DATE }}
+          MODE:   ${{ inputs.MODE }}
+          UNIT:   ${{ inputs.UNIT }}
+          SIMS:   ${{ inputs.SIMS }}
+          TOPN:   ${{ inputs.TOPN }}
+          PID:    ${{ inputs.PID }}
+          OUTDIR: ${{ inputs.OUTDIR }}
+          F_REQUIRE_ODDS:   ${{ steps.parse.outputs.F_REQUIRE_ODDS }}
+          F_MIN_EV:         ${{ steps.parse.outputs.F_MIN_EV }}
+          F_ODDS_BANDS:     ${{ steps.parse.outputs.F_ODDS_BANDS }}
+          F_ODDS_MIN:       ${{ steps.parse.outputs.F_ODDS_MIN }}
+          F_ODDS_MAX:       ${{ steps.parse.outputs.F_ODDS_MAX }}
+          F_EXCLUDE_FIRST1: ${{ steps.parse.outputs.F_EXCLUDE_FIRST1 }}
+          F_ONLY_FIRST1:    ${{ steps.parse.outputs.F_ONLY_FIRST1 }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+import os, json, csv
+from pathlib import Path
+
+OUTDIR  = os.environ["OUTDIR"]
+DATE    = os.environ["DATE"]
+MODE    = os.environ["MODE"]
+UNIT    = float(os.environ["UNIT"])
+SIMS    = int(os.environ["SIMS"])
+TOPN    = int(os.environ["TOPN"])
+PID     = os.environ["PID"]
+
+def tf(x:str)->bool: return str(x).strip().lower()=="true"
+
+filters = {
+  "require_odds": tf(os.environ.get("F_REQUIRE_ODDS","false")),
+  "min_ev": float(os.environ.get("F_MIN_EV","0") or 0),
+  "odds_bands": os.environ.get("F_ODDS_BANDS","") or "",
+  "odds_min": float(os.environ.get("F_ODDS_MIN","0") or 0),
+  "odds_max": float(os.environ.get("F_ODDS_MAX","0") or 0),
+  "exclude_first1": tf(os.environ.get("F_EXCLUDE_FIRST1","false")),
+  "only_first1": tf(os.environ.get("F_ONLY_FIRST1","false")),
+}
+
+pass2 = Path(OUTDIR) / "pass2"
+pass2.mkdir(parents=True, exist_ok=True)
+csv_path = pass2 / "per_race_results.csv"
+
+races=bets=stake=payout=hits=0
+if csv_path.exists():
+    import math
+    with csv_path.open(newline='', encoding='utf-8') as f:
+        rd = csv.DictReader(f)
+        for r in rd:
+            races += 1
+            b = int(float(r.get("bets") or 0));    bets += b
+            s = float(r.get("stake") or 0);        stake += s
+            p = float(r.get("payout") or 0);       payout += p
+            h = int(float(r.get("hit") or 0));     hits += h
+
+hit_rate = (hits / races) if races else 0.0
+roi = ((payout-stake)/stake) if stake>0 else 0.0
+
+overall = {
+  "date": DATE, "mode": MODE, "pid": PID,
+  "races": int(races), "bets_total": int(bets), "unit": int(UNIT),
+  "stake_total": int(stake), "hits": int(hits), "hit_rate": float(hit_rate),
+  "payout_total": int(payout), "roi": float(roi),
+  "options": {"sims": int(SIMS), "topn": int(TOPN), "filters": filters}
+}
+(out_path := pass2/"overall.json").write_text(json.dumps(overall, ensure_ascii=False, indent=2), encoding="utf-8")
+print(f"[overall] wrote {out_path}")
+PY
+
+      - name: Commit results
+        if: always()
+        run: |
+          set -e
+          git config user.name  "github-actions"
+          git config user.email "github-actions@github.com"
+          git add ${{ inputs.OUTDIR }}/pass2 || true
+          git commit -m "wf_pass2: simsv2 overall for ${{ inputs.DATE }} PID=${{ inputs.PID }}" || echo "nothing to commit"
+          git pull --rebase || true
+          git push || true
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wf_pass2_outputs_${{ inputs.DATE }}_${{ inputs.PID }}
+          path: ${{ inputs.OUTDIR }}/pass2/**
