@@ -4,85 +4,278 @@ on:
   workflow_dispatch:
     inputs:
       DATE:
-        description: "日付 (例: 20250820)"
+        description: "YYYYMMDD"
         required: true
         type: string
-      PIDS:
-        description: "場コード（例: 01,02,...）"
-        required: true
-        type: string
-      SIMS:
-        description: "試行回数（例: 600）"
+      PID:
+        description: "01..24, all/空=全場（カンマ区切り可）"
         required: false
+        default: "all"
+        type: string
+      MODE:
+        description: "predict or eval"
+        required: true
+        type: choice
+        options: [predict, eval]
+        default: predict
+      SIMS:
+        description: "試行回数/レース"
+        required: true
         default: "600"
         type: string
       TOPN:
-        description: "三連単 TopN（例: 18）"
-        required: false
+        description: "三連単 TOPN"
+        required: true
         default: "18"
         type: string
       UNIT:
-        description: "1点あたりの金額（例: 100）"
-        required: false
+        description: "1点あたり(円)"
+        required: true
         default: "100"
         type: string
-      MODE:
-        description: "モード（predict または eval）"
-        required: true
-        default: "predict"
-        type: string
-      FILTERS:
-        description: "フィルター文字列"
-        required: false
-        default: ""
-        type: string
-      KEYMAN:
-        description: "キーマンパラメータ"
-        required: false
-        default: ""
-        type: string
       OUTDIR:
-        description: "出力ディレクトリ"
-        required: false
+        description: "出力ディレクトリ（simsv2 出力ルート）"
+        required: true
         default: "scripts/sims"
         type: string
+      FILTERS:
+        description: "例: require_odds=true,min_ev=1.2,odds_bands=01-09,10-19,exclude_first1=false,only_first1=false,odds_min=0,odds_max=0"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: write
 
 jobs:
-  pass3:
+  normalize-parse:
     runs-on: ubuntu-latest
+    outputs:
+      PID_EXP: ${{ steps.pidnorm.outputs.PID_EXP }}
+      # filters
+      F_REQUIRE_ODDS:   ${{ steps.parse.outputs.F_REQUIRE_ODDS }}
+      F_MIN_EV:         ${{ steps.parse.outputs.F_MIN_EV }}
+      F_ODDS_BANDS:     ${{ steps.parse.outputs.F_ODDS_BANDS }}
+      F_ODDS_MIN:       ${{ steps.parse.outputs.F_ODDS_MIN }}
+      F_ODDS_MAX:       ${{ steps.parse.outputs.F_ODDS_MAX }}
+      F_EXCLUDE_FIRST1: ${{ steps.parse.outputs.F_EXCLUDE_FIRST1 }}
+      F_ONLY_FIRST1:    ${{ steps.parse.outputs.F_ONLY_FIRST1 }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Run pass3 for all PIDs
-        env:
-          DATE: ${{ inputs.DATE }}
-          PIDS: ${{ inputs.PIDS }}
-          SIMS: ${{ inputs.SIMS }}
-          TOPN: ${{ inputs.TOPN }}
-          UNIT: ${{ inputs.UNIT }}
-          MODE: ${{ inputs.MODE }}
-          FILTERS: ${{ inputs.FILTERS }}
-          KEYMAN: ${{ inputs.KEYMAN }}
-          OUTDIR: ${{ inputs.OUTDIR }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: PID normalize (all/空→01..24、ゼロ詰め)
+        id: pidnorm
+        shell: bash
         run: |
           set -euo pipefail
+          PID_IN="${{ inputs.PID }}"
+          PID_TRIM="$(echo "${PID_IN:-}" | tr '[:space:]' ' ' | xargs)"
+          if [ -z "$PID_TRIM" ] || [ "${PID_TRIM,,}" = "all" ]; then
+            ALL=""
+            for i in $(seq -w 01 24); do ALL="${ALL}${i},"; done
+            PID_EXP="${ALL%,}"
+          else
+            PID_NORM="$(echo "$PID_TRIM" | tr '、，;|' ',')"
+            OUT=""
+            IFS=',' read -r -a arr <<< "$PID_NORM"
+            for p in "${arr[@]}"; do
+              p="$(echo "$p" | xargs)"; [ -z "$p" ] && continue
+              if [[ "$p" =~ ^[0-9]+$ ]]; then
+                printf -v two "%02d" "$p"
+                OUT="${OUT}${two},"
+              fi
+            done
+            PID_EXP="${OUT%,}"
+          fi
+          echo "PID_EXP=$PID_EXP" | tee -a "$GITHUB_OUTPUT"
 
-          IFS=',' read -ra PID_ARR <<< "$PIDS"
+      - name: Parse FILTERS (キーマン無し)
+        id: parse
+        env:
+          FILTERS: ${{ inputs.FILTERS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          parse_kvlist () {
+            local s="$1"
+            IFS=',' read -r -a pairs <<< "$s"
+            for kv in "${pairs[@]}"; do
+              kv="$(echo "$kv" | xargs)"
+              [ -z "$kv" ] && continue
+              if [[ "$kv" == *"="* ]]; then
+                k="$(echo "${kv%%=*}" | tr '[:lower:]' '[:upper:]' | tr -c 'A-Z0-9_' '_' | xargs)"
+                v="$(echo "${kv#*=}" | xargs)"
+                echo "${k}=${v}" >> kv.out
+              fi
+            done
+          }
+          # defaults
+          {
+            echo "F_REQUIRE_ODDS=false"
+            echo "F_MIN_EV=0"
+            echo "F_ODDS_BANDS="
+            echo "F_ODDS_MIN=0"
+            echo "F_ODDS_MAX=0"
+            echo "F_EXCLUDE_FIRST1=false"
+            echo "F_ONLY_FIRST1=false"
+          } > defaults.out
+          : > kv.out
+          [ -n "${FILTERS:-}" ] && parse_kvlist "$FILTERS"
 
-          for PID in "${PID_ARR[@]}"; do
-            echo "Launching wf_pass3_sims_integrated for PID=$PID"
-
-            gh workflow run wf_pass3_sims_integrated.yml \
-              --ref main \
-              -f DATE="$DATE" \
-              -f PID="$PID" \
-              -f MODE="$MODE" \
-              -f SIMS="$SIMS" \
-              -f TOPN="$TOPN" \
-              -f UNIT="$UNIT" \
-              -f FILTERS="$FILTERS" \
-              -f KEYMAN="$KEYMAN" \
-              -f OUTDIR="$OUTDIR"
+          # merge kv → outputs（prefix付与）
+          source defaults.out
+          while IFS='=' read -r k v; do
+            case "$k" in
+              REQUIRE_ODDS)   echo "F_REQUIRE_ODDS=$v"   >> "$GITHUB_OUTPUT" ;;
+              MIN_EV)         echo "F_MIN_EV=$v"         >> "$GITHUB_OUTPUT" ;;
+              ODDS_BANDS)     echo "F_ODDS_BANDS=$v"     >> "$GITHUB_OUTPUT" ;;
+              ODDS_MIN)       echo "F_ODDS_MIN=$v"       >> "$GITHUB_OUTPUT" ;;
+              ODDS_MAX)       echo "F_ODDS_MAX=$v"       >> "$GITHUB_OUTPUT" ;;
+              EXCLUDE_FIRST1) echo "F_EXCLUDE_FIRST1=$v" >> "$GITHUB_OUTPUT" ;;
+              ONLY_FIRST1)    echo "F_ONLY_FIRST1=$v"    >> "$GITHUB_OUTPUT" ;;
+            esac
+          done < kv.out
+          # ensure defaults applied if not set by kv
+          for k in F_REQUIRE_ODDS F_MIN_EV F_ODDS_BANDS F_ODDS_MIN F_ODDS_MAX F_EXCLUDE_FIRST1 F_ONLY_FIRST1; do
+            if ! grep -q "^$k=" "$GITHUB_OUTPUT"; then
+              val="$(grep "^$k=" defaults.out | head -n1 | cut -d= -f2-)"
+              echo "$k=$val" >> "$GITHUB_OUTPUT"
+            fi
           done
+
+  # Pass1: ML 予測（B）
+  pass1:
+    needs: [normalize-parse]
+    uses: ./.github/workflows/wf_pass1_ml_predict.yml
+    with:
+      DATE:  ${{ inputs.DATE }}
+      PID:   ${{ needs.normalize-parse.outputs.PID_EXP }}
+      # RACE は空＝全レース
+      RACE:  ""
+      # 既定スクリプト/モデル日付はワークフロー内デフォルトに任せる
+
+  # Pass2: simsv2（キーマン無し）+ ML 合成で再シム（A’）
+  pass2:
+    needs: [normalize-parse, pass1]
+    uses: ./.github/workflows/wf_pass2_simsv2_mlmerge.yml
+    with:
+      DATE:  ${{ inputs.DATE }}
+      PID:   ${{ needs.normalize-parse.outputs.PID_EXP }}
+      MODE:  ${{ inputs.MODE }}
+      SIMS:  ${{ inputs.SIMS }}
+      TOPN:  ${{ inputs.TOPN }}
+      UNIT:  ${{ inputs.UNIT }}
+      OUTDIR: ${{ inputs.OUTDIR }}
+      # フィルタ（キーマン無し）
+      F_REQUIRE_ODDS:   ${{ needs.normalize-parse.outputs.F_REQUIRE_ODDS }}
+      F_MIN_EV:         ${{ needs.normalize-parse.outputs.F_MIN_EV }}
+      F_ODDS_BANDS:     ${{ needs.normalize-parse.outputs.F_ODDS_BANDS }}
+      F_ODDS_MIN:       ${{ needs.normalize-parse.outputs.F_ODDS_MIN }}
+      F_ODDS_MAX:       ${{ needs.normalize-parse.outputs.F_ODDS_MAX }}
+      F_EXCLUDE_FIRST1: ${{ needs.normalize-parse.outputs.F_EXCLUDE_FIRST1 }}
+      F_ONLY_FIRST1:    ${{ needs.normalize-parse.outputs.F_ONLY_FIRST1 }}
+
+  # 収集: per_race_results.csv を集計して overall.json を常に上書き
+  aggregate:
+    needs: [normalize-parse, pass2]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Aggregate & write overall.json (robust)
+        env:
+          OUTDIR: ${{ inputs.OUTDIR }}
+          DATE:   ${{ inputs.DATE }}
+          MODE:   ${{ inputs.MODE }}
+          UNIT:   ${{ inputs.UNIT }}
+          SIMS:   ${{ inputs.SIMS }}
+          TOPN:   ${{ inputs.TOPN }}
+          PID:    ${{ needs.normalize-parse.outputs.PID_EXP }}
+          # filters
+          F_REQUIRE_ODDS:   ${{ needs.normalize-parse.outputs.F_REQUIRE_ODDS }}
+          F_MIN_EV:         ${{ needs.normalize-parse.outputs.F_MIN_EV }}
+          F_ODDS_BANDS:     ${{ needs.normalize-parse.outputs.F_ODDS_BANDS }}
+          F_ODDS_MIN:       ${{ needs.normalize-parse.outputs.F_ODDS_MIN }}
+          F_ODDS_MAX:       ${{ needs.normalize-parse.outputs.F_ODDS_MAX }}
+          F_EXCLUDE_FIRST1: ${{ needs.normalize-parse.outputs.F_EXCLUDE_FIRST1 }}
+          F_ONLY_FIRST1:    ${{ needs.normalize-parse.outputs.F_ONLY_FIRST1 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+import os, json, csv
+from pathlib import Path
+
+OUTDIR  = os.environ["OUTDIR"]
+DATE    = os.environ["DATE"]
+MODE    = os.environ["MODE"]
+UNIT    = int(float(os.environ["UNIT"]))
+SIMS    = int(os.environ["SIMS"])
+TOPN    = int(os.environ["TOPN"])
+PID     = os.environ["PID"]
+
+def tf(x:str)->bool:
+    return str(x).strip().lower() == "true"
+
+filters = {
+  "require_odds": tf(os.environ.get("F_REQUIRE_ODDS","false")),
+  "min_ev": float(os.environ.get("F_MIN_EV","0") or 0),
+  "odds_bands": os.environ.get("F_ODDS_BANDS","") or "",
+  "odds_min": float(os.environ.get("F_ODDS_MIN","0") or 0),
+  "odds_max": float(os.environ.get("F_ODDS_MAX","0") or 0),
+  "exclude_first1": tf(os.environ.get("F_EXCLUDE_FIRST1","false")),
+  "only_first1": tf(os.environ.get("F_ONLY_FIRST1","false")),
+}
+
+pass2 = Path(OUTDIR) / "pass2"
+pass2.mkdir(parents=True, exist_ok=True)
+csv_path = pass2 / "per_race_results.csv"
+
+races=bets=stake=payout=hits=0
+if csv_path.exists():
+    with csv_path.open(newline='', encoding='utf-8') as f:
+        rd = csv.DictReader(f)
+        for r in rd:
+            races += 1
+            b = int(float(r.get("bets") or 0)); bets += b
+            s = int(float(r.get("stake") or 0)); stake += s
+            p = int(float(r.get("payout") or 0)); payout += p
+            h = int(float(r.get("hit") or 0)); hits += h
+
+hit_rate = (hits / races) if races else 0.0
+roi = ((payout-stake)/stake) if stake>0 else 0.0
+
+overall = {
+  "date": DATE, "mode": MODE, "pid": PID,
+  "races": int(races), "bets_total": int(bets), "unit": int(UNIT),
+  "stake_total": int(stake), "hits": int(hits), "hit_rate": float(hit_rate),
+  "payout_total": int(payout), "roi": float(roi),
+  "options": {
+    "sims": int(SIMS), "topn": int(TOPN),
+    "filters": filters
+  }
+}
+(out_path := pass2/"overall.json").write_text(json.dumps(overall, ensure_ascii=False, indent=2), encoding="utf-8")
+print(f"[overall] wrote {out_path}")
+PY
+
+      - name: Commit results into repo
+        if: always()
+        shell: bash
+        run: |
+          set -e
+          git config user.name  github-actions
+          git config user.email github-actions@github.com
+          git add ${{ inputs.OUTDIR }}/pass2 || true
+          git commit -m "pipeline: overall.json for ${{ inputs.DATE }} PID=${{ needs.normalize-parse.outputs.PID_EXP }}" || echo "nothing to commit"
+          git pull --rebase || true
+          git push || true
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sims_pipeline_outputs_${{ inputs.DATE }}_${{ needs.normalize-parse.outputs.PID_EXP }}
+          path: |
+            ${{ inputs.OUTDIR }}/pass2/**
