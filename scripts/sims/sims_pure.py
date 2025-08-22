@@ -8,6 +8,7 @@
 #  - 資金配分モード (--staking flat|kelly)、初期残高 (--bankroll)、分数ケリー (--kelly-frac)、
 #    最低ベット額 (--min-bet)、丸め単位 (--round-to) を追加
 #  - ケリー配分は同一レース内の相互排他チケットを対象に単独ケリー→正規化→分数ケリー
+#  - 【修正】払い戻しは「その券に実際に賭けていた（amount>0）場合のみ」計上
 
 import os, json, math, argparse, shutil
 from collections import Counter
@@ -79,9 +80,9 @@ from typing import List, Tuple, Optional
 
 @dataclass
 class BetCandidate:
-    ticket: str        # 例 "1-3-2"
-    prob: float        # 的中確率 p_i (0..1)
-    odds: Optional[float]  # デシマルオッズ (総戻り倍率) / 不明なら None
+    ticket: str
+    prob: float
+    odds: Optional[float]
     meta: Optional[dict] = None
 
 def _kelly_single(p: float, odds: float) -> float:
@@ -98,10 +99,9 @@ def allocate_kelly_multi(
     min_bet: float = 0.0,
     round_to: Optional[float] = None
 ) -> List[Tuple[BetCandidate, float]]:
-    """相互排他的な複数アウトカムに分数ケリー配分。オッズ不明は自動スキップ。"""
+    """相互排他的な複数アウトカムに分数ケリー配分。オッズ不明はスキップ。"""
     if bankroll <= 0:
         return [(c, 0.0) for c in cands]
-    # オッズあるものだけ
     c_ok = [c for c in cands if (c.odds is not None and math.isfinite(c.odds) and c.odds>1.0 and c.prob>0.0)]
     if not c_ok:
         return [(c, 0.0) for c in cands]
@@ -111,7 +111,6 @@ def allocate_kelly_multi(
         raw = [x/s for x in raw]
     fracs = [x*frac for x in raw]
     result = []
-    # 配分
     for c, f in zip(c_ok, fracs):
         amt = bankroll * f
         if amt < min_bet:
@@ -121,7 +120,6 @@ def allocate_kelly_multi(
             if amt < min_bet:
                 amt = 0.0
         result.append((c, amt))
-    # 元の順に戻し、スキップされた銘柄は0で埋める
     map_amt = {r.ticket: a for r,a in result}
     return [(c, float(map_amt.get(c.ticket, 0.0))) for c in cands]
 
@@ -157,7 +155,6 @@ def _minmax_norm(d, keys):
     return {k:(float(d.get(k,0.0))-lo)/den for k in keys}
 
 def _make_filter_set(raw: str, normalizer=lambda x: x):
-    """カンマ区切り -> set。空 or 'ALL'/'*' を含むときは空集合を返し≒フィルタ無効。"""
     items = [s.strip() for s in (raw or "").split(",") if s.strip()]
     if not items or any(s.upper() in ("ALL", "*") for s in items):
         return set()
@@ -387,7 +384,6 @@ def evaluate_one(int_path,res_path,sims,unit,strategy,topn,k,m,exclude_first1=Fa
         p=os.path.normpath(int_path).split(os.sep); race=os.path.splitext(p[-1])[0]; pid=p[-2]; date=p[-3]
     except: pass
 
-    # オッズは: EVフィルタやケリーで必要なら読む
     must_load_odds = (min_ev>0) or require_odds or (odds_bands is not None and len(odds_bands)>0) or (staking=="kelly")
     odds_map={}
     if must_load_odds and date and pid and race:
@@ -406,7 +402,6 @@ def evaluate_one(int_path,res_path,sims,unit,strategy,topn,k,m,exclude_first1=Fa
     # 配分
     bet_details=[]  # {ticket, prob, odds, amount}
     if staking=="kelly":
-        # ケリー：オッズの無いものは賭けない。全て無い場合はflatにフォールバック。
         cands=[]
         for (key,prob) in tickets:
             t="-".join(map(str,key))
@@ -415,7 +410,6 @@ def evaluate_one(int_path,res_path,sims,unit,strategy,topn,k,m,exclude_first1=Fa
         alloc=allocate_kelly_multi(cands, bankroll=bankroll, frac=kelly_frac, min_bet=min_bet, round_to=round_to)
         stake=sum(a for _,a in alloc)
         if stake<=0 and len(cands)>0:
-            # フォールバック: フラット（最低ベット優先）
             bets=[c.ticket for c in cands]
             stake = unit*len(bets)
             bet_details=[{"ticket":c.ticket,"prob":c.prob,"odds":c.odds,"amount":(unit if unit>=min_bet else 0.0)} for c in cands]
@@ -423,10 +417,8 @@ def evaluate_one(int_path,res_path,sims,unit,strategy,topn,k,m,exclude_first1=Fa
             for c,amt in alloc:
                 if amt>0:
                     bet_details.append({"ticket":c.ticket,"prob":c.prob,"odds":c.odds,"amount":float(amt)})
-            # stakeはbet_detailsから再計算（丸め後）
             stake = sum(d["amount"] for d in bet_details)
     else:
-        # フラット
         bets=['-'.join(map(str,k)) for k,_ in tickets]
         stake=unit*len(bets)
         for (key,prob) in tickets:
@@ -436,17 +428,16 @@ def evaluate_one(int_path,res_path,sims,unit,strategy,topn,k,m,exclude_first1=Fa
     d_res=_load_result(res_path) if res_path else {}
     hit_combo, pay=_actual_trifecta_and_amount(d_res)
 
-    # 的中計算（配分あり）
+    # ===== 的中判定＆払い戻し（修正済み） =====
     payout=0.0
     if hit_combo:
-        # 複数当りはない前提（相互排他）
-        # 当たったチケットの賭け金×オッズ（オッズ不明なら従来: 公開実払額を優先）
-        det = next((bd for bd in bet_details if bd["ticket"]==hit_combo), None)
-        if det and det.get("odds"):
-            payout = det["amount"] * float(det["odds"])
-        else:
-            # 公式リザルトの金額が取れていればそちらを使う
-            payout = float(pay if pay else 0.0)
+        det = next((bd for bd in bet_details if bd.get("ticket")==hit_combo and float(bd.get("amount",0.0))>0.0), None)
+        if det:
+            if det.get("odds"):
+                payout = float(det["amount"]) * float(det["odds"])
+            else:
+                # オッズ不明でも、その券を賭けていた場合のみ公式金額を使用
+                payout = float(pay or 0.0)
 
     return {
         "stake": float(stake),
@@ -471,10 +462,9 @@ def main():
     ap.add_argument("--odds-base",default="./public/odds/v1")
     ap.add_argument("--min-ev",type=float,default=0.0); ap.add_argument("--require-odds",action="store_true")
     ap.add_argument("--odds-bands",default=""); ap.add_argument("--odds-min",type=float,default=0.0); ap.add_argument("--odds-max",type=float,default=0.0)
-    # ★ 追加: フィット済み/手動上書きの受け口
     ap.add_argument("--params",default="", help="JSON/TOMLのParams上書きファイル（fit出力active_params.jsonなど）")
     ap.add_argument("--set",default="", help="一時上書き 例: 'theta=0.03,alpha_A=-0.011'")
-    # ★ 追加: 資金配分
+    # ★ 資金配分
     ap.add_argument("--staking", default="flat", choices=["flat","kelly"])
     ap.add_argument("--bankroll", type=float, default=0.0, help="初期残高。kelly時は必須（0ならフォールバック）")
     ap.add_argument("--kelly-frac", type=float, default=0.25, help="分数ケリー（0.1〜0.33程度推奨）")
@@ -485,7 +475,6 @@ def main():
 
     if args.exclude_first1 and args.only_first1: raise SystemExit("--exclude-first1 と --only_first1 は同時指定不可")
 
-    # ★ 追加: Params上書き適用
     try:
         if args.params:
             _apply_over(Params, _load_params_file(args.params))
