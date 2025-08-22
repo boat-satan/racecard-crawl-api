@@ -30,7 +30,7 @@ on:
         description: "ML予測スクリプトのパス（あなたの置き場所に合わせて）"
         required: false
         type: string
-        default: "scripts/ml/predict_unified.py"
+        default: "TENKAI/predict_unified.py"
 
 permissions:
   contents: write
