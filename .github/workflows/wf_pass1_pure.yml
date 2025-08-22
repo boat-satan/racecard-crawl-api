@@ -55,9 +55,8 @@ jobs:
           set -e
           git config user.name  "github-actions"
           git config user.email "github-actions@github.com"
-          git add ${{ inputs.OUTDIR }}/pass1 || true
-          git commit -m "wf_pass1_pure: ${{ inputs.MODE }} for ${{
-            inputs.DATE }} PID=${{ inputs.PID }}" || echo "nothing to commit"
+          git add "${{ inputs.OUTDIR }}/pass1" || true
+          git commit -m "wf_pass1_pure: ${{ inputs.MODE }} for ${{ inputs.DATE }} PID=${{ inputs.PID }}" || echo "nothing to commit"
           git pull --rebase || true
           git push || true
 
