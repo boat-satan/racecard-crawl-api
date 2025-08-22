@@ -99,6 +99,13 @@ def _minmax_norm(d, keys):
     den=(hi-lo) or 1.0
     return {k:(float(d.get(k,0.0))-lo)/den for k in keys}
 
+def _make_filter_set(raw: str, normalizer=lambda x: x):
+    """カンマ区切り -> set。空 or 'ALL'/'*' を含むときは空集合を返し≒フィルタ無効。"""
+    items = [s.strip() for s in (raw or "").split(",") if s.strip()]
+    if not items or any(s.upper() in ("ALL", "*") for s in items):
+        return set()
+    return set(normalizer(s) for s in items)
+
 # ===== 変換・環境 =====
 def _sbase(rc):
     n1=float(rc.get("natTop1",6.0)); n2=float(rc.get("natTop2",50.0)); n3=float(rc.get("natTop3",70.0))
@@ -378,8 +385,9 @@ def main():
 
     bands=_bands(args.odds_bands, args.odds_min, args.odds_max)
     dates=set([d.strip() for d in args.dates.split(",") if d.strip()]) if args.dates else set()
-    pids_filter=set([p.strip() for p in args.pids.split(",") if p.strip()])
-    races_filter=set([_norm_race(r) for r in args.races.split(",") if r.strip()])
+    # === 完全差し替え: フィルタ生成（ALL/*/空で無効）
+    pids_filter=_make_filter_set(args.pids, normalizer=lambda s: s)
+    races_filter=_make_filter_set(args.races, normalizer=_norm_race)
 
     int_idx=_collect(args.base,"integrated",dates) if dates else _collect(args.base,"integrated", set(os.listdir(os.path.join(args.base,"integrated","v1"))))
 
