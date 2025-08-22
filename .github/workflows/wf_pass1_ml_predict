@@ -1,0 +1,93 @@
+name: wf_pass1_ml_predict
+
+on:
+  workflow_call:
+    inputs:
+      DATE:
+        description: "YYYYMMDD"
+        required: true
+        type: string
+      PID:
+        description: "場ID（例: 01〜24）"
+        required: true
+        type: string
+      RACE:
+        description: "個別レース指定（例: 1R）。未指定なら全レース"
+        required: false
+        type: string
+        default: ""
+      TANSYO_MODEL_DATE:
+        description: "単勝モデルの日付（未指定で最新自動）"
+        required: false
+        type: string
+        default: ""
+      KIMARITE_MODEL_DATE:
+        description: "決まり手モデルの日付（未指定で最新自動）"
+        required: false
+        type: string
+        default: ""
+      SCRIPT_PATH:
+        description: "ML予測スクリプトのパス（あなたの置き場所に合わせて）"
+        required: false
+        type: string
+        default: "scripts/ml/predict_unified.py"
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          # scikit-learn/joblib/pandas/numpy は予測に必要
+          pip install numpy pandas scikit-learn joblib
+
+      - name: Run ML predict (Pass1)
+        env:
+          DATE:  ${{ inputs.DATE }}
+          PID:   ${{ inputs.PID }}
+          RACE:  ${{ inputs.RACE }}
+          TDATE: ${{ inputs.TANSYO_MODEL_DATE }}
+          KDATE: ${{ inputs.KIMARITE_MODEL_DATE }}
+          SCRIPT_PATH: ${{ inputs.SCRIPT_PATH }}
+        run: |
+          set -euo pipefail
+          echo "[pass1/ml] date=$DATE pid=$PID race=${RACE:-<all>} tdate=${TDATE:-<auto>} kdate=${KDATE:-<auto>}"
+          python "$SCRIPT_PATH" \
+            --date "$DATE" \
+            --pid  "$PID" \
+            ${RACE:+--race "$RACE"} \
+            ${TDATE:+--tansyo_model_date "$TDATE"} \
+            ${KDATE:+--kimarite_model_date "$KDATE"}
+
+      - name: Commit predictions
+        if: always()
+        run: |
+          set -e
+          git config user.name  "github-actions"
+          git config user.email "github-actions@github.com"
+          # 生成先はスクリプト内で TENKAI/predictions/v1/{DATE}/{PID}/ に固定されている想定
+          git add TENKAI/predictions/v1/${{ inputs.DATE }}/${{ inputs.PID }} || true
+          git commit -m "wf_pass1: ML predictions for ${{ inputs.DATE }} PID=${{ inputs.PID }} RACE=${{ inputs.RACE }}" || echo "nothing to commit"
+          git pull --rebase || true
+          git push || true
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wf_pass1_predictions_${{ inputs.DATE }}_${{ inputs.PID }}
+          path: TENKAI/predictions/v1/${{ inputs.DATE }}/${{ inputs.PID }}/**
