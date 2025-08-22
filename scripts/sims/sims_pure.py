@@ -1,8 +1,13 @@
-# sims_pure.py — SimS ver1.0 純粋シミュレーション（キーマン完全排除 / pass1のみ）
-# 入出力は既存に極力合わせつつ、predict/eval の二態をサポート
+# sims_pure.py — SimS ver1.1 資金配分（フラット/ケリー）対応・純粋シミュレーション
+# 入出力は極力互換。predict/evalサポート。
 # 出力：
 #  predict -> {outdir}/pass1/predict/pred_YYYYMMDD_PID_RACE.json, predictions_summary.csv
 #  eval    -> {outdir}/pass1/per_race_results.csv, overall.json
+#
+# 変更点:
+#  - 資金配分モード (--staking flat|kelly)、初期残高 (--bankroll)、分数ケリー (--kelly-frac)、
+#    最低ベット額 (--min-bet)、丸め単位 (--round-to) を追加
+#  - ケリー配分は同一レース内の相互排他チケットを対象に単独ケリー→正規化→分数ケリー
 
 import os, json, math, argparse, shutil
 from collections import Counter
@@ -67,6 +72,58 @@ class Params:
 
 rng = np.random.default_rng(2025)
 sigmoid = lambda x: 1/(1+math.exp(-x))
+
+# ===== 資金配分（ケリーなど） =====
+from dataclasses import dataclass
+from typing import List, Tuple, Optional
+
+@dataclass
+class BetCandidate:
+    ticket: str        # 例 "1-3-2"
+    prob: float        # 的中確率 p_i (0..1)
+    odds: Optional[float]  # デシマルオッズ (総戻り倍率) / 不明なら None
+    meta: Optional[dict] = None
+
+def _kelly_single(p: float, odds: float) -> float:
+    if odds is None or odds <= 1.0 or p <= 0.0:
+        return 0.0
+    b = odds - 1.0
+    f = (p * odds - 1.0) / b
+    return max(0.0, f)
+
+def allocate_kelly_multi(
+    cands: List[BetCandidate],
+    bankroll: float,
+    frac: float = 0.25,
+    min_bet: float = 0.0,
+    round_to: Optional[float] = None
+) -> List[Tuple[BetCandidate, float]]:
+    """相互排他的な複数アウトカムに分数ケリー配分。オッズ不明は自動スキップ。"""
+    if bankroll <= 0:
+        return [(c, 0.0) for c in cands]
+    # オッズあるものだけ
+    c_ok = [c for c in cands if (c.odds is not None and math.isfinite(c.odds) and c.odds>1.0 and c.prob>0.0)]
+    if not c_ok:
+        return [(c, 0.0) for c in cands]
+    raw = [_kelly_single(c.prob, c.odds) for c in c_ok]
+    s = sum(raw)
+    if s > 1.0 and s > 1e-12:
+        raw = [x/s for x in raw]
+    fracs = [x*frac for x in raw]
+    result = []
+    # 配分
+    for c, f in zip(c_ok, fracs):
+        amt = bankroll * f
+        if amt < min_bet:
+            amt = 0.0
+        if round_to and amt>0:
+            amt = round(amt/round_to)*round_to
+            if amt < min_bet:
+                amt = 0.0
+        result.append((c, amt))
+    # 元の順に戻し、スキップされた銘柄は0で埋める
+    map_amt = {r.ticket: a for r,a in result}
+    return [(c, float(map_amt.get(c.ticket, 0.0))) for c in cands]
 
 # ===== ユーティリティ =====
 def _norm_race(r): 
@@ -318,7 +375,9 @@ def _actual_trifecta_and_amount(res):
     return combo, amt
 
 def evaluate_one(int_path,res_path,sims,unit,strategy,topn,k,m,exclude_first1=False,only_first1=False,
-                 odds_base=None,min_ev=0.0,require_odds=False,odds_bands=None,outdir="./SimS_pure"):
+                 odds_base=None,min_ev=0.0,require_odds=False,odds_bands=None,outdir="./SimS_pure",
+                 staking="flat", bankroll=0.0, kelly_frac=0.25, min_bet=0.0, round_to=None):
+    """1レース評価＋配分。戻り値は賭け内訳も含む。"""
     d_int=json.load(open(int_path,"r",encoding="utf-8"))
     tri,ex2,th3=simulate_one(build_input(d_int),sims=sims)
     tickets=generate_tickets(strategy,tri,ex2,th3,topn,k,m,exclude_first1,only_first1)
@@ -328,9 +387,12 @@ def evaluate_one(int_path,res_path,sims,unit,strategy,topn,k,m,exclude_first1=Fa
         p=os.path.normpath(int_path).split(os.sep); race=os.path.splitext(p[-1])[0]; pid=p[-2]; date=p[-3]
     except: pass
 
+    # オッズは: EVフィルタやケリーで必要なら読む
+    must_load_odds = (min_ev>0) or require_odds or (odds_bands is not None and len(odds_bands)>0) or (staking=="kelly")
     odds_map={}
-    if (min_ev>0) or require_odds or odds_bands:
-        if date and pid and race: odds_map=_load_odds(odds_base,date,pid,race)
+    if must_load_odds and date and pid and race:
+        odds_map=_load_odds(odds_base,date,pid,race)
+
     kept=[]
     bands=odds_bands or []
     for (key,prob) in tickets:
@@ -341,12 +403,58 @@ def evaluate_one(int_path,res_path,sims,unit,strategy,topn,k,m,exclude_first1=Fa
         kept.append((key,prob))
     tickets=kept
 
-    bets=['-'.join(map(str,k)) for k,_ in tickets]; stake=unit*len(bets)
+    # 配分
+    bet_details=[]  # {ticket, prob, odds, amount}
+    if staking=="kelly":
+        # ケリー：オッズの無いものは賭けない。全て無い場合はflatにフォールバック。
+        cands=[]
+        for (key,prob) in tickets:
+            t="-".join(map(str,key))
+            odds = odds_map.get(t,{}).get("odds")
+            cands.append(BetCandidate(ticket=t, prob=float(prob), odds=(float(odds) if odds is not None else None), meta=None))
+        alloc=allocate_kelly_multi(cands, bankroll=bankroll, frac=kelly_frac, min_bet=min_bet, round_to=round_to)
+        stake=sum(a for _,a in alloc)
+        if stake<=0 and len(cands)>0:
+            # フォールバック: フラット（最低ベット優先）
+            bets=[c.ticket for c in cands]
+            stake = unit*len(bets)
+            bet_details=[{"ticket":c.ticket,"prob":c.prob,"odds":c.odds,"amount":(unit if unit>=min_bet else 0.0)} for c in cands]
+        else:
+            for c,amt in alloc:
+                if amt>0:
+                    bet_details.append({"ticket":c.ticket,"prob":c.prob,"odds":c.odds,"amount":float(amt)})
+            # stakeはbet_detailsから再計算（丸め後）
+            stake = sum(d["amount"] for d in bet_details)
+    else:
+        # フラット
+        bets=['-'.join(map(str,k)) for k,_ in tickets]
+        stake=unit*len(bets)
+        for (key,prob) in tickets:
+            t='-'.join(map(str,key)); odds=odds_map.get(t,{}).get("odds")
+            bet_details.append({"ticket":t,"prob":float(prob),"odds":(float(odds) if odds is not None else None),"amount":float(unit if unit>=min_bet else 0.0)})
+
     d_res=_load_result(res_path) if res_path else {}
     hit_combo, pay=_actual_trifecta_and_amount(d_res)
-    payout=pay if hit_combo in bets else 0
 
-    return {"stake":stake,"payout":payout,"hit":1 if payout>0 else 0, "bets":bets, "hit_combo":hit_combo}
+    # 的中計算（配分あり）
+    payout=0.0
+    if hit_combo:
+        # 複数当りはない前提（相互排他）
+        # 当たったチケットの賭け金×オッズ（オッズ不明なら従来: 公開実払額を優先）
+        det = next((bd for bd in bet_details if bd["ticket"]==hit_combo), None)
+        if det and det.get("odds"):
+            payout = det["amount"] * float(det["odds"])
+        else:
+            # 公式リザルトの金額が取れていればそちらを使う
+            payout = float(pay if pay else 0.0)
+
+    return {
+        "stake": float(stake),
+        "payout": float(payout),
+        "hit": 1 if payout>0 else 0,
+        "hit_combo": hit_combo,
+        "bet_details": bet_details
+    }
 
 # ===== メイン =====
 def main():
@@ -366,6 +474,13 @@ def main():
     # ★ 追加: フィット済み/手動上書きの受け口
     ap.add_argument("--params",default="", help="JSON/TOMLのParams上書きファイル（fit出力active_params.jsonなど）")
     ap.add_argument("--set",default="", help="一時上書き 例: 'theta=0.03,alpha_A=-0.011'")
+    # ★ 追加: 資金配分
+    ap.add_argument("--staking", default="flat", choices=["flat","kelly"])
+    ap.add_argument("--bankroll", type=float, default=0.0, help="初期残高。kelly時は必須（0ならフォールバック）")
+    ap.add_argument("--kelly-frac", type=float, default=0.25, help="分数ケリー（0.1〜0.33程度推奨）")
+    ap.add_argument("--min-bet", type=float, default=0.0, help="最低ベット額（0なら無効）")
+    ap.add_argument("--round-to", type=float, default=0.0, help="丸め単位（100円単位など。0なら無効）")
+
     args=ap.parse_args()
 
     if args.exclude_first1 and args.only_first1: raise SystemExit("--exclude-first1 と --only_first1 は同時指定不可")
@@ -385,13 +500,12 @@ def main():
 
     bands=_bands(args.odds_bands, args.odds_min, args.odds_max)
     dates=set([d.strip() for d in args.dates.split(",") if d.strip()]) if args.dates else set()
-    # === 完全差し替え: フィルタ生成（ALL/*/空で無効）
     pids_filter=_make_filter_set(args.pids, normalizer=lambda s: s)
     races_filter=_make_filter_set(args.races, normalizer=_norm_race)
 
     int_idx=_collect(args.base,"integrated",dates) if dates else _collect(args.base,"integrated", set(os.listdir(os.path.join(args.base,"integrated","v1"))))
 
-    # predict-only: 結果を見に行かない
+    # predict-only
     if args.predict_only:
         keys=sorted(int_idx.keys())
         if pids_filter: keys=[k for k in keys if k[1] in pids_filter]
@@ -421,7 +535,7 @@ def main():
         print(f"[predict/pure] {len(keys[:lim])} races -> {pred_dir}")
         return
 
-    # eval: 結果必須
+    # eval
     res_idx=_collect_results(args.base,dates)
     keys=sorted(set(int_idx.keys()) & set(res_idx.keys()))
     if pids_filter: keys=[k for k in keys if k[1] in pids_filter]
@@ -429,29 +543,56 @@ def main():
     if args.limit and args.limit>0: keys=keys[:args.limit]
 
     print(f"[eval/pure] races: {len(keys)}")
-    per=[]; stake_sum=0; pay_sum=0
+    per=[]; stake_sum=0.0; pay_sum=0.0
+
+    bankroll = float(args.bankroll or 0.0)
+    use_round = (args.round_to if args.round_to and args.round_to>0 else None)
     for (date,pid,race) in keys:
-        ev=evaluate_one(int_idx[(date,pid,race)], res_idx[(date,pid,race)], args.sims, args.unit,
-                        args.strategy, args.topn, args.k, args.m, args.exclude_first1, args.only_first1,
-                        args.odds_base, args.min_ev, args.require_odds, bands, pass1_dir)
+        bk_before = bankroll
+        ev=evaluate_one(
+            int_idx[(date,pid,race)], res_idx[(date,pid,race)], args.sims, args.unit,
+            args.strategy, args.topn, args.k, args.m, args.exclude_first1, args.only_first1,
+            args.odds_base, args.min_ev, args.require_odds, bands, pass1_dir,
+            staking=args.staking, bankroll=bk_before, kelly_frac=args.kelly_frac,
+            min_bet=args.min_bet, round_to=use_round
+        )
         stake_sum+=ev["stake"]; pay_sum+=ev["payout"]
-        per.append({"date":date,"pid":pid,"race":race,"bets":len(ev["bets"]),"stake":ev["stake"],
-                    "payout":ev["payout"],"hit":ev["hit"],"hit_combo":ev["hit_combo"]})
+        bankroll = max(0.0, bk_before - ev["stake"] + ev["payout"])
+        per.append({
+            "date":date,"pid":pid,"race":race,
+            "bets":len(ev["bet_details"]),
+            "stake":int(ev["stake"]),
+            "payout":int(ev["payout"]),
+            "hit":ev["hit"],"hit_combo":ev["hit_combo"],
+            "bankroll_before":int(bk_before), "bankroll_after":int(bankroll),
+            "bet_details":json.dumps(ev["bet_details"], ensure_ascii=False)
+        })
+
     df=pd.DataFrame(per)
-    overall={"engine":"SimS pure (E1)","races":int(len(df)),"bets_total":int(df["bets"].sum()) if len(df)>0 else 0,
-             "stake_total":int(stake_sum),"payout_total":int(pay_sum),"hit_rate":float(df["hit"].mean()) if len(df)>0 else 0.0,
-             "roi": float((pay_sum-stake_sum)/stake_sum) if stake_sum>0 else 0.0,
-             "strategy":args.strategy,"topn":args.topn,"k":args.k,"m":args.m,
-             "sims_per_race":args.sims,"unit":args.unit,
-             "exclude_first1":bool(args.exclude_first1),"only_first1":bool(args.only_first1),
-             "min_ev":float(args.min_ev),"require_odds":bool(args.require_odds),
-             "odds_bands":args.odds_bands or "","odds_min":float(args.odds_min),"odds_max":float(args.odds_max),
-             "pass":"pure"}
-    eval_dir=os.path.join(pass1_dir)  # pass1 の直下に格納
+    overall={
+        "engine":"SimS pure (E1, staking)",
+        "races":int(len(df)),
+        "bets_total":int(df["bets"].sum()) if len(df)>0 else 0,
+        "stake_total":int(stake_sum),
+        "payout_total":int(pay_sum),
+        "hit_rate":float(df["hit"].mean()) if len(df)>0 else 0.0,
+        "roi": float((pay_sum-stake_sum)/stake_sum) if stake_sum>0 else 0.0,
+        "final_bankroll": int(bankroll),
+        "profit": int(pay_sum - stake_sum),
+        "strategy":args.strategy,"topn":args.topn,"k":args.k,"m":args.m,
+        "sims_per_race":args.sims,"unit":args.unit,
+        "staking": args.staking, "bankroll_init": float(args.bankroll),
+        "kelly_frac": float(args.kelly_frac), "min_bet": float(args.min_bet), "round_to": float(args.round_to or 0),
+        "exclude_first1":bool(args.exclude_first1),"only_first1":bool(args.only_first1),
+        "min_ev":float(args.min_ev),"require_odds":bool(args.require_odds),
+        "odds_bands":args.odds_bands or "","odds_min":float(args.odds_min),"odds_max":float(args.odds_max),
+        "pass":"pure"
+    }
+    eval_dir=os.path.join(pass1_dir)
     os.makedirs(eval_dir, exist_ok=True)
     df.to_csv(os.path.join(eval_dir,"per_race_results.csv"), index=False)
     json.dump(overall, open(os.path.join(eval_dir,"overall.json"),"w",encoding="utf-8"), ensure_ascii=False, indent=2)
-    print("=== OVERALL (pure) ==="); print(json.dumps(overall, ensure_ascii=False, indent=2))
+    print("=== OVERALL (pure, staking) ==="); print(json.dumps(overall, ensure_ascii=False, indent=2))
 
 if __name__=="__main__":
     main()
