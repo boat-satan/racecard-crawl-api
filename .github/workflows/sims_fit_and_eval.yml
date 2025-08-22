@@ -1,0 +1,65 @@
+name: sims_fit_and_eval
+
+on:
+  workflow_dispatch:
+    inputs:
+      dates:   { description: "YYYYMMDD[,YYYYMMDD...]", required: true, type: string }
+      pids:    { description: "場ID or ALL", required: true, type: string, default: "ALL" }
+      sims:    { description: "trials per race", required: true, type: string, default: "3000" }
+      iters:   { description: "fit iters", required: true, type: string, default: "60" }
+      eval_topn: { description: "eval topN", required: true, type: string, default: "18" }
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy pandas
+
+      - name: Fit params to results
+        run: |
+          set -e
+          PYTHONPATH="scripts/sims" python scripts/sims/sims_fit.py \
+            --dates "${{ inputs.dates }}" \
+            --pids  "${{ inputs.pids }}" \
+            --sims  "${{ inputs.sims }}" \
+            --iters "${{ inputs.iters }}"
+
+      - name: Eval with fitted params (sims_pure)
+        run: |
+          set -e
+          PYTHONPATH="scripts/sims" python scripts/sims/sims_pure.py \
+            --dates "${{ inputs.dates }}" \
+            --pids  "${{ inputs.pids }}" \
+            --sims  "${{ inputs.sims }}" \
+            --topn  "${{ inputs.eval_topn }}" \
+            --outdir "SimS_pure_fitted" \
+            --params scripts/sims/pass1/fit/active_params.json
+
+      - name: Commit outputs
+        if: always()
+        run: |
+          set -e
+          git config user.name  "github-actions"
+          git config user.email "github-actions@github.com"
+          git add scripts/sims/pass1/fit SimS_pure_fitted/pass1 || true
+          git commit -m "sims_fit_and_eval: dates=${{ inputs.dates }} pids=${{ inputs.pids }}" || echo "nothing to commit"
+          git pull --rebase || true
+          git push || true
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sims_fit_eval_${{ inputs.dates }}_${{ inputs.pids }}
+          path: |
+            scripts/sims/pass1/fit/**
+            SimS_pure_fitted/pass1/**
