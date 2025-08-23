@@ -10,9 +10,9 @@ on:
       TOPN:        { description: "top N trifecta", required: true, type: string, default: "18" }
       UNIT:        { description: "unit stake", required: true, type: string, default: "100" }
       OUTDIR:      { description: "output root", required: true, type: string, default: "SimS_pure" }
-      STAKING:     { description: "flat or kelly", required: true, type: choice, options: ["flat","kelly"], default: "flat" }
-      BANKROLL:    { description: "初期残高 (eval時のみ使用)", required: true, type: string, default: "0" }
-      KELLY_FRAC:  { description: "分数ケリー (例 0.25)", required: true, type: string, default: "0.25" }
+      STAKING:     { description: "flat / kelly / eqpay", required: true, type: choice, options: ["flat","kelly","eqpay"], default: "flat" }
+      BANKROLL:    { description: "kelly=初期残高 / eqpay=1R上限(円)", required: true, type: string, default: "0" }
+      KELLY_FRAC:  { description: "分数ケリー (例 0.25) ※kelly時のみ", required: true, type: string, default: "0.25" }
 
 permissions:
   contents: write
@@ -49,12 +49,28 @@ jobs:
           KELLY_FRAC: ${{ inputs.KELLY_FRAC }}
         run: |
           set -euo pipefail
-          ARGS="--base public --dates $DATE --sims $SIMS --topn $TOPN --unit $UNIT --outdir $OUTDIR \
-                --staking $STAKING --bankroll $BANKROLL --kelly-frac $KELLY_FRAC"
-          # PID が ALL でなければ付与
+          # 共通引数
+          ARGS="--base public --dates $DATE --sims $SIMS --topn $TOPN --unit $UNIT --outdir $OUTDIR"
+
+          # 場IDフィルタ（ALL 以外のときのみ付与）
           if [ "$PID" != "ALL" ]; then
             ARGS="$ARGS --pids $PID"
           fi
+
+          # 資金配分モード別に追加引数を最小分岐で付与
+          case "$STAKING" in
+            kelly)
+              ARGS="$ARGS --staking kelly --bankroll $BANKROLL --kelly-frac $KELLY_FRAC"
+              ;;
+            eqpay)
+              # BANKROLL を 1レースの総ベット上限として使う
+              ARGS="$ARGS --staking eqpay --race-budget $BANKROLL"
+              ;;
+            *)
+              ARGS="$ARGS --staking flat"
+              ;;
+          esac
+
           if [ "$MODE" = "predict" ]; then
             python scripts/sims/sims_pure.py $ARGS --predict-only
           else
