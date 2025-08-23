@@ -1,14 +1,8 @@
-# sims_pure.py — SimS ver1.1 資金配分（フラット/ケリー）対応・純粋シミュレーション
+# sims_pure.py — SimS ver1.2 資金配分（フラット/ケリー/均等払い戻し）対応・純粋シミュレーション
 # 入出力は極力互換。predict/evalサポート。
 # 出力：
 #  predict -> {outdir}/pass1/predict/pred_YYYYMMDD_PID_RACE.json, predictions_summary.csv
 #  eval    -> {outdir}/pass1/per_race_results.csv, overall.json
-#
-# 変更点:
-#  - 資金配分モード (--staking flat|kelly)、初期残高 (--bankroll)、分数ケリー (--kelly-frac)、
-#    最低ベット額 (--min-bet)、丸め単位 (--round-to) を追加
-#  - ケリー配分は同一レース内の相互排他チケットを対象に単独ケリー→正規化→分数ケリー
-#  - 【修正】払い戻しは「その券に実際に賭けていた（amount>0）場合のみ」計上
 
 import os, json, math, argparse, shutil
 from collections import Counter
@@ -74,15 +68,15 @@ class Params:
 rng = np.random.default_rng(2025)
 sigmoid = lambda x: 1/(1+math.exp(-x))
 
-# ===== 資金配分（ケリーなど） =====
+# ===== 資金配分ユーティリティ =====
 from dataclasses import dataclass
 from typing import List, Tuple, Optional
 
 @dataclass
 class BetCandidate:
-    ticket: str
-    prob: float
-    odds: Optional[float]
+    ticket: str        # 例 "1-3-2"
+    prob: float        # 的中確率 p_i (0..1)
+    odds: Optional[float]  # デシマルオッズ (総戻り倍率) / 不明なら None
     meta: Optional[dict] = None
 
 def _kelly_single(p: float, odds: float) -> float:
@@ -99,7 +93,7 @@ def allocate_kelly_multi(
     min_bet: float = 0.0,
     round_to: Optional[float] = None
 ) -> List[Tuple[BetCandidate, float]]:
-    """相互排他的な複数アウトカムに分数ケリー配分。オッズ不明はスキップ。"""
+    """相互排他的な複数アウトカムに分数ケリー配分。オッズ不明は自動スキップ。"""
     if bankroll <= 0:
         return [(c, 0.0) for c in cands]
     c_ok = [c for c in cands if (c.odds is not None and math.isfinite(c.odds) and c.odds>1.0 and c.prob>0.0)]
@@ -121,6 +115,40 @@ def allocate_kelly_multi(
                 amt = 0.0
         result.append((c, amt))
     map_amt = {r.ticket: a for r,a in result}
+    return [(c, float(map_amt.get(c.ticket, 0.0))) for c in cands]
+
+def allocate_equal_payout(
+    cands: List[BetCandidate],
+    budget: float,
+    min_bet: float = 0.0,
+    round_to: Optional[float] = None
+) -> List[Tuple[BetCandidate, float]]:
+    """
+    均等払い戻し（equal‑payout）配分：
+      a_i = K / o_i, かつ ∑ a_i = budget  ->  K = budget / ∑(1/o_i)
+    ※ オッズ不明/<=1 のものはスキップ。
+    """
+    if budget <= 0:
+        return [(c, 0.0) for c in cands]
+    ok = [c for c in cands if (c.odds is not None and math.isfinite(c.odds) and c.odds>1.0)]
+    if not ok:
+        return [(c, 0.0) for c in cands]
+    denom = sum(1.0/float(c.odds) for c in ok)
+    if denom <= 0:
+        return [(c, 0.0) for c in cands]
+    K = budget / denom  # 当たった時の目標払戻
+    alloc = []
+    for c in ok:
+        amt = K / float(c.odds)
+        if amt < min_bet:
+            amt = 0.0
+        if round_to and amt>0:
+            amt = round(amt/round_to)*round_to
+            if amt < min_bet:
+                amt = 0.0
+        alloc.append((c, float(amt)))
+    # 丸め等で総額がbudgetからズレた場合はそのまま（過不足微小は許容）
+    map_amt = {r.ticket: a for r,a in alloc}
     return [(c, float(map_amt.get(c.ticket, 0.0))) for c in cands]
 
 # ===== ユーティリティ =====
@@ -366,6 +394,20 @@ def _actual_trifecta_and_amount(res):
         if isinstance(order,list) and len(order)>=3:
             def lane(x): return str(x.get("lane") or x.get("course") or x.get("F") or x.get("number"))
             try:
+                f,s,t=lane(order[0]),lane[1].get("lane") if isinstance(order[1],dict) else None, lane
+            except: pass
+    return combo, amt
+
+def _actual_trifecta_and_amount(res):
+    trif=(res or {}).get("payouts",{}).get("trifecta")
+    combo=None; amt=0
+    if isinstance(trif,dict):
+        combo=trif.get("combo"); amt=int(trif.get("amount") or 0)
+    if not combo and isinstance(res,dict):
+        order=res.get("order")
+        if isinstance(order,list) and len(order)>=3:
+            def lane(x): return str(x.get("lane") or x.get("course") or x.get("F") or x.get("number"))
+            try:
                 f,s,t=lane(order[0]),lane(order[1]),lane(order[2])
                 if all([f,s,t]): combo=f"{f}-{s}-{t}"
             except: pass
@@ -373,7 +415,8 @@ def _actual_trifecta_and_amount(res):
 
 def evaluate_one(int_path,res_path,sims,unit,strategy,topn,k,m,exclude_first1=False,only_first1=False,
                  odds_base=None,min_ev=0.0,require_odds=False,odds_bands=None,outdir="./SimS_pure",
-                 staking="flat", bankroll=0.0, kelly_frac=0.25, min_bet=0.0, round_to=None):
+                 staking="flat", bankroll=0.0, kelly_frac=0.25, min_bet=0.0, round_to=None,
+                 race_budget: float = 0.0):
     """1レース評価＋配分。戻り値は賭け内訳も含む。"""
     d_int=json.load(open(int_path,"r",encoding="utf-8"))
     tri,ex2,th3=simulate_one(build_input(d_int),sims=sims)
@@ -384,7 +427,7 @@ def evaluate_one(int_path,res_path,sims,unit,strategy,topn,k,m,exclude_first1=Fa
         p=os.path.normpath(int_path).split(os.sep); race=os.path.splitext(p[-1])[0]; pid=p[-2]; date=p[-3]
     except: pass
 
-    must_load_odds = (min_ev>0) or require_odds or (odds_bands is not None and len(odds_bands)>0) or (staking=="kelly")
+    must_load_odds = (min_ev>0) or require_odds or (odds_bands is not None and len(odds_bands)>0) or (staking in ("kelly","eqpay"))
     odds_map={}
     if must_load_odds and date and pid and race:
         odds_map=_load_odds(odds_base,date,pid,race)
@@ -399,7 +442,6 @@ def evaluate_one(int_path,res_path,sims,unit,strategy,topn,k,m,exclude_first1=Fa
         kept.append((key,prob))
     tickets=kept
 
-    # 配分
     bet_details=[]  # {ticket, prob, odds, amount}
     if staking=="kelly":
         cands=[]
@@ -418,26 +460,43 @@ def evaluate_one(int_path,res_path,sims,unit,strategy,topn,k,m,exclude_first1=Fa
                 if amt>0:
                     bet_details.append({"ticket":c.ticket,"prob":c.prob,"odds":c.odds,"amount":float(amt)})
             stake = sum(d["amount"] for d in bet_details)
+
+    elif staking=="eqpay":
+        # 1レースの総額を race_budget で制御。未指定(<=0)なら unit×件数 を既定予算に。
+        cands=[]
+        for (key,prob) in tickets:
+            t="-".join(map(str,key))
+            odds = odds_map.get(t,{}).get("odds")
+            cands.append(BetCandidate(ticket=t, prob=float(prob), odds=(float(odds) if odds is not None else None), meta=None))
+        budget = float(race_budget) if race_budget and race_budget>0 else (unit * len(cands))
+        alloc = allocate_equal_payout(cands, budget=budget, min_bet=min_bet, round_to=round_to)
+        if all(amt<=0 for _,amt in alloc) and len(cands)>0:
+            # フォールバック：フラット
+            for c in cands:
+                bet_details.append({"ticket":c.ticket,"prob":c.prob,"odds":c.odds,"amount":float(unit if unit>=min_bet else 0.0)})
+        else:
+            for c,amt in alloc:
+                if amt>0:
+                    bet_details.append({"ticket":c.ticket,"prob":c.prob,"odds":c.odds,"amount":float(amt)})
+        stake = sum(d["amount"] for d in bet_details)
+
     else:
-        bets=['-'.join(map(str,k)) for k,_ in tickets]
-        stake=unit*len(bets)
+        # フラット
         for (key,prob) in tickets:
             t='-'.join(map(str,key)); odds=odds_map.get(t,{}).get("odds")
             bet_details.append({"ticket":t,"prob":float(prob),"odds":(float(odds) if odds is not None else None),"amount":float(unit if unit>=min_bet else 0.0)})
+        stake=unit*len(bet_details)
 
     d_res=_load_result(res_path) if res_path else {}
     hit_combo, pay=_actual_trifecta_and_amount(d_res)
 
-    # ===== 的中判定＆払い戻し（修正済み） =====
     payout=0.0
     if hit_combo:
-        det = next((bd for bd in bet_details if bd.get("ticket")==hit_combo and float(bd.get("amount",0.0))>0.0), None)
-        if det:
-            if det.get("odds"):
-                payout = float(det["amount"]) * float(det["odds"])
-            else:
-                # オッズ不明でも、その券を賭けていた場合のみ公式金額を使用
-                payout = float(pay or 0.0)
+        det = next((bd for bd in bet_details if bd["ticket"]==hit_combo), None)
+        if det and det.get("odds"):
+            payout = det["amount"] * float(det["odds"])
+        else:
+            payout = float(pay if pay else 0.0)
 
     return {
         "stake": float(stake),
@@ -462,14 +521,15 @@ def main():
     ap.add_argument("--odds-base",default="./public/odds/v1")
     ap.add_argument("--min-ev",type=float,default=0.0); ap.add_argument("--require-odds",action="store_true")
     ap.add_argument("--odds-bands",default=""); ap.add_argument("--odds-min",type=float,default=0.0); ap.add_argument("--odds-max",type=float,default=0.0)
-    ap.add_argument("--params",default="", help="JSON/TOMLのParams上書きファイル（fit出力active_params.jsonなど）")
+    ap.add_argument("--params",default="", help="JSON/TOMLのParams上書きファイル")
     ap.add_argument("--set",default="", help="一時上書き 例: 'theta=0.03,alpha_A=-0.011'")
-    # ★ 資金配分
-    ap.add_argument("--staking", default="flat", choices=["flat","kelly"])
+    # 資金配分
+    ap.add_argument("--staking", default="flat", choices=["flat","kelly","eqpay"])
     ap.add_argument("--bankroll", type=float, default=0.0, help="初期残高。kelly時は必須（0ならフォールバック）")
     ap.add_argument("--kelly-frac", type=float, default=0.25, help="分数ケリー（0.1〜0.33程度推奨）")
     ap.add_argument("--min-bet", type=float, default=0.0, help="最低ベット額（0なら無効）")
     ap.add_argument("--round-to", type=float, default=0.0, help="丸め単位（100円単位など。0なら無効）")
+    ap.add_argument("--race-budget", type=float, default=0.0, help="eqpay用：1レースの総ベット上限。未指定なら unit×件数")
 
     args=ap.parse_args()
 
@@ -543,10 +603,12 @@ def main():
             args.strategy, args.topn, args.k, args.m, args.exclude_first1, args.only_first1,
             args.odds_base, args.min_ev, args.require_odds, bands, pass1_dir,
             staking=args.staking, bankroll=bk_before, kelly_frac=args.kelly_frac,
-            min_bet=args.min_bet, round_to=use_round
+            min_bet=args.min_bet, round_to=use_round, race_budget=args.race_budget
         )
         stake_sum+=ev["stake"]; pay_sum+=ev["payout"]
-        bankroll = max(0.0, bk_before - ev["stake"] + ev["payout"])
+        # kellyのみ動的残高を使う（eqpay/flatは独立予算なので残高制御なし）
+        if args.staking=="kelly":
+            bankroll = max(0.0, bk_before - ev["stake"] + ev["payout"])
         per.append({
             "date":date,"pid":pid,"race":race,
             "bets":len(ev["bet_details"]),
@@ -571,7 +633,8 @@ def main():
         "strategy":args.strategy,"topn":args.topn,"k":args.k,"m":args.m,
         "sims_per_race":args.sims,"unit":args.unit,
         "staking": args.staking, "bankroll_init": float(args.bankroll),
-        "kelly_frac": float(args.kelly_frac), "min_bet": float(args.min_bet), "round_to": float(args.round_to or 0),
+        "kelly_frac": float(args.kelly_frac), "min_bet": float(args.min_bet),
+        "round_to": float(args.round_to or 0), "race_budget": float(args.race_budget or 0),
         "exclude_first1":bool(args.exclude_first1),"only_first1":bool(args.only_first1),
         "min_ev":float(args.min_ev),"require_odds":bool(args.require_odds),
         "odds_bands":args.odds_bands or "","odds_min":float(args.odds_min),"odds_max":float(args.odds_max),
