@@ -1,0 +1,909 @@
+{
+  "schemaVersion": "1.0",
+  "date": "20250824",
+  "pid": "06",
+  "race": "9R",
+  "generatedAt": "2025-08-24T07:28:12.522Z",
+  "sources": {
+    "racecard": "public/programs/v2/20250824/06/9R.json",
+    "exhibition": "public/exhibition/v1/20250824/06/9R.json",
+    "statsDir": "public/stats/v2/racers"
+  },
+  "weather": {
+    "weather": "晴",
+    "temperature": 29,
+    "windSpeed": 5,
+    "windDirection": "西",
+    "waterTemperature": 29,
+    "waveHeight": 0.03,
+    "stabilizer": false
+  },
+  "entries": [
+    {
+      "number": 3499,
+      "lane": 1,
+      "startCourse": 1,
+      "racecard": {
+        "lane": 1,
+        "number": 3499,
+        "name": "市川 哲也",
+        "classNumber": 2,
+        "branchNumber": 34,
+        "birthplaceNumber": 34,
+        "age": 56,
+        "weight": 52,
+        "flyingCount": 0,
+        "lateCount": 0,
+        "avgST": 0.14,
+        "natTop1": 6.26,
+        "natTop2": 43.26,
+        "natTop3": 63.12,
+        "locTop1": 6.73,
+        "locTop2": 45.45,
+        "locTop3": 72.73,
+        "motorNumber": 55,
+        "motorTop2": 29.76,
+        "motorTop3": 48.81,
+        "boatNumber": 39,
+        "boatTop2": 29.8,
+        "boatTop3": 48.99
+      },
+      "exhibition": {
+        "lane": 1,
+        "number": "3499",
+        "name": "市川 哲也",
+        "weight": "51.5kg",
+        "tenjiTime": "6.70",
+        "tilt": "-0.5",
+        "st": ".09",
+        "stFlag": ""
+      },
+      "stats": {
+        "entryCourse": {
+          "course": 1,
+          "avgST": null,
+          "selfSummary": null,
+          "winKimariteSelf": null,
+          "loseKimarite": {
+            "逃げ": 0,
+            "差し": 0,
+            "まくり": 0,
+            "まくり差し": 0,
+            "抜き": 0,
+            "恵まれ": 0
+          },
+          "matrixSelf": null
+        },
+        "exTimeRank": null,
+        "regno": 3499,
+        "fetchedAt": "2025-08-23T22:33:20.982Z",
+        "schemaVersion": "2.0"
+      }
+    },
+    {
+      "number": 4677,
+      "lane": 2,
+      "startCourse": 2,
+      "racecard": {
+        "lane": 2,
+        "number": 4677,
+        "name": "片橋 幸貴",
+        "classNumber": 1,
+        "branchNumber": 25,
+        "birthplaceNumber": 13,
+        "age": 37,
+        "weight": 52.7,
+        "flyingCount": 2,
+        "lateCount": 0,
+        "avgST": 0.14,
+        "natTop1": 5.86,
+        "natTop2": 38.46,
+        "natTop3": 53.85,
+        "locTop1": 6.94,
+        "locTop2": 50,
+        "locTop3": 72.22,
+        "motorNumber": 27,
+        "motorTop2": 52.34,
+        "motorTop3": 72.9,
+        "boatNumber": 60,
+        "boatTop2": 29.89,
+        "boatTop3": 43.48
+      },
+      "exhibition": {
+        "lane": 2,
+        "number": "4677",
+        "name": "片橋 幸貴",
+        "weight": "52.4kg",
+        "tenjiTime": "6.64",
+        "tilt": "0.0",
+        "st": ".21",
+        "stFlag": ""
+      },
+      "stats": {
+        "entryCourse": {
+          "course": 2,
+          "avgST": 0.16,
+          "selfSummary": {
+            "course": 2,
+            "starts": 17,
+            "firstCount": 4,
+            "secondCount": 4,
+            "thirdCount": 1
+          },
+          "winKimariteSelf": {
+            "逃げ": 0,
+            "差し": 2,
+            "まくり": 2,
+            "まくり差し": 0,
+            "抜き": 0,
+            "恵まれ": 0
+          },
+          "loseKimarite": {
+            "逃げ": 8,
+            "差し": 0,
+            "まくり": 4,
+            "まくり差し": 1,
+            "抜き": 0,
+            "恵まれ": 0
+          },
+          "matrixSelf": {
+            "course": 2,
+            "isSelf": true,
+            "starts": 17,
+            "firstCount": 4,
+            "secondCount": 4,
+            "thirdCount": 1,
+            "winRate": 23.5,
+            "top2Rate": 47,
+            "top3Rate": 52.9,
+            "raw": [
+              "2 コース （自艇）",
+              "17",
+              "4",
+              "4",
+              "1",
+              "23.5 %",
+              "47.0 %",
+              "52.9 %"
+            ]
+          }
+        },
+        "exTimeRank": [
+          {
+            "rank": 1,
+            "winRate": 32.1,
+            "top2Rate": 57.1,
+            "top3Rate": 64.2,
+            "raw": [
+              "1 位",
+              "28",
+              "9",
+              "7",
+              "2",
+              "32.1 %",
+              "57.1 %",
+              "64.2 %"
+            ]
+          },
+          {
+            "rank": 2,
+            "winRate": 31.5,
+            "top2Rate": 47.3,
+            "top3Rate": 63.1,
+            "raw": [
+              "2 位",
+              "19",
+              "6",
+              "3",
+              "3",
+              "31.5 %",
+              "47.3 %",
+              "63.1 %"
+            ]
+          },
+          {
+            "rank": 3,
+            "winRate": 25,
+            "top2Rate": 31.2,
+            "top3Rate": 50,
+            "raw": [
+              "3 位",
+              "16",
+              "4",
+              "1",
+              "3",
+              "25.0 %",
+              "31.2 %",
+              "50.0 %"
+            ]
+          },
+          {
+            "rank": 4,
+            "winRate": 20,
+            "top2Rate": 26.6,
+            "top3Rate": 40,
+            "raw": [
+              "4 位",
+              "15",
+              "3",
+              "1",
+              "2",
+              "20.0 %",
+              "26.6 %",
+              "40.0 %"
+            ]
+          },
+          {
+            "rank": 5,
+            "winRate": 0,
+            "top2Rate": 10,
+            "top3Rate": 20,
+            "raw": [
+              "5 位",
+              "10",
+              "0",
+              "1",
+              "1",
+              "0.0 %",
+              "10.0 %",
+              "20.0 %"
+            ]
+          },
+          {
+            "rank": 6,
+            "winRate": 6.2,
+            "top2Rate": 31.2,
+            "top3Rate": 62.5,
+            "raw": [
+              "6 位",
+              "16",
+              "1",
+              "4",
+              "5",
+              "6.2 %",
+              "31.2 %",
+              "62.5 %"
+            ]
+          }
+        ],
+        "regno": 4677,
+        "fetchedAt": "2025-08-22T22:49:17.300Z",
+        "schemaVersion": "2.0"
+      }
+    },
+    {
+      "number": 4943,
+      "lane": 3,
+      "startCourse": 3,
+      "racecard": {
+        "lane": 3,
+        "number": 4943,
+        "name": "八木 治樹",
+        "classNumber": 3,
+        "branchNumber": 23,
+        "birthplaceNumber": 23,
+        "age": 34,
+        "weight": 52.9,
+        "flyingCount": 0,
+        "lateCount": 0,
+        "avgST": 0.15,
+        "natTop1": 4.49,
+        "natTop2": 22.12,
+        "natTop3": 40.38,
+        "locTop1": 5.09,
+        "locTop2": 34.29,
+        "locTop3": 45.71,
+        "motorNumber": 37,
+        "motorTop2": 30.95,
+        "motorTop3": 51.19,
+        "boatNumber": 14,
+        "boatTop2": 22.9,
+        "boatTop3": 38.17
+      },
+      "exhibition": {
+        "lane": 3,
+        "number": "4943",
+        "name": "八木 治樹",
+        "weight": "52.4kg",
+        "tenjiTime": "6.70",
+        "tilt": "0.0",
+        "st": ".06",
+        "stFlag": ""
+      },
+      "stats": {
+        "entryCourse": {
+          "course": 3,
+          "avgST": 0.14,
+          "selfSummary": {
+            "course": 3,
+            "starts": 17,
+            "firstCount": 1,
+            "secondCount": 0,
+            "thirdCount": 5
+          },
+          "winKimariteSelf": {
+            "逃げ": 0,
+            "差し": 0,
+            "まくり": 1,
+            "まくり差し": 0,
+            "抜き": 0,
+            "恵まれ": 0
+          },
+          "loseKimarite": {
+            "逃げ": 9,
+            "差し": 3,
+            "まくり": 2,
+            "まくり差し": 2,
+            "抜き": 0,
+            "恵まれ": 0
+          },
+          "matrixSelf": {
+            "course": 3,
+            "isSelf": true,
+            "starts": 17,
+            "firstCount": 1,
+            "secondCount": 0,
+            "thirdCount": 5,
+            "winRate": 5.8,
+            "top2Rate": 5.8,
+            "top3Rate": 35.2,
+            "raw": [
+              "3 コース （自艇）",
+              "17",
+              "1",
+              "0",
+              "5",
+              "5.8 %",
+              "5.8 %",
+              "35.2 %"
+            ]
+          }
+        },
+        "exTimeRank": [
+          {
+            "rank": 1,
+            "winRate": 23,
+            "top2Rate": 38.4,
+            "top3Rate": 46.1,
+            "raw": [
+              "1 位",
+              "13",
+              "3",
+              "2",
+              "1",
+              "23.0 %",
+              "38.4 %",
+              "46.1 %"
+            ]
+          },
+          {
+            "rank": 2,
+            "winRate": 13.3,
+            "top2Rate": 33.3,
+            "top3Rate": 40,
+            "raw": [
+              "2 位",
+              "15",
+              "2",
+              "3",
+              "1",
+              "13.3 %",
+              "33.3 %",
+              "40.0 %"
+            ]
+          },
+          {
+            "rank": 3,
+            "winRate": 15,
+            "top2Rate": 25,
+            "top3Rate": 50,
+            "raw": [
+              "3 位",
+              "20",
+              "3",
+              "2",
+              "5",
+              "15.0 %",
+              "25.0 %",
+              "50.0 %"
+            ]
+          },
+          {
+            "rank": 4,
+            "winRate": 5,
+            "top2Rate": 10,
+            "top3Rate": 25,
+            "raw": [
+              "4 位",
+              "20",
+              "1",
+              "1",
+              "3",
+              "5.0 %",
+              "10.0 %",
+              "25.0 %"
+            ]
+          },
+          {
+            "rank": 5,
+            "winRate": 5,
+            "top2Rate": 10,
+            "top3Rate": 40,
+            "raw": [
+              "5 位",
+              "20",
+              "1",
+              "1",
+              "6",
+              "5.0 %",
+              "10.0 %",
+              "40.0 %"
+            ]
+          },
+          {
+            "rank": 6,
+            "winRate": 6.2,
+            "top2Rate": 25,
+            "top3Rate": 43.7,
+            "raw": [
+              "6 位",
+              "16",
+              "1",
+              "3",
+              "3",
+              "6.2 %",
+              "25.0 %",
+              "43.7 %"
+            ]
+          }
+        ],
+        "regno": 4943,
+        "fetchedAt": "2025-08-22T23:15:26.499Z",
+        "schemaVersion": "2.0"
+      }
+    },
+    {
+      "number": 3362,
+      "lane": 4,
+      "startCourse": 4,
+      "racecard": {
+        "lane": 4,
+        "number": 3362,
+        "name": "間嶋 仁志",
+        "classNumber": 2,
+        "branchNumber": 24,
+        "birthplaceNumber": 27,
+        "age": 56,
+        "weight": 54,
+        "flyingCount": 0,
+        "lateCount": 0,
+        "avgST": 0.19,
+        "natTop1": 5.21,
+        "natTop2": 33.03,
+        "natTop3": 47.71,
+        "locTop1": 5.34,
+        "locTop2": 37.29,
+        "locTop3": 47.46,
+        "motorNumber": 25,
+        "motorTop2": 20.59,
+        "motorTop3": 41.18,
+        "boatNumber": 59,
+        "boatTop2": 32.32,
+        "boatTop3": 50
+      },
+      "exhibition": {
+        "lane": 4,
+        "number": "3362",
+        "name": "間嶋 仁志",
+        "weight": "53.7kg",
+        "tenjiTime": "6.80",
+        "tilt": "-0.5",
+        "st": ".10",
+        "stFlag": ""
+      },
+      "stats": {
+        "entryCourse": {
+          "course": 4,
+          "avgST": null,
+          "selfSummary": null,
+          "winKimariteSelf": null,
+          "loseKimarite": {
+            "逃げ": 0,
+            "差し": 0,
+            "まくり": 0,
+            "まくり差し": 0,
+            "抜き": 0,
+            "恵まれ": 0
+          },
+          "matrixSelf": null
+        },
+        "exTimeRank": null,
+        "regno": 3362,
+        "fetchedAt": "2025-08-23T21:33:25.610Z",
+        "schemaVersion": "2.0"
+      }
+    },
+    {
+      "number": 4532,
+      "lane": 5,
+      "startCourse": 5,
+      "racecard": {
+        "lane": 5,
+        "number": 4532,
+        "name": "秋元 哲",
+        "classNumber": 1,
+        "branchNumber": 11,
+        "birthplaceNumber": 9,
+        "age": 36,
+        "weight": 52,
+        "flyingCount": 0,
+        "lateCount": 0,
+        "avgST": 0.15,
+        "natTop1": 7.41,
+        "natTop2": 57.14,
+        "natTop3": 79.12,
+        "locTop1": 7.5,
+        "locTop2": 70,
+        "locTop3": 90,
+        "motorNumber": 46,
+        "motorTop2": 42.86,
+        "motorTop3": 55.95,
+        "boatNumber": 20,
+        "boatTop2": 21.97,
+        "boatTop3": 45.09
+      },
+      "exhibition": {
+        "lane": 5,
+        "number": "4532",
+        "name": "秋元 哲",
+        "weight": "52.0kg",
+        "tenjiTime": "6.81",
+        "tilt": "0.0",
+        "st": ".07",
+        "stFlag": ""
+      },
+      "stats": {
+        "entryCourse": {
+          "course": 5,
+          "avgST": 0.14,
+          "selfSummary": {
+            "course": 5,
+            "starts": 15,
+            "firstCount": 3,
+            "secondCount": 4,
+            "thirdCount": 1
+          },
+          "winKimariteSelf": {
+            "逃げ": 0,
+            "差し": 0,
+            "まくり": 0,
+            "まくり差し": 2,
+            "抜き": 1,
+            "恵まれ": 0
+          },
+          "loseKimarite": {
+            "逃げ": 9,
+            "差し": 1,
+            "まくり": 2,
+            "まくり差し": 0,
+            "抜き": 0,
+            "恵まれ": 0
+          },
+          "matrixSelf": {
+            "course": 5,
+            "isSelf": true,
+            "starts": 15,
+            "firstCount": 3,
+            "secondCount": 4,
+            "thirdCount": 1,
+            "winRate": 20,
+            "top2Rate": 46.6,
+            "top3Rate": 53.3,
+            "raw": [
+              "5 コース （自艇）",
+              "15",
+              "3",
+              "4",
+              "1",
+              "20.0 %",
+              "46.6 %",
+              "53.3 %"
+            ]
+          }
+        },
+        "exTimeRank": [
+          {
+            "rank": 1,
+            "winRate": 40,
+            "top2Rate": 40,
+            "top3Rate": 80,
+            "raw": [
+              "1 位",
+              "5",
+              "2",
+              "0",
+              "2",
+              "40.0 %",
+              "40.0 %",
+              "80.0 %"
+            ]
+          },
+          {
+            "rank": 2,
+            "winRate": 54.5,
+            "top2Rate": 63.6,
+            "top3Rate": 90.9,
+            "raw": [
+              "2 位",
+              "11",
+              "6",
+              "1",
+              "3",
+              "54.5 %",
+              "63.6 %",
+              "90.9 %"
+            ]
+          },
+          {
+            "rank": 3,
+            "winRate": 40,
+            "top2Rate": 80,
+            "top3Rate": 100,
+            "raw": [
+              "3 位",
+              "5",
+              "2",
+              "2",
+              "1",
+              "40.0 %",
+              "80.0 %",
+              "100.0 %"
+            ]
+          },
+          {
+            "rank": 4,
+            "winRate": 58.3,
+            "top2Rate": 83.3,
+            "top3Rate": 91.6,
+            "raw": [
+              "4 位",
+              "12",
+              "7",
+              "3",
+              "1",
+              "58.3 %",
+              "83.3 %",
+              "91.6 %"
+            ]
+          },
+          {
+            "rank": 5,
+            "winRate": 35.2,
+            "top2Rate": 64.7,
+            "top3Rate": 88.2,
+            "raw": [
+              "5 位",
+              "17",
+              "6",
+              "5",
+              "4",
+              "35.2 %",
+              "64.7 %",
+              "88.2 %"
+            ]
+          },
+          {
+            "rank": 6,
+            "winRate": 17,
+            "top2Rate": 43.9,
+            "top3Rate": 65.8,
+            "raw": [
+              "6 位",
+              "41",
+              "7",
+              "11",
+              "9",
+              "17.0 %",
+              "43.9 %",
+              "65.8 %"
+            ]
+          }
+        ],
+        "regno": 4532,
+        "fetchedAt": "2025-08-22T22:35:32.326Z",
+        "schemaVersion": "2.0"
+      }
+    },
+    {
+      "number": 3867,
+      "lane": 6,
+      "startCourse": 6,
+      "racecard": {
+        "lane": 6,
+        "number": 3867,
+        "name": "松浦 勝",
+        "classNumber": 3,
+        "branchNumber": 23,
+        "birthplaceNumber": 23,
+        "age": 50,
+        "weight": 53.6,
+        "flyingCount": 0,
+        "lateCount": 0,
+        "avgST": 0.17,
+        "natTop1": 4.18,
+        "natTop2": 25,
+        "natTop3": 39.77,
+        "locTop1": 4.76,
+        "locTop2": 29.41,
+        "locTop3": 41.18,
+        "motorNumber": 51,
+        "motorTop2": 25.61,
+        "motorTop3": 29.27,
+        "boatNumber": 75,
+        "boatTop2": 35.71,
+        "boatTop3": 52.55
+      },
+      "exhibition": {
+        "lane": 6,
+        "number": "3867",
+        "name": "松浦 勝",
+        "weight": "53.5kg",
+        "tenjiTime": "6.82",
+        "tilt": "0.0",
+        "st": ".17",
+        "stFlag": ""
+      },
+      "stats": {
+        "entryCourse": {
+          "course": 6,
+          "avgST": 0.18,
+          "selfSummary": {
+            "course": 6,
+            "starts": 12,
+            "firstCount": 0,
+            "secondCount": 1,
+            "thirdCount": 1
+          },
+          "winKimariteSelf": {
+            "逃げ": 0,
+            "差し": 0,
+            "まくり": 0,
+            "まくり差し": 0,
+            "抜き": 0,
+            "恵まれ": 0
+          },
+          "loseKimarite": {
+            "逃げ": 7,
+            "差し": 1,
+            "まくり": 2,
+            "まくり差し": 2,
+            "抜き": 0,
+            "恵まれ": 0
+          },
+          "matrixSelf": {
+            "course": 6,
+            "isSelf": true,
+            "starts": 12,
+            "firstCount": 0,
+            "secondCount": 1,
+            "thirdCount": 1,
+            "winRate": 0,
+            "top2Rate": 8.3,
+            "top3Rate": 16.6,
+            "raw": [
+              "6 コース （自艇）",
+              "12",
+              "0",
+              "1",
+              "1",
+              "0.0 %",
+              "8.3 %",
+              "16.6 %"
+            ]
+          }
+        },
+        "exTimeRank": [
+          {
+            "rank": 1,
+            "winRate": 14.2,
+            "top2Rate": 42.8,
+            "top3Rate": 57.1,
+            "raw": [
+              "1 位",
+              "7",
+              "1",
+              "2",
+              "1",
+              "14.2 %",
+              "42.8 %",
+              "57.1 %"
+            ]
+          },
+          {
+            "rank": 2,
+            "winRate": 12.5,
+            "top2Rate": 37.5,
+            "top3Rate": 37.5,
+            "raw": [
+              "2 位",
+              "8",
+              "1",
+              "2",
+              "0",
+              "12.5 %",
+              "37.5 %",
+              "37.5 %"
+            ]
+          },
+          {
+            "rank": 3,
+            "winRate": 25,
+            "top2Rate": 35,
+            "top3Rate": 60,
+            "raw": [
+              "3 位",
+              "20",
+              "5",
+              "2",
+              "5",
+              "25.0 %",
+              "35.0 %",
+              "60.0 %"
+            ]
+          },
+          {
+            "rank": 4,
+            "winRate": 9.5,
+            "top2Rate": 28.5,
+            "top3Rate": 38.1,
+            "raw": [
+              "4 位",
+              "21",
+              "2",
+              "4",
+              "2",
+              "9.5 %",
+              "28.5 %",
+              "38.1 %"
+            ]
+          },
+          {
+            "rank": 5,
+            "winRate": 10,
+            "top2Rate": 10,
+            "top3Rate": 35,
+            "raw": [
+              "5 位",
+              "20",
+              "2",
+              "0",
+              "5",
+              "10.0 %",
+              "10.0 %",
+              "35.0 %"
+            ]
+          },
+          {
+            "rank": 6,
+            "winRate": 0,
+            "top2Rate": 7.1,
+            "top3Rate": 7.1,
+            "raw": [
+              "6 位",
+              "14",
+              "0",
+              "1",
+              "0",
+              "0.0 %",
+              "7.1 %",
+              "7.1 %"
+            ]
+          }
+        ],
+        "regno": 3867,
+        "fetchedAt": "2025-08-22T21:21:29.654Z",
+        "schemaVersion": "2.0"
+      }
+    }
+  ]
+}
