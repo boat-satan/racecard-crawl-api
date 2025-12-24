@@ -12,7 +12,7 @@
       "6": "https://boatrace-db.net/racer/rcourse/regno/4584/course/6/"
     }
   },
-  "fetchedAt": "2025-12-23T21:49:17.789Z",
+  "fetchedAt": "2025-12-24T21:46:11.955Z",
   "entryCourse": [
     {
       "course": 1,
@@ -22,19 +22,19 @@
             "course": 1,
             "isSelf": true,
             "starts": 30,
-            "firstCount": 17,
-            "secondCount": 11,
+            "firstCount": 16,
+            "secondCount": 12,
             "thirdCount": 1,
-            "winRate": 56.6,
+            "winRate": 53.3,
             "top2Rate": 93.3,
             "top3Rate": 96.6,
             "raw": [
               "1 コース （自艇）",
               "30",
-              "17",
-              "11",
+              "16",
+              "12",
               "1",
-              "56.6 %",
+              "53.3 %",
               "93.3 %",
               "96.6 %"
             ]
@@ -45,19 +45,19 @@
             "starts": 30,
             "firstCount": 3,
             "secondCount": 8,
-            "thirdCount": 7,
+            "thirdCount": 6,
             "winRate": 10,
             "top2Rate": 36.6,
-            "top3Rate": 60,
+            "top3Rate": 56.6,
             "raw": [
               "2 コース （他艇）",
               "30",
               "3",
               "8",
-              "7",
+              "6",
               "10.0 %",
               "36.6 %",
-              "60.0 %"
+              "56.6 %"
             ]
           },
           {
@@ -66,19 +66,19 @@
             "starts": 30,
             "firstCount": 4,
             "secondCount": 6,
-            "thirdCount": 8,
+            "thirdCount": 9,
             "winRate": 13.3,
             "top2Rate": 33.3,
-            "top3Rate": 60,
+            "top3Rate": 63.3,
             "raw": [
               "3 コース （他艇）",
               "30",
               "4",
               "6",
-              "8",
+              "9",
               "13.3 %",
               "33.3 %",
-              "60.0 %"
+              "63.3 %"
             ]
           },
           {
@@ -86,20 +86,20 @@
             "isSelf": false,
             "starts": 30,
             "firstCount": 0,
-            "secondCount": 2,
+            "secondCount": 1,
             "thirdCount": 5,
             "winRate": 0,
-            "top2Rate": 6.6,
-            "top3Rate": 23.3,
+            "top2Rate": 3.3,
+            "top3Rate": 20,
             "raw": [
               "4 コース （他艇）",
               "30",
               "0",
-              "2",
+              "1",
               "5",
               "0.0 %",
-              "6.6 %",
-              "23.3 %"
+              "3.3 %",
+              "20.0 %"
             ]
           },
           {
@@ -127,21 +127,21 @@
             "course": 6,
             "isSelf": false,
             "starts": 30,
-            "firstCount": 2,
+            "firstCount": 3,
             "secondCount": 1,
             "thirdCount": 1,
-            "winRate": 6.6,
-            "top2Rate": 10,
-            "top3Rate": 13.3,
+            "winRate": 10,
+            "top2Rate": 13.3,
+            "top3Rate": 16.6,
             "raw": [
               "6 コース （他艇）",
               "30",
-              "2",
+              "3",
               "1",
               "1",
-              "6.6 %",
               "10.0 %",
-              "13.3 %"
+              "13.3 %",
+              "16.6 %"
             ]
           }
         ],
@@ -149,19 +149,19 @@
           "course": 1,
           "isSelf": true,
           "starts": 30,
-          "firstCount": 17,
-          "secondCount": 11,
+          "firstCount": 16,
+          "secondCount": 12,
           "thirdCount": 1,
-          "winRate": 56.6,
+          "winRate": 53.3,
           "top2Rate": 93.3,
           "top3Rate": 96.6,
           "raw": [
             "1 コース （自艇）",
             "30",
-            "17",
-            "11",
+            "16",
+            "12",
             "1",
-            "56.6 %",
+            "53.3 %",
             "93.3 %",
             "96.6 %"
           ]
@@ -173,7 +173,7 @@
             "course": 1,
             "isSelf": true,
             "detail": {
-              "逃げ": 16,
+              "逃げ": 15,
               "差し": 0,
               "まくり": 0,
               "まくり差し": 0,
@@ -183,8 +183,8 @@
             "raw": [
               "1 コース （自艇）",
               "30",
-              "17",
               "16",
+              "15",
               "0",
               "0",
               "0",
@@ -290,7 +290,7 @@
             "detail": {
               "逃げ": 0,
               "差し": 0,
-              "まくり": 0,
+              "まくり": 1,
               "まくり差し": 2,
               "抜き": 0,
               "恵まれ": 0
@@ -298,10 +298,10 @@
             "raw": [
               "6 コース （他艇）",
               "30",
-              "2",
+              "3",
               "0",
               "0",
-              "0",
+              "1",
               "2",
               "0",
               "0"
@@ -313,13 +313,13 @@
       "loseKimarite": {
         "逃げ": 0,
         "差し": 3,
-        "まくり": 1,
+        "まくり": 2,
         "まくり差し": 7,
         "抜き": 2,
         "恵まれ": 0
       },
       "winKimariteSelf": {
-        "逃げ": 16,
+        "逃げ": 15,
         "差し": 0,
         "まくり": 0,
         "まくり差し": 0,
@@ -329,8 +329,8 @@
       "selfSummary": {
         "course": 1,
         "starts": 30,
-        "firstCount": 17,
-        "secondCount": 11,
+        "firstCount": 16,
+        "secondCount": 12,
         "thirdCount": 1
       }
     },
@@ -1301,149 +1301,149 @@
           {
             "course": 1,
             "isSelf": false,
-            "starts": 20,
-            "firstCount": 7,
+            "starts": 21,
+            "firstCount": 8,
             "secondCount": 3,
             "thirdCount": 4,
-            "winRate": 35,
-            "top2Rate": 50,
-            "top3Rate": 70,
+            "winRate": 38.1,
+            "top2Rate": 52.3,
+            "top3Rate": 71.4,
             "raw": [
               "1 コース （他艇）",
-              "20",
-              "7",
+              "21",
+              "8",
               "3",
               "4",
-              "35.0 %",
-              "50.0 %",
-              "70.0 %"
+              "38.1 %",
+              "52.3 %",
+              "71.4 %"
             ]
           },
           {
             "course": 2,
             "isSelf": false,
-            "starts": 20,
+            "starts": 21,
             "firstCount": 2,
             "secondCount": 4,
             "thirdCount": 2,
-            "winRate": 10,
-            "top2Rate": 30,
-            "top3Rate": 40,
+            "winRate": 9.5,
+            "top2Rate": 28.5,
+            "top3Rate": 38.1,
             "raw": [
               "2 コース （他艇）",
-              "20",
+              "21",
               "2",
               "4",
               "2",
-              "10.0 %",
-              "30.0 %",
-              "40.0 %"
+              "9.5 %",
+              "28.5 %",
+              "38.1 %"
             ]
           },
           {
             "course": 3,
             "isSelf": false,
-            "starts": 20,
+            "starts": 21,
             "firstCount": 3,
-            "secondCount": 7,
+            "secondCount": 8,
             "thirdCount": 0,
-            "winRate": 15,
-            "top2Rate": 50,
-            "top3Rate": 50,
+            "winRate": 14.2,
+            "top2Rate": 52.3,
+            "top3Rate": 52.3,
             "raw": [
               "3 コース （他艇）",
-              "20",
+              "21",
               "3",
-              "7",
+              "8",
               "0",
-              "15.0 %",
-              "50.0 %",
-              "50.0 %"
+              "14.2 %",
+              "52.3 %",
+              "52.3 %"
             ]
           },
           {
             "course": 4,
             "isSelf": false,
-            "starts": 20,
+            "starts": 21,
             "firstCount": 4,
             "secondCount": 1,
-            "thirdCount": 6,
-            "winRate": 20,
-            "top2Rate": 25,
-            "top3Rate": 55,
+            "thirdCount": 7,
+            "winRate": 19,
+            "top2Rate": 23.8,
+            "top3Rate": 57.1,
             "raw": [
               "4 コース （他艇）",
-              "20",
+              "21",
               "4",
               "1",
-              "6",
-              "20.0 %",
-              "25.0 %",
-              "55.0 %"
+              "7",
+              "19.0 %",
+              "23.8 %",
+              "57.1 %"
             ]
           },
           {
             "course": 5,
             "isSelf": true,
-            "starts": 20,
+            "starts": 21,
             "firstCount": 4,
             "secondCount": 5,
             "thirdCount": 5,
-            "winRate": 20,
-            "top2Rate": 45,
-            "top3Rate": 70,
+            "winRate": 19,
+            "top2Rate": 42.8,
+            "top3Rate": 66.6,
             "raw": [
               "5 コース （自艇）",
-              "20",
+              "21",
               "4",
               "5",
               "5",
-              "20.0 %",
-              "45.0 %",
-              "70.0 %"
+              "19.0 %",
+              "42.8 %",
+              "66.6 %"
             ]
           },
           {
             "course": 6,
             "isSelf": false,
-            "starts": 18,
+            "starts": 19,
             "firstCount": 0,
             "secondCount": 0,
             "thirdCount": 3,
             "winRate": 0,
             "top2Rate": 0,
-            "top3Rate": 16.6,
+            "top3Rate": 15.7,
             "raw": [
               "6 コース （他艇）",
-              "18",
+              "19",
               "0",
               "0",
               "3",
               "0.0 %",
               "0.0 %",
-              "16.6 %"
+              "15.7 %"
             ]
           }
         ],
         "self": {
           "course": 5,
           "isSelf": true,
-          "starts": 20,
+          "starts": 21,
           "firstCount": 4,
           "secondCount": 5,
           "thirdCount": 5,
-          "winRate": 20,
-          "top2Rate": 45,
-          "top3Rate": 70,
+          "winRate": 19,
+          "top2Rate": 42.8,
+          "top3Rate": 66.6,
           "raw": [
             "5 コース （自艇）",
-            "20",
+            "21",
             "4",
             "5",
             "5",
-            "20.0 %",
-            "45.0 %",
-            "70.0 %"
+            "19.0 %",
+            "42.8 %",
+            "66.6 %"
           ]
         }
       },
@@ -1453,7 +1453,7 @@
             "course": 1,
             "isSelf": false,
             "detail": {
-              "逃げ": 7,
+              "逃げ": 8,
               "差し": 0,
               "まくり": 0,
               "まくり差し": 0,
@@ -1462,9 +1462,9 @@
             },
             "raw": [
               "1 コース （他艇）",
-              "20",
-              "7",
-              "7",
+              "21",
+              "8",
+              "8",
               "0",
               "0",
               "0",
@@ -1485,7 +1485,7 @@
             },
             "raw": [
               "2 コース （他艇）",
-              "20",
+              "21",
               "2",
               "0",
               "1",
@@ -1508,7 +1508,7 @@
             },
             "raw": [
               "3 コース （他艇）",
-              "20",
+              "21",
               "3",
               "0",
               "0",
@@ -1531,7 +1531,7 @@
             },
             "raw": [
               "4 コース （他艇）",
-              "20",
+              "21",
               "4",
               "0",
               "1",
@@ -1554,7 +1554,7 @@
             },
             "raw": [
               "5 コース （自艇）",
-              "20",
+              "21",
               "4",
               "0",
               "0",
@@ -1577,7 +1577,7 @@
             },
             "raw": [
               "6 コース （他艇）",
-              "18",
+              "19",
               "0",
               "0",
               "0",
@@ -1591,7 +1591,7 @@
       },
       "avgST": 0.12,
       "loseKimarite": {
-        "逃げ": 7,
+        "逃げ": 8,
         "差し": 2,
         "まくり": 5,
         "まくり差し": 2,
@@ -1608,7 +1608,7 @@
       },
       "selfSummary": {
         "course": 5,
-        "starts": 20,
+        "starts": 21,
         "firstCount": 4,
         "secondCount": 5,
         "thirdCount": 5
@@ -1938,18 +1938,18 @@
   "exTimeRank": [
     {
       "rank": 1,
-      "winRate": 31.1,
-      "top2Rate": 68.8,
-      "top3Rate": 88.8,
+      "winRate": 28.8,
+      "top2Rate": 66.6,
+      "top3Rate": 86.6,
       "raw": [
         "1 位",
         "45",
-        "14",
+        "13",
         "17",
         "9",
-        "31.1 %",
-        "68.8 %",
-        "88.8 %"
+        "28.8 %",
+        "66.6 %",
+        "86.6 %"
       ]
     },
     {
@@ -1970,18 +1970,18 @@
     },
     {
       "rank": 3,
-      "winRate": 17.3,
-      "top2Rate": 43.4,
-      "top3Rate": 60.8,
+      "winRate": 16.6,
+      "top2Rate": 45.8,
+      "top3Rate": 62.5,
       "raw": [
         "3 位",
-        "23",
+        "24",
         "4",
-        "6",
+        "7",
         "4",
-        "17.3 %",
-        "43.4 %",
-        "60.8 %"
+        "16.6 %",
+        "45.8 %",
+        "62.5 %"
       ]
     },
     {
